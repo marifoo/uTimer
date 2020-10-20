@@ -7,11 +7,11 @@ Main feature is the Auto-Pause option, which sends the timer into Pause mode (re
 
 Info
 ------
-Written by github.com/marifoo
+Written by [marifoo](https://github.com/marifoo)
 
-Icon by icons8.com
+Icon by [icons8.com](https://icons8.com)
 
-Build with Qt 5.14 and MinGW-w64 7.3.0
+Build with [Qt 5.14](https://www.qt.io) and [MinGW-w64 7.3.0](https://mingw-w64.org)
 
 
 License
