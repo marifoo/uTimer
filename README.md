@@ -1,13 +1,18 @@
-µTimer M1
+ÂµTimer M1
 ======
 Small timer app for Windows to track your activity time during the work day.
-Main feature is the <Auto-Pause> option, which sends the timer into Pause mode (retroactively) after Windows has been locked for a certain amount of time.
+
+Main feature is the Auto-Pause option, which sends the timer into Pause mode (retroactively) after Windows has been locked for a certain amount of time.
+
 
 Info
 ------
 Written by github.com/marifoo
+
 Icon by icons8.com
+
 Build with Qt 5.14 and MinGW-w64 7.3.0
+
 
 License
 ------
