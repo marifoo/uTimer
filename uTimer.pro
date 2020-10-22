@@ -7,17 +7,17 @@ HEADERS = \
    $$PWD/contentwidget.h \
    $$PWD/mainwin.h \
    $$PWD/timetracker.h \
-   lockstatewatcher.h \
-   settings.h \
-   types.h
+   $$PWD/lockstatewatcher.h \
+   $$PWD/settings.h \
+   $$PWD/types.h
 
 SOURCES = \
    $$PWD/contentwidget.cpp \
    $$PWD/main.cpp \
    $$PWD/mainwin.cpp \
    $$PWD/timetracker.cpp \
-   lockstatewatcher.cpp \
-   settings.cpp
+   $$PWD/lockstatewatcher.cpp \
+   $$PWD/settings.cpp
 
 INCLUDEPATH = \
     $$PWD/.
