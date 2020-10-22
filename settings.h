@@ -13,8 +13,9 @@ private:
 	int start_minimized_;
 	int start_pinned_to_top_;
 	int pin_when_paused_;
-	//int warning_pause_min_;
-	//int warning_activity_min_;
+	int warning_nopause_min_;
+	int pause_for_warning_nopause_min_;
+	int warning_activity_min_;
 	QSettings sfile_;
 
 public:
@@ -25,6 +26,9 @@ public:
 	bool isMinimizedStartEnabled();
 	bool isPinnedStartEnabled();
 	bool pinToTopWhenPaused();
+	qint64 getPauseTimeForWarnTimeNoPauseMsec();
+	qint64 getWarnTimeNoPauseMsec();
+	qint64 getWarnTimeActivityMsec();
 	void setAutopauseState(bool autopause_enabled);
 	void setPinToTopState(bool pin2top_enabled);
 };

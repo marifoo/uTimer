@@ -2,8 +2,9 @@
 #include <QtDebug>
 #include <QTime>
 #include <QSystemTrayIcon>
+#include <QMessageBox>
 
-MainWin::MainWin(Settings &settings, QWidget *parent) : QMainWindow(parent), settings_(settings)
+MainWin::MainWin(Settings &settings, QWidget *parent) : QMainWindow(parent), settings_(settings), warning_activity_shown(false), warning_pause_shown(false)
 {
 	content_widget_ = std::make_unique<ContentWidget>(settings);
 	setCentralWidget(content_widget_.get());
@@ -25,9 +26,31 @@ MainWin::MainWin(Settings &settings, QWidget *parent) : QMainWindow(parent), set
 
 void MainWin::updateAllTimes(qint64 t_active, qint64 t_pause)
 {
-	content_widget_->setAllTimes(QDateTime::fromTime_t(t_active/1000).toUTC().toString("hh:mm:ss"),
-															 QDateTime::fromTime_t(t_pause/1000).toUTC().toString("hh:mm:ss"));
+	QString t_active_string = QDateTime::fromTime_t(t_active/1000).toUTC().toString("hh:mm:ss");
+	QString t_pause_string = QDateTime::fromTime_t(t_pause/1000).toUTC().toString("hh:mm:ss");
+
+	content_widget_->setAllTimes(t_active_string, t_pause_string);
 	tray_icon_->setToolTip(content_widget_->getTooltip());
+
+	if ((!warning_activity_shown) && (t_active > settings_.getWarnTimeActivityMsec())) {
+		warning_activity_shown = true;
+		showMsgBox("You have been working too long today :-/\nActivity Time: " + t_active_string);
+	}
+
+	if ((!warning_pause_shown) && (t_active > settings_.getWarnTimeNoPauseMsec()) && (t_pause < settings_.getPauseTimeForWarnTimeNoPauseMsec())) {
+		warning_pause_shown = true;
+		showMsgBox("You didn't make enough Pauses today :/\nActivity Time: " + t_active_string + "\nPause Time: " + t_pause_string);
+	}
+}
+
+void MainWin::showMsgBox(QString text)
+{
+	activateWindow();
+	show();
+	QMessageBox msgBox;
+	msgBox.setText(text);
+	msgBox.setIcon(QMessageBox::Warning);
+	msgBox.exec();
 }
 
 void MainWin::iconActivated(QSystemTrayIcon::ActivationReason reason)
@@ -67,6 +90,9 @@ void MainWin::start()
 
 	if (settings_.isAutostartTimingEnabled())
 		content_widget_->pressedStartPauseButton();
+
+	warning_activity_shown = (settings_.getWarnTimeActivityMsec() == 0);
+	warning_pause_shown = (settings_.getWarnTimeNoPauseMsec() == 0);
 }
 
 void MainWin::reactOnLockState(LockEvent event)

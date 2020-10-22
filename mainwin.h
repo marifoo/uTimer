@@ -15,8 +15,11 @@ private:
 	std::unique_ptr<ContentWidget> content_widget_;
 	std::unique_ptr<QSystemTrayIcon> tray_icon_;
 	Settings & settings_;
+	bool warning_activity_shown;
+	bool warning_pause_shown;
 
 	void updateTrayIconTooltip(QString activity, QString pause);
+	void showMsgBox(QString text);
 
 public:
 	explicit MainWin(Settings & settings, QWidget *parent = nullptr);
