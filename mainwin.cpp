@@ -57,6 +57,9 @@ void MainWin::toggleAlwaysOnTop()
 
 void MainWin::start()
 {
+	if (settings_.isPinnedStartEnabled())
+		setWindowFlags(windowFlags() ^ (Qt::CustomizeWindowHint | Qt::WindowStaysOnTopHint));
+
 	if(settings_.isMinimizedStartEnabled())
 		minToTray();
 	else

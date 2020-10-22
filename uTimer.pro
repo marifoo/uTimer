@@ -35,3 +35,6 @@ QMAKE_CXXFLAGS += -Wall -Wextra
 RESOURCES += \
     icon.qrc
 
+DISTFILES += \
+    README.md
+

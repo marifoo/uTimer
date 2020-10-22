@@ -77,20 +77,30 @@ void ContentWidget::setupGUI()
 
 	button_hold_color_ = Qt::gray;
 
-	if(settings_.isAutopauseEnabled())
+	if (settings_.isAutopauseEnabled())
 		doButtonColorToggle(autopause_button_, button_hold_color_);
+
+	if (settings_.isPinnedStartEnabled())
+		doButtonColorToggle(pintotop_button_, button_hold_color_);
 }
 
 void ContentWidget::pressedStartPauseButton()
 {
 	bool in_activity = (startpause_button_->text() == "PAUSE");
-	bool in_pause = ((startpause_button_->text() == "START") || (startpause_button_->text() == "CONTINUE"));
+	bool in_pause_or_stopped = ((startpause_button_->text() == "START") || (startpause_button_->text() == "CONTINUE"));
+	bool in_pause = (startpause_button_->text() == "CONTINUE");
 
 	if (in_activity) {
+		if (settings_.pinToTopWhenPaused()) {
+			pressedPinToTopButton();
+		}
 		setGUItoPause();
 		emit pressedButton(Button::Pause);
 	}
-	else if (in_pause) {
+	else if (in_pause_or_stopped) {
+		if (in_pause && settings_.pinToTopWhenPaused()) {
+			pressedPinToTopButton();
+		}
 		setGUItoActivity();
 		emit pressedButton(Button::Start);
 	}
@@ -110,6 +120,7 @@ void ContentWidget::pressedMinToTrayButton()
 void ContentWidget::pressedPinToTopButton()
 {
 	doButtonColorToggle(pintotop_button_, button_hold_color_);
+	settings_.setPinToTopState(!settings_.isPinnedStartEnabled());
 	emit toggleAlwaysOnTop();
 }
 
