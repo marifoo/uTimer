@@ -1,8 +1,8 @@
 µTimer M1
 ======
-Small timer app for Windows to track your Activity time / Pause time during the work day.
+Small timer app for Windows to track your Activity time / Pause time during the (home office) work day.
 
-Main feature is *Auto-Pause*, which sends the timer into Pause mode (retroactively) after Windows has been locked for a certain amount of time.
+Main feature is *Auto-Pause*, which sends the timer retroactively into Pause mode after Windows has been locked for a certain amount of time.
 
 Latest release can be found as a ZIP file in the *release-win* folder
 
