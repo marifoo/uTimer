@@ -10,9 +10,9 @@ Settings::Settings(QString filename) : sfile_(filename, QSettings::IniFormat)
 	start_minimized_ = qBound(0, sfile_.value("uTimer/start_minimized_to_tray", 0).toInt(), 1);
 	start_pinned_to_top_ = qBound(0, sfile_.value("uTimer/start_pinned_to_top", 0).toInt(), 1);
 	pin_when_paused_ = qBound(0, sfile_.value("uTimer/pin_to_top_when_paused", 0).toInt(), 1);
-	warning_nopause_min_ = qBound(0, sfile_.value("uTimer/too_much_activity_without_pause_warning_min", 360).toInt(), 1000);
+	warning_nopause_min_ = qBound(0, sfile_.value("uTimer/too_much_activity_without_pause_warning_min", 0).toInt(), 1000);
 	pause_for_warning_nopause_min_ = 30;
-	warning_activity_min_ = qBound(0, sfile_.value("uTimer/too_much_activity_warning_min", 595).toInt(), 1000);
+	warning_activity_min_ = qBound(0, sfile_.value("uTimer/too_much_activity_warning_min", 0).toInt(), 1000);
 
 	sfile_.setValue("uTimer/press_start_button_on_app_start", autostart_timing_);
 	sfile_.setValue("uTimer/autopause_enabled", autopause_enabled_);
