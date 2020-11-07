@@ -34,12 +34,12 @@ void MainWin::updateAllTimes(qint64 t_active, qint64 t_pause)
 
 	if ((!warning_activity_shown) && (t_active > settings_.getWarnTimeActivityMsec())) {
 		warning_activity_shown = true;
-		showMsgBox("You have been working too long today :-/\nActivity Time: " + t_active_string);
+		showMsgBox("Your activity time today: " + t_active_string);
 	}
 
 	if ((!warning_pause_shown) && (t_active > settings_.getWarnTimeNoPauseMsec()) && (t_pause < settings_.getPauseTimeForWarnTimeNoPauseMsec())) {
 		warning_pause_shown = true;
-		showMsgBox("You didn't make enough Pauses today :/\nActivity Time: " + t_active_string + "\nPause Time: " + t_pause_string);
+		showMsgBox("Your pause time today: " + t_pause_string + "\n(activity time: " + t_active_string + ")");
 	}
 }
 
