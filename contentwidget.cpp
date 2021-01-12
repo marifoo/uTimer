@@ -88,19 +88,12 @@ void ContentWidget::pressedStartPauseButton()
 {
 	bool in_activity = (startpause_button_->text() == "PAUSE");
 	bool in_pause_or_stopped = ((startpause_button_->text() == "START") || (startpause_button_->text() == "CONTINUE"));
-	bool in_pause = (startpause_button_->text() == "CONTINUE");
 
 	if (in_activity) {
-		if (settings_.pinToTopWhenPaused()) {
-			pressedPinToTopButton();
-		}
 		setGUItoPause();
 		emit pressedButton(Button::Pause);
 	}
 	else if (in_pause_or_stopped) {
-		if (in_pause && settings_.pinToTopWhenPaused()) {
-			pressedPinToTopButton();
-		}
 		setGUItoActivity();
 		emit pressedButton(Button::Start);
 	}
@@ -142,11 +135,14 @@ void ContentWidget::doButtonColorToggle(std::unique_ptr<QPushButton> &button, QC
 
 void ContentWidget::setGUItoActivity()
 {
-	if (startpause_button_->text() == "START") {
+	bool in_stopped = (startpause_button_->text() == "START");
+	bool in_pause = (startpause_button_->text() == "CONTINUE");
+
+	if (in_stopped) {
 		activity_time_->setToolTip("First Start was at " + QTime::currentTime().toString("hh:mm") + " o'clock");
 		pause_time_->setToolTip("");
 	}
-	else if (startpause_button_->text() == "CONTINUE") {
+	else if (in_pause) {
 		pause_time_->setToolTip("Last Pause ended at " + QTime::currentTime().toString("hh:mm") + " o'clock");
 	}
 	startpause_button_->setText("PAUSE");

@@ -12,7 +12,6 @@ private:
 	int autostart_timing_;
 	int start_minimized_;
 	int start_pinned_to_top_;
-	int pin_when_paused_;
 	int warning_nopause_;
 	int warning_nopause_min_;
 	int pause_for_warning_nopause_min_;
@@ -27,7 +26,6 @@ public:
 	bool isAutostartTimingEnabled();
 	bool isMinimizedStartEnabled();
 	bool isPinnedStartEnabled();
-	bool pinToTopWhenPaused();
 	bool showNoPauseWarning();
 	bool showTooMuchActivityWarning();
 	qint64 getPauseTimeForWarnTimeNoPauseMsec();
