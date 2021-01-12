@@ -1,4 +1,4 @@
-µTimer
+µTimer v1.0
 ======
 Small timer app for Windows to track your Activity time / Pause time during the home office work day.
 
