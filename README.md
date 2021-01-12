@@ -9,6 +9,8 @@ Latest release can be found as a ZIP file in the *release-win* folder
 
 Info
 ------
+This app is open-source and available at [Github](https://github.com/marifoo/uTimer)
+
 Written by [marifoo](https://github.com/marifoo)
 
 Icon by [icons8.com](https://icons8.com)
@@ -18,7 +20,7 @@ Build with [Qt 5.14](https://www.qt.io) and [MinGW-w64 7.3.0](https://mingw-w64.
 
 License
 ------
-Copyright (c) 2020
+Copyright (c) 2020 marifoo
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
