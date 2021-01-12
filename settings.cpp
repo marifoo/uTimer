@@ -76,7 +76,7 @@ qint64 Settings::getWarnTimeActivityMsec()
 
 void Settings::setAutopauseState(bool autopause_enabled)
 {
-	backpause_min_ = qBound(0, sfile_.value("uTimer/autopause_threshold_minutes", 12).toInt(), 200);
+	backpause_min_ = qBound(0, sfile_.value("uTimer/autopause_threshold_minutes", 15).toInt(), 99);
 	autopause_enabled_ = autopause_enabled ? 1 : 0;
 	sfile_.setValue("uTimer/autopause_enabled", autopause_enabled_);
 }
