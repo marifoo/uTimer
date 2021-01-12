@@ -32,12 +32,14 @@ void MainWin::updateAllTimes(qint64 t_active, qint64 t_pause)
 	content_widget_->setAllTimes(t_active_string, t_pause_string);
 	tray_icon_->setToolTip(content_widget_->getTooltip());
 
-	if ((!warning_activity_shown) && (t_active > settings_.getWarnTimeActivityMsec())) {
+	if ((!warning_activity_shown) && (content_widget_->isGUIinActivity())
+			&& (t_active > settings_.getWarnTimeActivityMsec())) {
 		warning_activity_shown = true;
 		showMsgBox("Total activity time: " + t_active_string);
 	}
 
-	if ((!warning_pause_shown) && (t_active > settings_.getWarnTimeNoPauseMsec()) && (t_pause < settings_.getPauseTimeForWarnTimeNoPauseMsec())) {
+	if ((!warning_pause_shown) && (content_widget_->isGUIinActivity())
+			&& (t_active > settings_.getWarnTimeNoPauseMsec()) && (t_pause < settings_.getPauseTimeForWarnTimeNoPauseMsec())) {
 		warning_pause_shown = true;
 		showMsgBox("Pause time: " + t_pause_string + "\nwith activity time: " + t_active_string);
 	}

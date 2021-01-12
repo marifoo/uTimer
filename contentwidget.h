@@ -40,6 +40,7 @@ public:
 	explicit ContentWidget(Settings & settings, QWidget *parent = nullptr);
 	void setAllTimes(QString activity, QString pause);
 	QString getTooltip();
+	bool isGUIinActivity();
 
 signals:
 	void minToTray();

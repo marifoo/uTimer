@@ -181,3 +181,8 @@ QString ContentWidget::getTooltip()
 		tooltip = "Activity ongoing: " + activity_time_->text();
 	return tooltip;
 }
+
+bool ContentWidget::isGUIinActivity()
+{
+	return (startpause_button_->text() == "PAUSE");
+}
