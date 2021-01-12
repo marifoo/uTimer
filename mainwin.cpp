@@ -34,12 +34,12 @@ void MainWin::updateAllTimes(qint64 t_active, qint64 t_pause)
 
 	if ((!warning_activity_shown) && (t_active > settings_.getWarnTimeActivityMsec())) {
 		warning_activity_shown = true;
-		showMsgBox("Your activity time today: " + t_active_string);
+		showMsgBox("Total activity time: " + t_active_string);
 	}
 
 	if ((!warning_pause_shown) && (t_active > settings_.getWarnTimeNoPauseMsec()) && (t_pause < settings_.getPauseTimeForWarnTimeNoPauseMsec())) {
 		warning_pause_shown = true;
-		showMsgBox("Your pause time today: " + t_pause_string + "\n(activity time: " + t_active_string + ")");
+		showMsgBox("Pause time: " + t_pause_string + "\nwith activity time: " + t_active_string);
 	}
 }
 
@@ -91,8 +91,8 @@ void MainWin::start()
 	if (settings_.isAutostartTimingEnabled())
 		content_widget_->pressedStartPauseButton();
 
-	warning_activity_shown = (settings_.getWarnTimeActivityMsec() == 0);
-	warning_pause_shown = (settings_.getWarnTimeNoPauseMsec() == 0);
+	warning_activity_shown = !settings_.showTooMuchActivityWarning();
+	warning_pause_shown = !settings_.showNoPauseWarning();
 }
 
 void MainWin::reactOnLockState(LockEvent event)
