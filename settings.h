@@ -3,10 +3,12 @@
 
 #include <QtGlobal>
 #include <QSettings>
+#include <QString>
 
 class Settings
 {
 private:
+	QSettings sfile_;
 	int backpause_min_;
 	bool autopause_enabled_;
 	bool autostart_timing_;
@@ -17,7 +19,7 @@ private:
 	int warning_nopause_min_;
 	int pause_for_warning_nopause_min_;
 	int warning_activity_min_;
-	QSettings sfile_;
+
 	qint64 convMinToMsec(const int minutes) const;
 	void readSettings();
 	void writeSettings();
@@ -30,6 +32,7 @@ public:
 	bool isPinnedStartEnabled() const;
 	bool showNoPauseWarning() const;
 	bool showTooMuchActivityWarning() const;
+	QString getBackpauseMin() const;
 	qint64 getBackpauseMsec() const;
 	qint64 getPauseTimeForWarnTimeNoPauseMsec() const;
 	qint64 getWarnTimeNoPauseMsec() const;

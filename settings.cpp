@@ -68,6 +68,11 @@ qint64 Settings::convMinToMsec(const int minutes) const
 	return (static_cast<qint64>(minutes) * 60000);
 }
 
+QString Settings::getBackpauseMin() const
+{
+	return QString::number(backpause_min_);
+}
+
 qint64 Settings::getBackpauseMsec() const
 {
 	return convMinToMsec(backpause_min_);

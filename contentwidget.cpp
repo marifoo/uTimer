@@ -63,7 +63,7 @@ void ContentWidget::setupGUI()
 	autopause_button_ = std::make_unique<QPushButton>("Auto-Pause");
 	autopause_button_->setFont(button_font);
 	autopause_tooltip_ = "min after locking the PC via [Win]+[L], convert this whole time into a Pause\nBeware: Locking via [Alt]+[Del] is not detected";
-	autopause_button_->setToolTip(QString::number(settings_.getBackpauseMsec()/60000) + autopause_tooltip_);
+	autopause_button_->setToolTip(settings_.getBackpauseMin() + autopause_tooltip_);
 	optionbutton_row_->addWidget(mintotray_button_.get());
 	optionbutton_row_->addWidget(pintotop_button_.get());
 	optionbutton_row_->addWidget(autopause_button_.get());
@@ -121,7 +121,7 @@ void ContentWidget::pressedAutoPauseButton()
 {
 	doButtonColorToggle(autopause_button_, button_hold_color_);
 	settings_.setAutopauseState(!settings_.isAutopauseEnabled());
-	autopause_button_->setToolTip(QString::number(settings_.getBackpauseMsec()/60000) + autopause_tooltip_);
+	autopause_button_->setToolTip(settings_.getBackpauseMin() + autopause_tooltip_);
 }
 
 void ContentWidget::doButtonColorToggle(std::unique_ptr<QPushButton> &button, QColor color)
