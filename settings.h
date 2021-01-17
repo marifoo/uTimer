@@ -8,14 +8,14 @@ class Settings
 {
 private:
 	int backpause_min_;
-	int autopause_enabled_;
-	int autostart_timing_;
-	int start_minimized_;
-	int start_pinned_to_top_;
-	int warning_nopause_;
+	bool autopause_enabled_;
+	bool autostart_timing_;
+	bool start_minimized_;
+	bool start_pinned_to_top_;
+	bool warning_nopause_;
+	bool warning_activity_;
 	int warning_nopause_min_;
 	int pause_for_warning_nopause_min_;
-	int warning_activity_;
 	int warning_activity_min_;
 	QSettings sfile_;
 
