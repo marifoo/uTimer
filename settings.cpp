@@ -3,7 +3,13 @@
 Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniFormat)
 {
 	sfile_.setIniCodec("UTF-8");
+	readSettings();
+	sfile_.clear();
+	writeSettings();
+}
 
+void Settings::readSettings()
+{
 	autostart_timing_ = sfile_.value("uTimer/press_start_button_on_app_start", true).toBool();
 	autopause_enabled_ = sfile_.value("uTimer/autopause_enabled", false).toBool();
 	backpause_min_ = qBound(0, sfile_.value("uTimer/autopause_threshold_minutes", 15).toInt(), 99);
@@ -14,7 +20,10 @@ Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniForm
 	pause_for_warning_nopause_min_ = 30;
 	warning_activity_ = sfile_.value("uTimer/show_warning_after_9h45min_activity", false).toBool();
 	warning_activity_min_ = 9*60+45;
+}
 
+void Settings::writeSettings()
+{
 	sfile_.setValue("uTimer/press_start_button_on_app_start", autostart_timing_);
 	sfile_.setValue("uTimer/autopause_enabled", autopause_enabled_);
 	sfile_.setValue("uTimer/autopause_threshold_minutes", backpause_min_);
@@ -81,13 +90,13 @@ qint64 Settings::getWarnTimeActivityMsec() const
 
 void Settings::setAutopauseState(const bool autopause_enabled)
 {
-	backpause_min_ = qBound(0, sfile_.value("uTimer/autopause_threshold_minutes", 15).toInt(), 99);
+	readSettings();
 	autopause_enabled_ = autopause_enabled;
-	sfile_.setValue("uTimer/autopause_enabled", autopause_enabled_);
+	writeSettings();
 }
 
 void Settings::setPinToTopState(const bool pin2top_enabled)
 {
 	start_pinned_to_top_ = pin2top_enabled;
-	sfile_.setValue("uTimer/start_pinned_to_top", start_pinned_to_top_);
+	writeSettings();
 }

@@ -19,6 +19,8 @@ private:
 	int warning_activity_min_;
 	QSettings sfile_;
 	qint64 convMinToMsec(const int minutes) const;
+	void readSettings();
+	void writeSettings();
 
 public:
 	Settings(const QString filename);
