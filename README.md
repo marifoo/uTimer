@@ -4,14 +4,13 @@ Small timer app for Windows to track your Activity time / Pause time during the 
 
 Main feature is *Auto-Pause*, which sends the timer retroactively into Pause mode after Windows has been locked for a certain amount of time.
 
-Latest pre-compiled release can be found on [Github](https://github.com/marifoo/uTimer) under *Releases*.
+This app is open-source and available at [Github](https://github.com/marifoo/uTimer). The latest pre-compiled release can be found there under *Releases*.
 
 
 Info
 ------
-This app is open-source and available at [Github](https://github.com/marifoo/uTimer)
 
-Written by [marifoo](https://github.com/marifoo)
+Written by [Mario H.](https://github.com/marifoo)
 
 Icon by [icons8.com](https://icons8.com)
 
@@ -20,7 +19,7 @@ Build with [Qt 5.14](https://www.qt.io) and [MinGW-w64 7.3.0](https://mingw-w64.
 
 License
 ------
-Copyright (c) 2020 marifoo
+Copyright (c) 2020 Mario H.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
