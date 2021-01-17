@@ -18,21 +18,22 @@ private:
 	int pause_for_warning_nopause_min_;
 	int warning_activity_min_;
 	QSettings sfile_;
+	qint64 convMinToMsec(const int minutes) const;
 
 public:
-	Settings(QString filename);
-	qint64 getBackpauseMsec();
-	bool isAutopauseEnabled();
-	bool isAutostartTimingEnabled();
-	bool isMinimizedStartEnabled();
-	bool isPinnedStartEnabled();
-	bool showNoPauseWarning();
-	bool showTooMuchActivityWarning();
-	qint64 getPauseTimeForWarnTimeNoPauseMsec();
-	qint64 getWarnTimeNoPauseMsec();
-	qint64 getWarnTimeActivityMsec();
-	void setAutopauseState(bool autopause_enabled);
-	void setPinToTopState(bool pin2top_enabled);
+	Settings(const QString filename);
+	bool isAutopauseEnabled() const;
+	bool isAutostartTimingEnabled() const;
+	bool isMinimizedStartEnabled() const;
+	bool isPinnedStartEnabled() const;
+	bool showNoPauseWarning() const;
+	bool showTooMuchActivityWarning() const;
+	qint64 getBackpauseMsec() const;
+	qint64 getPauseTimeForWarnTimeNoPauseMsec() const;
+	qint64 getWarnTimeNoPauseMsec() const;
+	qint64 getWarnTimeActivityMsec() const;
+	void setAutopauseState(const bool autopause_enabled);
+	void setPinToTopState(const bool pin2top_enabled);
 };
 
 #endif // SETTINGS_H

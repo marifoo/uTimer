@@ -1,6 +1,6 @@
 #include "settings.h"
 
-Settings::Settings(QString filename) : sfile_(filename, QSettings::IniFormat)
+Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniFormat)
 {
 	sfile_.setIniCodec("UTF-8");
 
@@ -24,65 +24,70 @@ Settings::Settings(QString filename) : sfile_(filename, QSettings::IniFormat)
 	sfile_.setValue("uTimer/show_warning_after_9h45min_activity", warning_activity_);
 }
 
-qint64 Settings::getBackpauseMsec()
-{
-	return (static_cast<qint64>(backpause_min_) * 60000);
-}
-
-bool Settings::isAutopauseEnabled()
+bool Settings::isAutopauseEnabled() const
 {
 	return autopause_enabled_;
 }
 
-bool Settings::isAutostartTimingEnabled()
+bool Settings::isAutostartTimingEnabled() const
 {
 	return autostart_timing_;
 }
 
-bool Settings::isMinimizedStartEnabled()
+bool Settings::isMinimizedStartEnabled() const
 {
 	return start_minimized_;
 }
 
-bool Settings::isPinnedStartEnabled()
+bool Settings::isPinnedStartEnabled() const
 {
 	return start_pinned_to_top_;
 }
 
-bool Settings::showNoPauseWarning()
+bool Settings::showNoPauseWarning() const
 {
 	return warning_nopause_;
 }
 
-bool Settings::showTooMuchActivityWarning()
+bool Settings::showTooMuchActivityWarning() const
 {
 	return warning_activity_;
 }
 
-qint64 Settings::getPauseTimeForWarnTimeNoPauseMsec()
+qint64 Settings::convMinToMsec(const int minutes) const
 {
-	return (static_cast<qint64>(pause_for_warning_nopause_min_) * 60000);;
+	return (static_cast<qint64>(minutes) * 60000);
 }
 
-qint64 Settings::getWarnTimeNoPauseMsec()
+qint64 Settings::getBackpauseMsec() const
 {
-	return (static_cast<qint64>(warning_nopause_min_) * 60000);;
+	return convMinToMsec(backpause_min_);
 }
 
-qint64 Settings::getWarnTimeActivityMsec()
+qint64 Settings::getPauseTimeForWarnTimeNoPauseMsec() const
 {
-	return (static_cast<qint64>(warning_activity_min_) * 60000);;
+	return convMinToMsec(pause_for_warning_nopause_min_);
 }
 
-void Settings::setAutopauseState(bool autopause_enabled)
+qint64 Settings::getWarnTimeNoPauseMsec() const
+{
+	return convMinToMsec(warning_nopause_min_);
+}
+
+qint64 Settings::getWarnTimeActivityMsec() const
+{
+	return convMinToMsec(warning_activity_min_);
+}
+
+void Settings::setAutopauseState(const bool autopause_enabled)
 {
 	backpause_min_ = qBound(0, sfile_.value("uTimer/autopause_threshold_minutes", 15).toInt(), 99);
 	autopause_enabled_ = autopause_enabled;
 	sfile_.setValue("uTimer/autopause_enabled", autopause_enabled_);
 }
 
-void Settings::setPinToTopState(bool pin2top_enabled)
+void Settings::setPinToTopState(const bool pin2top_enabled)
 {
-	start_pinned_to_top_ = pin2top_enabled ? 1 : 0;
+	start_pinned_to_top_ = pin2top_enabled;
 	sfile_.setValue("uTimer/start_pinned_to_top", start_pinned_to_top_);
 }
