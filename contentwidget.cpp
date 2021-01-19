@@ -141,14 +141,11 @@ void ContentWidget::setGUItoActivity()
 	if (from_stopped) {
 		QString tooltip_label = "First Start was at " + QTime::currentTime().toString("hh:mm") + " o'clock";
 		activity_time_->setToolTip(tooltip_label);
-		activity_text_->setToolTip(tooltip_label);
-		pause_time_->setToolTip("No Pauses yet");
-		pause_text_->setToolTip("No Pauses yet");
+		pause_time_->setToolTip("");
 	}
 	else if (from_pause) {
 		QString tooltip_label = "Last Pause ended at " + QTime::currentTime().toString("hh:mm") + " o'clock";
 		pause_time_->setToolTip(tooltip_label);
-		pause_text_->setToolTip(tooltip_label);
 	}
 	startpause_button_->setText("PAUSE");
 	activity_time_->setStyleSheet("QLabel {color : green; }");
