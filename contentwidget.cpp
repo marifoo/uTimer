@@ -174,11 +174,11 @@ QString ContentWidget::getTooltip()
 {
 	QString tooltip = "tooltip_error_state_unknown";
 	if (startpause_button_->text() == "CONTINUE")
-		tooltip = "Pause ongoing: " + pause_time_->text();
+		tooltip = "µTimer:  In Pause (" + pause_time_->text() + ")";
 	else if (startpause_button_->text() == "START")
-		tooltip = "Timing inactive";
+		tooltip = "µTimer:  Timing inactive";
 	else if (startpause_button_->text() == "PAUSE")
-		tooltip = "Activity ongoing: " + activity_time_->text();
+		tooltip = "µTimer:  In Activity (" + activity_time_->text() + ")";
 	return tooltip;
 }
 
