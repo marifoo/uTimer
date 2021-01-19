@@ -49,7 +49,8 @@ void MainWin::showMsgBox(QString text)
 {
 	activateWindow();
 	show();
-	QMessageBox msgBox;
+	QMessageBox msgBox(this);
+	msgBox.setWindowTitle("µTimer Warning");
 	msgBox.setText(text);
 	msgBox.setIcon(QMessageBox::Warning);
 	msgBox.exec();
