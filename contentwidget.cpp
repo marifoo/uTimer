@@ -86,14 +86,14 @@ void ContentWidget::setupGUI()
 
 void ContentWidget::pressedStartPauseButton()
 {
-	bool in_activity = (startpause_button_->text() == "PAUSE");
-	bool in_pause_or_stopped = ((startpause_button_->text() == "START") || (startpause_button_->text() == "CONTINUE"));
+	const bool from_activity = (startpause_button_->text() == "PAUSE");
+	const bool from_pause_or_stopped = ((startpause_button_->text() == "START") || (startpause_button_->text() == "CONTINUE"));
 
-	if (in_activity) {
+	if (from_activity) {
 		setGUItoPause();
 		emit pressedButton(Button::Pause);
 	}
-	else if (in_pause_or_stopped) {
+	else if (from_pause_or_stopped) {
 		setGUItoActivity();
 		emit pressedButton(Button::Start);
 	}
@@ -126,7 +126,7 @@ void ContentWidget::pressedAutoPauseButton()
 
 void ContentWidget::doButtonColorToggle(std::unique_ptr<QPushButton> &button, QColor color)
 {
-	QString stylesheet_string = QString("QPushButton {background-color: %1;}").arg(color.name());
+	const QString stylesheet_string = QString("QPushButton {background-color: %1;}").arg(color.name());
 	if (button->styleSheet() != stylesheet_string)
 		button->setStyleSheet(stylesheet_string);
 	else
@@ -135,16 +135,16 @@ void ContentWidget::doButtonColorToggle(std::unique_ptr<QPushButton> &button, QC
 
 void ContentWidget::setGUItoActivity()
 {
-	bool from_stopped = (startpause_button_->text() == "START");
-	bool from_pause = (startpause_button_->text() == "CONTINUE");
+	const bool from_stopped = (startpause_button_->text() == "START");
+	const bool from_pause = (startpause_button_->text() == "CONTINUE");
 
 	if (from_stopped) {
-		QString tooltip_label = "First Start was at " + QTime::currentTime().toString("hh:mm") + " o'clock";
+		const QString tooltip_label = "First Start was at " + QTime::currentTime().toString("hh:mm") + " o'clock";
 		activity_time_->setToolTip(tooltip_label);
 		pause_time_->setToolTip("");
 	}
 	else if (from_pause) {
-		QString tooltip_label = "Last Pause ended at " + QTime::currentTime().toString("hh:mm") + " o'clock";
+		const QString tooltip_label = "Last Pause ended at " + QTime::currentTime().toString("hh:mm") + " o'clock";
 		pause_time_->setToolTip(tooltip_label);
 	}
 	startpause_button_->setText("PAUSE");

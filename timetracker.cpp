@@ -2,7 +2,7 @@
 #include <QtDebug>
 #include <QDateTime>
 
-TimeTracker::TimeTracker(Settings &settings, QObject *parent) : QObject(parent), settings_(settings)
+TimeTracker::TimeTracker(const Settings &settings, QObject *parent) : QObject(parent), settings_(settings)
 {
 	timer_ = std::make_unique<QElapsedTimer>();
 	mode_ = Mode::None;
@@ -29,6 +29,16 @@ void TimeTracker::pauseTimer()
 		qint64 t_active = timer_->restart();
 		activities_.push_back(t_active);
 		mode_ = Mode::Pause;
+	}
+}
+
+void TimeTracker::backpauseTimer()
+{
+	if (mode_ == Mode::Activity) {
+		qint64 backpause_msec = settings_.getBackpauseMsec();
+		pauses_.push_back(backpause_msec);
+		activities_.push_back(-backpause_msec);
+		pauseTimer();
 	}
 }
 
@@ -62,22 +72,12 @@ void TimeTracker::useTimerViaLockEvent(LockEvent event) {
 		backpauseTimer();
 }
 
-void TimeTracker::backpauseTimer()
-{
-	if (mode_ == Mode::Activity) {
-		qint64 backpause_msec = settings_.getBackpauseMsec();
-		pauses_.push_back(backpause_msec);
-		activities_.push_back(-backpause_msec);
-		pauseTimer();
-	}
-}
-
 void TimeTracker::sendTimes()
 {
 	emit sendAllTimes(getActiveTime(), getPauseTime());
 }
 
-qint64 TimeTracker::getActiveTime()
+qint64 TimeTracker::getActiveTime() const
 {
 	qint64 sum = 0;
 	for(auto & t : activities_)
@@ -87,7 +87,7 @@ qint64 TimeTracker::getActiveTime()
 	return sum;
 }
 
-qint64 TimeTracker::getPauseTime()
+qint64 TimeTracker::getPauseTime() const
 {
 	qint64 sum = 0;
 	for(auto & t : pauses_)

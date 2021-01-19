@@ -20,12 +20,12 @@ private:
 	std::unique_ptr<QElapsedTimer> lock_timer_;
 	std::deque<Event> lock_events_;
 	const int thres_lock_ = 4; // magic number
-	Settings & settings_;
+	const Settings & settings_;
 
-	Event getLockEvent();
+	Event getLockEvent() const;
 
 public:
-	explicit LockStateWatcher(Settings & settings, QWidget *parent = nullptr);
+	explicit LockStateWatcher(const Settings & settings, QWidget *parent = nullptr);
 
 signals:
 	void desktopLockEvent(LockEvent event);

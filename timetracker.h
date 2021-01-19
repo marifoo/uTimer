@@ -20,10 +20,10 @@ private:
 	std::vector<qint64> activities_;
 	std::vector<qint64> pauses_;
 	Mode mode_;
-	Settings & settings_;
+	const Settings & settings_;
 
-	qint64 getActiveTime();
-	qint64 getPauseTime();
+	qint64 getActiveTime() const;
+	qint64 getPauseTime() const;
 
 	void startTimer();
 	void stopTimer();
@@ -31,7 +31,7 @@ private:
 	void backpauseTimer();
 
 public:
-	explicit TimeTracker(Settings & settings, QObject *parent = nullptr);
+	explicit TimeTracker(const Settings & settings, QObject *parent = nullptr);
 
 signals:
 	void sendAllTimes(qint64 t_active, qint64 t_pause);

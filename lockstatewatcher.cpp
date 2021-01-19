@@ -3,7 +3,7 @@
 #include <QDateTime>
 #include <algorithm>
 
-LockStateWatcher::LockStateWatcher(Settings &settings, QWidget *parent) : QWidget(parent), settings_(settings)
+LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent) : QWidget(parent), settings_(settings)
 {
 	lock_timer_ = std::make_unique<QElapsedTimer>();
 	lock_timer_->invalidate();
@@ -13,7 +13,7 @@ LockStateWatcher::LockStateWatcher(Settings &settings, QWidget *parent) : QWidge
 	}
 }
 
-LockStateWatcher::Event LockStateWatcher::getLockEvent()
+LockStateWatcher::Event LockStateWatcher::getLockEvent() const
 {
 	HDESK desktop = OpenDesktop(TEXT("Default"), 0, false, DESKTOP_SWITCHDESKTOP);
 	if (desktop) {

@@ -12,7 +12,7 @@ MainWin::MainWin(Settings &settings, QWidget *parent) : QMainWindow(parent), set
 	QObject::connect(content_widget_.get(), SIGNAL(minToTray()), this, SLOT(minToTray()));
 	QObject::connect(content_widget_.get(), SIGNAL(toggleAlwaysOnTop()), this, SLOT(toggleAlwaysOnTop()));
 
-	QIcon icon(":/clock.png");
+	const QIcon icon(":/clock.png");
 	setWindowIcon(icon);
 	tray_icon_ = std::make_unique<QSystemTrayIcon>(icon);
 	tray_icon_->setToolTip("Timing Inactive");
@@ -26,8 +26,8 @@ MainWin::MainWin(Settings &settings, QWidget *parent) : QMainWindow(parent), set
 
 void MainWin::updateAllTimes(qint64 t_active, qint64 t_pause)
 {
-	QString t_active_string = QDateTime::fromTime_t(t_active/1000).toUTC().toString("hh:mm:ss");
-	QString t_pause_string = QDateTime::fromTime_t(t_pause/1000).toUTC().toString("hh:mm:ss");
+	const QString t_active_string = QDateTime::fromTime_t(t_active/1000).toUTC().toString("hh:mm:ss");
+	const QString t_pause_string = QDateTime::fromTime_t(t_pause/1000).toUTC().toString("hh:mm:ss");
 
 	content_widget_->setAllTimes(t_active_string, t_pause_string);
 	tray_icon_->setToolTip(content_widget_->getTooltip());
