@@ -135,15 +135,20 @@ void ContentWidget::doButtonColorToggle(std::unique_ptr<QPushButton> &button, QC
 
 void ContentWidget::setGUItoActivity()
 {
-	bool in_stopped = (startpause_button_->text() == "START");
-	bool in_pause = (startpause_button_->text() == "CONTINUE");
+	bool from_stopped = (startpause_button_->text() == "START");
+	bool from_pause = (startpause_button_->text() == "CONTINUE");
 
-	if (in_stopped) {
-		activity_time_->setToolTip("First Start was at " + QTime::currentTime().toString("hh:mm") + " o'clock");
-		pause_time_->setToolTip("");
+	if (from_stopped) {
+		QString tooltip_label = "First Start was at " + QTime::currentTime().toString("hh:mm") + " o'clock";
+		activity_time_->setToolTip(tooltip_label);
+		activity_text_->setToolTip(tooltip_label);
+		pause_time_->setToolTip("No Pauses yet");
+		pause_text_->setToolTip("No Pauses yet");
 	}
-	else if (in_pause) {
-		pause_time_->setToolTip("Last Pause ended at " + QTime::currentTime().toString("hh:mm") + " o'clock");
+	else if (from_pause) {
+		QString tooltip_label = "Last Pause ended at " + QTime::currentTime().toString("hh:mm") + " o'clock";
+		pause_time_->setToolTip(tooltip_label);
+		pause_text_->setToolTip(tooltip_label);
 	}
 	startpause_button_->setText("PAUSE");
 	activity_time_->setStyleSheet("QLabel {color : green; }");
