@@ -3,6 +3,7 @@
 #include <QtDebug>
 #include <QFont>
 #include <QColor>
+#include <QStringList>
 
 ContentWidget::ContentWidget(Settings & settings, QWidget *parent) : QWidget(parent), settings_(settings)
 {
@@ -133,20 +134,32 @@ void ContentWidget::doButtonColorToggle(std::unique_ptr<QPushButton> &button, QC
 		button->setStyleSheet("");
 }
 
+void ContentWidget::setActivityTimeTooltip(const QString &hours /* ="0.00" */)
+{
+	const QString tooltip_label = "That's " + hours + activity_time_tooltip_base_;
+	activity_time_->setToolTip(tooltip_label);
+}
+
+void ContentWidget::setPauseTimeTooltip()
+{
+	const QString tooltip_label = "Last Pause ended at " + QTime::currentTime().toString("hh:mm") + " o'clock";
+	pause_time_->setToolTip(tooltip_label);
+}
+
 void ContentWidget::setGUItoActivity()
 {
 	const bool from_stopped = (startpause_button_->text() == "START");
 	const bool from_pause = (startpause_button_->text() == "CONTINUE");
 
 	if (from_stopped) {
-		const QString tooltip_label = "First Start was at " + QTime::currentTime().toString("hh:mm") + " o'clock";
-		activity_time_->setToolTip(tooltip_label);
+		activity_time_tooltip_base_ = "h overall since " + QTime::currentTime().toString("hh:mm") + " o'clock";
+		setActivityTimeTooltip();
 		pause_time_->setToolTip("");
 	}
 	else if (from_pause) {
-		const QString tooltip_label = "Last Pause ended at " + QTime::currentTime().toString("hh:mm") + " o'clock";
-		pause_time_->setToolTip(tooltip_label);
+		setPauseTimeTooltip();
 	}
+
 	startpause_button_->setText("PAUSE");
 	activity_time_->setStyleSheet("QLabel {color : green; }");
 	pause_time_->setStyleSheet("QLabel { color : black; }");
@@ -166,10 +179,24 @@ void ContentWidget::setGUItoPause()
 	pause_time_->setStyleSheet("QLabel { color : green; }");
 }
 
-void ContentWidget::setAllTimes(QString activity, QString pause)
+QString ContentWidget::convertTimeStrToDurationStr(const QString &activity) const
+{
+	const QStringList split = activity.split(":");
+
+	QString hours = split[0];
+	if (hours.startsWith("0")) { hours.remove(0,1); }
+
+	QString minutes = QString::number(static_cast<int>(float(100.0)*(split[1].toFloat())/float(60.0))); //.rightJustified(2, '0');
+	if (minutes.length() == 1) { minutes = "0"+minutes; }
+
+	return(hours + "." + minutes);
+}
+
+void ContentWidget::setAllTimes(const QString &activity, const QString &pause)
 {
 	pause_time_->setText(pause);
 	activity_time_->setText(activity);
+	setActivityTimeTooltip(convertTimeStrToDurationStr(activity));
 }
 
 QString ContentWidget::getTooltip()

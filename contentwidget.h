@@ -30,15 +30,19 @@ private:
 	std::unique_ptr<QPushButton> autopause_button_;
 	Qt::GlobalColor button_hold_color_;
 	QString autopause_tooltip_;
+	QString activity_time_tooltip_base_;
 
 	Settings & settings_;
 
 	void setupGUI();
 	void doButtonColorToggle(std::unique_ptr<QPushButton> & button, QColor color);
+	void setActivityTimeTooltip(const QString &hours = "0.00");
+	QString convertTimeStrToDurationStr(const QString &activity) const;
+	void setPauseTimeTooltip();
 
 public:
 	explicit ContentWidget(Settings & settings, QWidget *parent = nullptr);
-	void setAllTimes(QString activity, QString pause);
+	void setAllTimes(const QString &activity, const QString &pause);
 	QString getTooltip();
 	bool isGUIinActivity();
 
