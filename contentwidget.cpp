@@ -146,6 +146,11 @@ void ContentWidget::setPauseTimeTooltip()
 	pause_time_->setToolTip(tooltip_label);
 }
 
+void ContentWidget::resetPauseTimeTooltip()
+{
+	pause_time_->setToolTip("");
+}
+
 void ContentWidget::setGUItoActivity()
 {
 	const bool from_stopped = (startpause_button_->text() == "START");
@@ -154,7 +159,7 @@ void ContentWidget::setGUItoActivity()
 	if (from_stopped) {
 		activity_time_tooltip_base_ = "h overall since " + QTime::currentTime().toString("hh:mm") + " o'clock";
 		setActivityTimeTooltip();
-		pause_time_->setToolTip("");
+		resetPauseTimeTooltip();
 	}
 	else if (from_pause) {
 		setPauseTimeTooltip();

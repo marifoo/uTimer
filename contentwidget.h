@@ -36,9 +36,10 @@ private:
 
 	void setupGUI();
 	void doButtonColorToggle(std::unique_ptr<QPushButton> & button, QColor color);
-	void setActivityTimeTooltip(const QString &hours = "0.00");
 	QString convertTimeStrToDurationStr(const QString &activity) const;
+	void setActivityTimeTooltip(const QString &hours = "0.00");
 	void setPauseTimeTooltip();
+	void resetPauseTimeTooltip();
 
 public:
 	explicit ContentWidget(Settings & settings, QWidget *parent = nullptr);
