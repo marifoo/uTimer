@@ -4,21 +4,20 @@
 
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent) : QObject(parent), settings_(settings)
 {
-	timer_ = std::make_unique<QElapsedTimer>();
 	mode_ = Mode::None;
 }
 
 void TimeTracker::startTimer()
 {
 	if (mode_ == Mode::Pause) {
-		qint64 t_pause = timer_->restart();
+		qint64 t_pause = timer_.restart();
 		pauses_.push_back(t_pause);
 		mode_ = Mode::Activity;
 	}
 	else if (mode_ == Mode::None) {
 		activities_.clear();
 		pauses_.clear();
-		timer_->start();
+		timer_.start();
 		mode_ = Mode::Activity;
 	}
 }
@@ -26,7 +25,7 @@ void TimeTracker::startTimer()
 void TimeTracker::pauseTimer()
 {
 	if (mode_ == Mode::Activity) {
-		qint64 t_active = timer_->restart();
+		qint64 t_active = timer_.restart();
 		activities_.push_back(t_active);
 		mode_ = Mode::Pause;
 	}
@@ -45,12 +44,12 @@ void TimeTracker::backpauseTimer()
 void TimeTracker::stopTimer()
 {
 	if (mode_ == Mode::Pause) {
-		qint64 t_pause = timer_->elapsed();
+		qint64 t_pause = timer_.elapsed();
 		pauses_.push_back(t_pause);
 		mode_ = Mode::None;
 	}
 	else if (mode_ == Mode::Activity) {
-		qint64 t_active = timer_->elapsed();
+		qint64 t_active = timer_.elapsed();
 		activities_.push_back(t_active);
 		mode_ = Mode::None;
 	}
@@ -83,7 +82,7 @@ qint64 TimeTracker::getActiveTime() const
 	for(auto & t : activities_)
 		sum += t;
 	if (mode_ == Mode::Activity)
-		sum += timer_->elapsed();
+		sum += timer_.elapsed();
 	return sum;
 }
 
@@ -93,7 +92,7 @@ qint64 TimeTracker::getPauseTime() const
 	for(auto & t : pauses_)
 		sum += t;
 	if (mode_ == Mode::Pause)
-		sum += timer_->elapsed();
+		sum += timer_.elapsed();
 	return sum;
 }
 

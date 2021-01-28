@@ -16,7 +16,7 @@ class TimeTracker : public QObject
 private:
 	enum class Mode {Activity, Pause, None};
 
-	std::unique_ptr<QElapsedTimer> timer_;
+	QElapsedTimer timer_;
 	std::vector<qint64> activities_;
 	std::vector<qint64> pauses_;
 	Mode mode_;

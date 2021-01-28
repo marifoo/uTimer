@@ -29,20 +29,14 @@ LockStateWatcher::Event LockStateWatcher::getEvent() const
 
 LockEvent LockStateWatcher::determineLockEvent(const Event &e)
 {
-	if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock)) {
-		if (lock_events_.front() == Event::None) {
-			return LockEvent::Lock;
-		}
-		else /* lock_events_.front() == Event::LockOrUnlock */ {
-			return LockEvent::Unlock;
-		}
-	}
-	else if (lock_timer_.isValid() && (lock_timer_.elapsed() >= settings_.getBackpauseMsec())) {
+	if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock) && (lock_events_.front() == Event::None))
+		return LockEvent::Lock;
+	else if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock) && (lock_events_.front() == Event::LockOrUnlock))
+		return LockEvent::Unlock;
+	else if (lock_timer_.isValid() && (lock_timer_.elapsed() >= settings_.getBackpauseMsec()))
 		return LockEvent::LongOngoingLock;
-	}
-	else {
+	else
 		return LockEvent::None;
-	}
 }
 
 void LockStateWatcher::update()
