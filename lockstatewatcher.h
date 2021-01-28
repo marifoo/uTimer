@@ -15,14 +15,15 @@ class LockStateWatcher : public QWidget
 {
 	Q_OBJECT
 private:
-	enum class Event {None, LockEvent};
+	enum class Event {None, LockOrUnlock};
 
-	std::unique_ptr<QElapsedTimer> lock_timer_;
+	QElapsedTimer lock_timer_;
 	std::deque<Event> lock_events_;
 	const int thres_lock_ = 4; // magic number
 	const Settings & settings_;
 
-	Event getLockEvent() const;
+	Event getEvent() const;
+	LockEvent determineLockEvent(const Event &e);
 
 public:
 	explicit LockStateWatcher(const Settings & settings, QWidget *parent = nullptr);

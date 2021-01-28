@@ -102,7 +102,7 @@ void MainWin::reactOnLockState(LockEvent event)
 {
 	if (event == LockEvent::Unlock)
 		content_widget_->setGUItoActivity();
-	else if (event == LockEvent::LongLock)
+	else if (event == LockEvent::LongOngoingLock)
 		content_widget_->setGUItoPause();
 }
 

@@ -68,7 +68,7 @@ void TimeTracker::useTimerViaButton(Button button) {
 void TimeTracker::useTimerViaLockEvent(LockEvent event) {
 	if (event == LockEvent::Unlock)
 		startTimer();
-	else if (event == LockEvent::LongLock)
+	else if (event == LockEvent::LongOngoingLock)
 		backpauseTimer();
 }
 

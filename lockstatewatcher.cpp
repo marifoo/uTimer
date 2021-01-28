@@ -5,15 +5,14 @@
 
 LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent) : QWidget(parent), settings_(settings)
 {
-	lock_timer_ = std::make_unique<QElapsedTimer>();
-	lock_timer_->invalidate();
+	lock_timer_.invalidate();
 
 	for (int i=0; i<(thres_lock_+1); ++i) {
 		lock_events_.push_back(Event::None);
 	}
 }
 
-LockStateWatcher::Event LockStateWatcher::getLockEvent() const
+LockStateWatcher::Event LockStateWatcher::getEvent() const
 {
 	HDESK desktop = OpenDesktop(TEXT("Default"), 0, false, DESKTOP_SWITCHDESKTOP);
 	if (desktop) {
@@ -25,27 +24,39 @@ LockStateWatcher::Event LockStateWatcher::getLockEvent() const
 			CloseDesktop(desktop);
 		}
 	}
-	return Event::LockEvent;
+	return Event::LockOrUnlock;
+}
+
+LockEvent LockStateWatcher::determineLockEvent(const Event &e)
+{
+	if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock)) {
+		if (lock_events_.front() == Event::None) {
+			return LockEvent::Lock;
+		}
+		else /* lock_events_.front() == Event::LockOrUnlock */ {
+			return LockEvent::Unlock;
+		}
+	}
+	else if (lock_timer_.isValid() && (lock_timer_.elapsed() >= settings_.getBackpauseMsec())) {
+		return LockEvent::LongOngoingLock;
+	}
+	else {
+		return LockEvent::None;
+	}
 }
 
 void LockStateWatcher::update()
 {
-	const Event e = getLockEvent();
-	if ((e == Event::None) && (lock_events_.back() == Event::LockEvent)) {
-		if (lock_events_.front() == Event::None) {
-			lock_timer_->start();
-		}
-		else {
-			lock_timer_->invalidate();
-			if (settings_.isAutopauseEnabled())
-				emit desktopLockEvent(LockEvent::Unlock);
-		}
-	}	
+	const Event e = getEvent();
+	const LockEvent le = determineLockEvent(e);
 
-	if (lock_timer_->isValid() && (lock_timer_->elapsed() >= settings_.getBackpauseMsec())) {
-		lock_timer_->invalidate();
+	if (le == LockEvent::Lock) {
+		lock_timer_.start();
+	}
+	else if ((le == LockEvent::Unlock) || (le == LockEvent::LongOngoingLock)) {
+		lock_timer_.invalidate();
 		if (settings_.isAutopauseEnabled())
-			emit desktopLockEvent(LockEvent::LongLock);
+			emit desktopLockEvent(le);
 	}
 
 	lock_events_.push_back(e);

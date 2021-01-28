@@ -3,6 +3,6 @@
 
 enum class Button {Start, Pause, Stop};
 
-enum class LockEvent {Unlock, LongLock};
+enum class LockEvent {None, Unlock, Lock, LongOngoingLock};
 
 #endif // TYPES_H
