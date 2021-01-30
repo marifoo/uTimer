@@ -12,8 +12,8 @@ class MainWin : public QMainWindow
 {
 	Q_OBJECT
 private:
-	std::unique_ptr<ContentWidget> content_widget_;
-	std::unique_ptr<QSystemTrayIcon> tray_icon_;
+	ContentWidget *content_widget_;
+	QSystemTrayIcon *tray_icon_;
 	const Settings & settings_;
 	bool warning_activity_shown;
 	bool warning_pause_shown;

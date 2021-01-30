@@ -4,85 +4,101 @@
 #include <QFont>
 #include <QColor>
 #include <QStringList>
+#include <QApplication>
 
-ContentWidget::ContentWidget(Settings & settings, QWidget *parent) : QWidget(parent), settings_(settings)
+ContentWidget::ContentWidget(Settings & settings, QWidget *parent /* = nullptr */) : QWidget(parent), settings_(settings)
 {
+	button_hold_color_ = Qt::gray;
 	setupGUI();
 
-	QObject::connect(startpause_button_.get(), SIGNAL(clicked()), this, SLOT(pressedStartPauseButton()));
-	QObject::connect(stop_button_.get(), SIGNAL(clicked()), this, SLOT(pressedStopButton()));
-	QObject::connect(mintotray_button_.get(), SIGNAL(clicked()), this, SLOT(pressedMinToTrayButton()));
-	QObject::connect(pintotop_button_.get(), SIGNAL(clicked()), this, SLOT(pressedPinToTopButton()));
-	QObject::connect(autopause_button_.get(), SIGNAL(clicked()), this, SLOT(pressedAutoPauseButton()));
+	QObject::connect(startpause_button_, SIGNAL(clicked()), this, SLOT(pressedStartPauseButton()));
+	QObject::connect(stop_button_, SIGNAL(clicked()), this, SLOT(pressedStopButton()));
+	QObject::connect(mintotray_button_, SIGNAL(clicked()), this, SLOT(pressedMinToTrayButton()));
+	QObject::connect(pintotop_button_, SIGNAL(clicked()), this, SLOT(pressedPinToTopButton()));
+	QObject::connect(autopause_button_, SIGNAL(clicked()), this, SLOT(pressedAutoPauseButton()));
 }
 
-void ContentWidget::setupGUI()
+void ContentWidget::setupTimeRows()
 {
+	QFont label_font = QApplication::font();
+	label_font.setPointSize(9);
+
 	// Activity Time:  00:00:00
-	activity_row_ = std::make_unique<QHBoxLayout>();
-	activity_text_ = std::make_unique<QLabel>("Activity Time:");
-	QFont label_font = activity_text_->font();
-	label_font.setPointSize(9); // 15px
+	activity_row_ = new QHBoxLayout();
+	activity_text_ = new QLabel("Activity Time:");
 	activity_text_->setFont(label_font);
-	activity_time_ = std::make_unique<QLabel>("00:00:00");
+	activity_time_ = new QLabel("00:00:00");
 	activity_time_->setFont(label_font);
 	activity_time_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-	activity_row_->addWidget(activity_text_.get());
-	activity_row_->addWidget(activity_time_.get());
+	activity_row_->addWidget(activity_text_);
+	activity_row_->addWidget(activity_time_);
 
 	// Pause Time:  00:00:00
-	pause_row_ = std::make_unique<QHBoxLayout>();
-	pause_text_ = std::make_unique<QLabel>("Pause Time:");
+	pause_row_ = new QHBoxLayout();
+	pause_text_ = new QLabel("Pause Time:");
 	pause_text_->setFont(label_font);
-	pause_time_ = std::make_unique<QLabel>("00:00:00");
+	pause_time_ = new QLabel("00:00:00");
 	pause_time_->setFont(label_font);
 	pause_time_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-	pause_row_->addWidget(pause_text_.get());
-	pause_row_->addWidget(pause_time_.get());
+	pause_row_->addWidget(pause_text_);
+	pause_row_->addWidget(pause_time_);
+}
+
+void ContentWidget::setupButtonRows()
+{
+	QFont button_font = QApplication::font();
+	button_font.setPointSize(8);
 
 	// [START] [STOP]
-	button_row_ = std::make_unique<QHBoxLayout>();
-	startpause_button_ = std::make_unique<QPushButton>("START");
-	QFont button_font = startpause_button_->font();
-	button_font.setPointSize(8); // 13px
+	button_row_ = new QHBoxLayout();
+	startpause_button_ = new QPushButton("START");
 	startpause_button_->setFont(button_font);
 	startpause_button_->setToolTip("Start/Pause Activity Time");
-	stop_button_ = std::make_unique<QPushButton>("STOP");
+	stop_button_ = new QPushButton("STOP");
 	stop_button_->setFont(button_font);
 	stop_button_->setToolTip("Stop all Timing");
-	button_row_->addWidget(startpause_button_.get());
-	button_row_->addWidget(stop_button_.get());
+	button_row_->addWidget(startpause_button_);
+	button_row_->addWidget(stop_button_);
 
 	// [Min to Tray] [Stay on Top] [Auto-Pause]
-	optionbutton_row_ = std::make_unique<QHBoxLayout>();
-	mintotray_button_ = std::make_unique<QPushButton>("Min to Tray");
+	optionbutton_row_ = new QHBoxLayout();
+	mintotray_button_ = new QPushButton("Min to Tray");
 	mintotray_button_->setFont(button_font);
 	mintotray_button_->setToolTip("Minimize to Tray Icon now");
-	pintotop_button_ = std::make_unique<QPushButton>("Stay on Top");
+	pintotop_button_ = new QPushButton("Stay on Top");
 	pintotop_button_->setFont(button_font);
 	pintotop_button_->setToolTip("Keep this Window in Foreground");
-	autopause_button_ = std::make_unique<QPushButton>("Auto-Pause");
+	autopause_button_ = new QPushButton("Auto-Pause");
 	autopause_button_->setFont(button_font);
 	autopause_tooltip_ = "min after locking the PC via [Win]+[L], convert this whole time into a Pause\nBeware: Locking via [Alt]+[Del] is not detected";
 	autopause_button_->setToolTip(settings_.getBackpauseMin() + autopause_tooltip_);
-	optionbutton_row_->addWidget(mintotray_button_.get());
-	optionbutton_row_->addWidget(pintotop_button_.get());
-	optionbutton_row_->addWidget(autopause_button_.get());
+	optionbutton_row_->addWidget(mintotray_button_);
+	optionbutton_row_->addWidget(pintotop_button_);
+	optionbutton_row_->addWidget(autopause_button_);
+}
 
-	rows_ = std::make_unique<QVBoxLayout>();
-	rows_->addLayout(activity_row_.get());
-	rows_->addLayout(pause_row_.get());
-	rows_->addLayout(button_row_.get());
-	rows_->addLayout(optionbutton_row_.get());
-	setLayout(rows_.get());
-
-	button_hold_color_ = Qt::gray;
-
+void ContentWidget::applyStartupSettingsToGui()
+{
 	if (settings_.isAutopauseEnabled())
 		doButtonColorToggle(autopause_button_, button_hold_color_);
 
 	if (settings_.isPinnedStartEnabled())
 		doButtonColorToggle(pintotop_button_, button_hold_color_);
+}
+
+void ContentWidget::setupGUI()
+{	
+	rows_ = new QVBoxLayout(this);
+
+	setupTimeRows();
+	setupButtonRows();
+
+	rows_->addLayout(activity_row_);
+	rows_->addLayout(pause_row_);
+	rows_->addLayout(button_row_);
+	rows_->addLayout(optionbutton_row_);
+
+	applyStartupSettingsToGui();
 }
 
 void ContentWidget::pressedStartPauseButton()
@@ -125,7 +141,7 @@ void ContentWidget::pressedAutoPauseButton()
 	autopause_button_->setToolTip(settings_.getBackpauseMin() + autopause_tooltip_);
 }
 
-void ContentWidget::doButtonColorToggle(std::unique_ptr<QPushButton> &button, QColor color)
+void ContentWidget::doButtonColorToggle(QPushButton *button, const QColor &color)
 {
 	const QString stylesheet_string = QString("QPushButton {background-color: %1;}").arg(color.name());
 	if (button->styleSheet() != stylesheet_string)
@@ -189,10 +205,12 @@ QString ContentWidget::convertTimeStrToDurationStr(const QString &activity) cons
 	const QStringList split = activity.split(":");
 
 	QString hours = split[0];
-	if (hours.startsWith("0")) { hours.remove(0,1); }
+	if (hours.startsWith("0"))
+		hours.remove(0,1);
 
-	QString minutes = QString::number(static_cast<int>(float(100.0)*(split[1].toFloat())/float(60.0))); //.rightJustified(2, '0');
-	if (minutes.length() == 1) { minutes = "0"+minutes; }
+	QString minutes = QString::number(static_cast<int>(float(100.0)*(split[1].toFloat())/float(60.0)));
+	if (minutes.length() == 1)
+		minutes = "0"+minutes;
 
 	return(hours + "." + minutes);
 }
@@ -206,14 +224,12 @@ void ContentWidget::setAllTimes(const QString &activity, const QString &pause)
 
 QString ContentWidget::getTooltip()
 {
-	QString tooltip = "tooltip_error_state_unknown";
 	if (startpause_button_->text() == "CONTINUE")
-		tooltip = "µTimer:  In Pause (" + pause_time_->text() + ")";
-	else if (startpause_button_->text() == "START")
-		tooltip = "µTimer:  Timing inactive";
+		return QString("µTimer:  In Pause (" + pause_time_->text() + ")");
 	else if (startpause_button_->text() == "PAUSE")
-		tooltip = "µTimer:  In Activity (" + activity_time_->text() + ")";
-	return tooltip;
+		return QString("µTimer:  In Activity (" + activity_time_->text() + ")");
+	else
+		return QString("µTimer:  Timing inactive");
 }
 
 bool ContentWidget::isGUIinActivity()

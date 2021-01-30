@@ -14,20 +14,20 @@ class ContentWidget : public QWidget
 {
 	Q_OBJECT
 private:
-	std::unique_ptr<QVBoxLayout> rows_;
-	std::unique_ptr<QHBoxLayout> activity_row_;
-	std::unique_ptr<QLabel> activity_text_;
-	std::unique_ptr<QLabel> activity_time_;
-	std::unique_ptr<QHBoxLayout> pause_row_;
-	std::unique_ptr<QLabel> pause_text_;
-	std::unique_ptr<QLabel> pause_time_;
-	std::unique_ptr<QHBoxLayout> button_row_;
-	std::unique_ptr<QPushButton> startpause_button_;
-	std::unique_ptr<QPushButton> stop_button_;
-	std::unique_ptr<QHBoxLayout> optionbutton_row_;
-	std::unique_ptr<QPushButton> mintotray_button_;
-	std::unique_ptr<QPushButton> pintotop_button_;
-	std::unique_ptr<QPushButton> autopause_button_;
+	QVBoxLayout *rows_;
+	QHBoxLayout *activity_row_;
+	QLabel *activity_text_;
+	QLabel *activity_time_;
+	QHBoxLayout *pause_row_;
+	QLabel *pause_text_;
+	QLabel *pause_time_;
+	QHBoxLayout *button_row_;
+	QPushButton *startpause_button_;
+	QPushButton *stop_button_;
+	QHBoxLayout *optionbutton_row_;
+	QPushButton *mintotray_button_;
+	QPushButton * pintotop_button_;
+	QPushButton *autopause_button_;
 	Qt::GlobalColor button_hold_color_;
 	QString autopause_tooltip_;
 	QString activity_time_tooltip_base_;
@@ -35,7 +35,10 @@ private:
 	Settings & settings_;
 
 	void setupGUI();
-	void doButtonColorToggle(std::unique_ptr<QPushButton> & button, QColor color);
+	void setupTimeRows();
+	void setupButtonRows();
+	void applyStartupSettingsToGui();
+	void doButtonColorToggle(QPushButton * button, const QColor &color);
 	QString convertTimeStrToDurationStr(const QString &activity) const;
 	void setActivityTimeTooltip(const QString &hours = "0.00");
 	void setPauseTimeTooltip();

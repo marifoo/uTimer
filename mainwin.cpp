@@ -4,20 +4,20 @@
 #include <QSystemTrayIcon>
 #include <QMessageBox>
 
-MainWin::MainWin(Settings &settings, QWidget *parent) : QMainWindow(parent), settings_(settings), warning_activity_shown(false), warning_pause_shown(false)
+MainWin::MainWin(Settings &settings, QWidget *parent /* = nullptr */) : QMainWindow(parent), settings_(settings), warning_activity_shown(false), warning_pause_shown(false)
 {
-	content_widget_ = std::make_unique<ContentWidget>(settings);
-	setCentralWidget(content_widget_.get());
-	QObject::connect(content_widget_.get(), SIGNAL(pressedButton(Button)), this, SIGNAL(sendButtons(Button)));
-	QObject::connect(content_widget_.get(), SIGNAL(minToTray()), this, SLOT(minToTray()));
-	QObject::connect(content_widget_.get(), SIGNAL(toggleAlwaysOnTop()), this, SLOT(toggleAlwaysOnTop()));
+	content_widget_ = new ContentWidget(settings, this);
+	setCentralWidget(content_widget_);
+	QObject::connect(content_widget_, SIGNAL(pressedButton(Button)), this, SIGNAL(sendButtons(Button)));
+	QObject::connect(content_widget_, SIGNAL(minToTray()), this, SLOT(minToTray()));
+	QObject::connect(content_widget_, SIGNAL(toggleAlwaysOnTop()), this, SLOT(toggleAlwaysOnTop()));
 
 	const QIcon icon(":/clock.png");
 	setWindowIcon(icon);
-	tray_icon_ = std::make_unique<QSystemTrayIcon>(icon);
+	tray_icon_ = new QSystemTrayIcon(icon, this);
 	tray_icon_->setToolTip("Timing Inactive");
 	tray_icon_->show();
-	QObject::connect(tray_icon_.get(), SIGNAL(activated(QSystemTrayIcon::ActivationReason)), this, SLOT(iconActivated(QSystemTrayIcon::ActivationReason)));
+	QObject::connect(tray_icon_, SIGNAL(activated(QSystemTrayIcon::ActivationReason)), this, SLOT(iconActivated(QSystemTrayIcon::ActivationReason)));
 
 	resize(280, 1);
 	setWindowTitle("µTimer");
