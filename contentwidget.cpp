@@ -70,7 +70,7 @@ void ContentWidget::setupButtonRows()
 	pintotop_button_->setToolTip("Keep this Window in Foreground");
 	autopause_button_ = new QPushButton("Auto-Pause");
 	autopause_button_->setFont(button_font);
-	autopause_tooltip_ = "min after locking the PC via [Win]+[L], convert this whole time into a Pause\nBeware: Locking via [Alt]+[Del] is not detected";
+	autopause_tooltip_ = "min after locking the PC via [Win]+[L], convert this whole time into a Pause\nBeware: Locking via [Ctrl]+[Alt]+[Del] is not detected";
 	autopause_button_->setToolTip(settings_.getBackpauseMin() + autopause_tooltip_);
 	optionbutton_row_->addWidget(mintotray_button_);
 	optionbutton_row_->addWidget(pintotop_button_);
