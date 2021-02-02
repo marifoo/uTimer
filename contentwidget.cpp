@@ -200,9 +200,9 @@ void ContentWidget::setGUItoPause()
 	pause_time_->setStyleSheet("QLabel { color : green; }");
 }
 
-QString ContentWidget::convertTimeStrToDurationStr(const QString &activity) const
+QString ContentWidget::convertTimeStrToDurationStr(const QString &time_str) const
 {
-	const QStringList split = activity.split(":");
+	const QStringList split = time_str.split(":");
 
 	QString hours = split[0];
 	if (hours.startsWith("0"))
@@ -225,9 +225,9 @@ void ContentWidget::setAllTimes(const QString &activity, const QString &pause)
 QString ContentWidget::getTooltip()
 {
 	if (startpause_button_->text() == "CONTINUE")
-		return QString("µTimer:  In Pause (" + pause_time_->text() + ")");
+		return QString("µTimer:  In Pause (Overall " + pause_time_->text() + ")");
 	else if (startpause_button_->text() == "PAUSE")
-		return QString("µTimer:  In Activity (" + activity_time_->text() + ")");
+		return QString("µTimer:  In Activity (Overall " + convertTimeStrToDurationStr(activity_time_->text()) + "h / " + activity_time_->text() + ")");
 	else
 		return QString("µTimer:  Timing inactive");
 }
