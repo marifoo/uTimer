@@ -208,11 +208,11 @@ QString ContentWidget::convertTimeStrToDurationStr(const QString &time_str) cons
 	if (hours.startsWith("0"))
 		hours.remove(0,1);
 
-	QString minutes = QString::number(static_cast<int>(float(100.0)*(split[1].toFloat())/float(60.0)));
-	if (minutes.length() == 1)
-		minutes = "0"+minutes;
+	QString hour_frac = QString::number(static_cast<int>(float(100.0) * (split[1].toFloat()*60.0f + split[2].toFloat())/3600.0f));
+	if (hour_frac.length() == 1)
+		hour_frac = "0"+hour_frac;
 
-	return(hours + "." + minutes);
+	return(hours + "." + hour_frac);
 }
 
 void ContentWidget::setAllTimes(const QString &activity, const QString &pause)
