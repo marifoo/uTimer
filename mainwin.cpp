@@ -25,11 +25,11 @@ MainWin::MainWin(Settings &settings, QWidget *parent /* = nullptr */) : QMainWin
 
 void MainWin::updateAllTimes(qint64 t_active, qint64 t_pause)
 {
+	content_widget_->setAllTimes(t_active, t_pause);
+	tray_icon_->setToolTip(content_widget_->getTooltip());
+
 	const QString t_active_string = QDateTime::fromTime_t(t_active/1000).toUTC().toString("hh:mm:ss");
 	const QString t_pause_string = QDateTime::fromTime_t(t_pause/1000).toUTC().toString("hh:mm:ss");
-
-	content_widget_->setAllTimes(t_active_string, t_pause_string);
-	tray_icon_->setToolTip(content_widget_->getTooltip());
 
 	if ((!warning_activity_shown) && (content_widget_->isGUIinActivity())
 			&& (t_active > settings_.getWarnTimeActivityMsec())) {

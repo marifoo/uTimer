@@ -215,8 +215,11 @@ QString ContentWidget::convertTimeStrToDurationStr(const QString &time_str) cons
 	return(hours + "." + hour_frac);
 }
 
-void ContentWidget::setAllTimes(const QString &activity, const QString &pause)
+void ContentWidget::setAllTimes(const qint64 &t_active, const qint64 &t_pause)
 {
+	const QString activity = QDateTime::fromTime_t(t_active/1000).toUTC().toString("hh:mm:ss");
+	const QString pause = QDateTime::fromTime_t(t_pause/1000).toUTC().toString("hh:mm:ss");
+
 	pause_time_->setText(pause);
 	activity_time_->setText(activity);
 	setActivityTimeTooltip(convertTimeStrToDurationStr(activity));

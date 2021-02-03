@@ -46,7 +46,7 @@ private:
 
 public:
 	explicit ContentWidget(Settings & settings, QWidget *parent = nullptr);
-	void setAllTimes(const QString &activity, const QString &pause);
+	void setAllTimes(const qint64 &t_active, const qint64 &t_pause);
 	QString getTooltip();
 	bool isGUIinActivity();
 
