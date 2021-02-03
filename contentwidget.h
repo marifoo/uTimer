@@ -43,7 +43,8 @@ private:
 	void setActivityTimeTooltip(const QString &hours = "0.00");
 	void setPauseTimeTooltip();
 	void resetPauseTimeTooltip();
-
+	void manageTooltipsForActivity();
+        
 public:
 	explicit ContentWidget(Settings & settings, QWidget *parent = nullptr);
 	void setAllTimes(const qint64 &t_active, const qint64 &t_pause);

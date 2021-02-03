@@ -9,6 +9,7 @@
 ContentWidget::ContentWidget(Settings & settings, QWidget *parent /* = nullptr */) : QWidget(parent), settings_(settings)
 {
 	button_hold_color_ = Qt::gray;
+
 	setupGUI();
 
 	QObject::connect(startpause_button_, SIGNAL(clicked()), this, SLOT(pressedStartPauseButton()));
@@ -16,6 +17,21 @@ ContentWidget::ContentWidget(Settings & settings, QWidget *parent /* = nullptr *
 	QObject::connect(mintotray_button_, SIGNAL(clicked()), this, SLOT(pressedMinToTrayButton()));
 	QObject::connect(pintotop_button_, SIGNAL(clicked()), this, SLOT(pressedPinToTopButton()));
 	QObject::connect(autopause_button_, SIGNAL(clicked()), this, SLOT(pressedAutoPauseButton()));
+}
+
+void ContentWidget::setupGUI()
+{
+	rows_ = new QVBoxLayout(this);
+
+	setupTimeRows();
+	setupButtonRows();
+
+	rows_->addLayout(activity_row_);
+	rows_->addLayout(pause_row_);
+	rows_->addLayout(button_row_);
+	rows_->addLayout(optionbutton_row_);
+
+	applyStartupSettingsToGui();
 }
 
 void ContentWidget::setupTimeRows()
@@ -86,21 +102,6 @@ void ContentWidget::applyStartupSettingsToGui()
 		doButtonColorToggle(pintotop_button_, button_hold_color_);
 }
 
-void ContentWidget::setupGUI()
-{	
-	rows_ = new QVBoxLayout(this);
-
-	setupTimeRows();
-	setupButtonRows();
-
-	rows_->addLayout(activity_row_);
-	rows_->addLayout(pause_row_);
-	rows_->addLayout(button_row_);
-	rows_->addLayout(optionbutton_row_);
-
-	applyStartupSettingsToGui();
-}
-
 void ContentWidget::pressedStartPauseButton()
 {
 	const bool from_activity = (startpause_button_->text() == "PAUSE");
@@ -167,7 +168,7 @@ void ContentWidget::resetPauseTimeTooltip()
 	pause_time_->setToolTip("");
 }
 
-void ContentWidget::setGUItoActivity()
+void ContentWidget::manageTooltipsForActivity()
 {
 	const bool from_stopped = (startpause_button_->text() == "START");
 	const bool from_pause = (startpause_button_->text() == "CONTINUE");
@@ -180,6 +181,11 @@ void ContentWidget::setGUItoActivity()
 	else if (from_pause) {
 		setPauseTimeTooltip();
 	}
+}
+
+void ContentWidget::setGUItoActivity()
+{
+	manageTooltipsForActivity();
 
 	startpause_button_->setText("PAUSE");
 	activity_time_->setStyleSheet("QLabel {color : green; }");
