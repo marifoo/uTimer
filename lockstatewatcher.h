@@ -17,10 +17,10 @@ class LockStateWatcher : public QWidget
 private:
 	enum class Event {None, LockOrUnlock};
 
+	const Settings & settings_;
 	QElapsedTimer lock_timer_;
 	std::deque<Event> lock_events_;
-	const int thres_lock_ = 4; // magic number
-	const Settings & settings_;
+	const std::deque<Event>::size_type buffer_size_with_100ms_timing_ = 5;
 
 	Event getEvent() const;
 	LockEvent determineLockEvent(const Event &e);

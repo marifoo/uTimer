@@ -7,9 +7,7 @@ LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent) : 
 {
 	lock_timer_.invalidate();
 
-	for (int i=0; i<(thres_lock_+1); ++i) {
-		lock_events_.push_back(Event::None);
-	}
+	lock_events_.assign(buffer_size_with_100ms_timing_, Event::None);
 }
 
 LockStateWatcher::Event LockStateWatcher::getEvent() const
