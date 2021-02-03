@@ -20,10 +20,12 @@ private:
 	bool warning_pause_shown_;
 
 	void updateTrayIconTooltip(QString activity, QString pause);
-	void showMsgBox(QString text);
+	void showMsgBox(const QString &text);
 	void showMainWin();
 	void toggleAlwaysOnTopFlag();
 	void showActivityWarnings(const qint64 &t_active, const qint64 &t_pause);
+	void setupIcon();
+	void setupCentralWidget(Settings &settings);
 
 public:
 	explicit MainWin(Settings & settings, QWidget *parent = nullptr);

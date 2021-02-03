@@ -4,23 +4,40 @@
 #include <QSystemTrayIcon>
 #include <QMessageBox>
 
+
+
 MainWin::MainWin(Settings &settings, QWidget *parent /* = nullptr */)	: QMainWindow(parent), settings_(settings), warning_activity_shown_(false), warning_pause_shown_(false)
 {
-	content_widget_ = new ContentWidget(settings, this);
-	setCentralWidget(content_widget_);
-	QObject::connect(content_widget_, SIGNAL(pressedButton(Button)), this, SIGNAL(sendButtons(Button)));
-	QObject::connect(content_widget_, SIGNAL(minToTray()), this, SLOT(minToTray()));
-	QObject::connect(content_widget_, SIGNAL(toggleAlwaysOnTop()), this, SLOT(toggleAlwaysOnTop()));
+	setupCentralWidget(settings);
 
-	const QIcon icon(":/clock.png");
-	setWindowIcon(icon);
-	tray_icon_ = new QSystemTrayIcon(icon, this);
-	tray_icon_->setToolTip("Timing Inactive");
-	tray_icon_->show();
-	QObject::connect(tray_icon_, SIGNAL(activated(QSystemTrayIcon::ActivationReason)), this, SLOT(iconActivated(QSystemTrayIcon::ActivationReason)));
+	setupIcon();
 
 	setWindowTitle("µTimer");
 	setWindowFlags(windowFlags() &(~Qt::WindowMaximizeButtonHint));
+}
+
+void MainWin::setupCentralWidget(Settings &settings)
+{
+	content_widget_ = new ContentWidget(settings, this);
+
+	setCentralWidget(content_widget_);
+
+	QObject::connect(content_widget_, SIGNAL(pressedButton(Button)), this, SIGNAL(sendButtons(Button)));
+	QObject::connect(content_widget_, SIGNAL(minToTray()), this, SLOT(minToTray()));
+	QObject::connect(content_widget_, SIGNAL(toggleAlwaysOnTop()), this, SLOT(toggleAlwaysOnTop()));
+}
+
+void MainWin::setupIcon()
+{
+	const QIcon icon(":/clock.png");
+
+	setWindowIcon(icon);
+
+	tray_icon_ = new QSystemTrayIcon(icon, this);
+	tray_icon_->setToolTip("Timing Inactive");
+	tray_icon_->show();
+
+	QObject::connect(tray_icon_, SIGNAL(activated(QSystemTrayIcon::ActivationReason)), this, SLOT(iconActivated(QSystemTrayIcon::ActivationReason)));
 }
 
 void MainWin::updateAllTimes(qint64 t_active, qint64 t_pause)
@@ -53,10 +70,10 @@ void MainWin::showActivityWarnings(const qint64 &t_active, const qint64 &t_pause
 	}
 }
 
-void MainWin::showMsgBox(QString text)
+void MainWin::showMsgBox(const QString &text)
 {
-	activateWindow();
-	show();
+	showMainWin();
+
 	QMessageBox msgBox(this);
 	msgBox.setWindowTitle("µTimer Warning");
 	msgBox.setText(text);
@@ -83,6 +100,12 @@ void MainWin::iconActivated(QSystemTrayIcon::ActivationReason reason)
 		showMainWin();
 }
 
+void MainWin::showMainWin()
+{
+	activateWindow();
+	show();
+}
+
 void MainWin::minToTray()
 {
 	hide();
@@ -92,12 +115,6 @@ void MainWin::toggleAlwaysOnTop()
 {
 	toggleAlwaysOnTopFlag();
 	showMainWin();
-}
-
-void MainWin::showMainWin()
-{
-	activateWindow();
-	show();
 }
 
 void MainWin::toggleAlwaysOnTopFlag()
