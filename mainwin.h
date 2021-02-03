@@ -20,7 +20,9 @@ private:
 
 	void updateTrayIconTooltip(QString activity, QString pause);
 	void showMsgBox(QString text);
-
+	void showMainWin();
+	void toggleAlwaysOnTopFlag();
+        
 public:
 	explicit MainWin(Settings & settings, QWidget *parent = nullptr);
 	void start();

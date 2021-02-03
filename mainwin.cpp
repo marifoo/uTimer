@@ -19,7 +19,6 @@ MainWin::MainWin(Settings &settings, QWidget *parent /* = nullptr */) : QMainWin
 	tray_icon_->show();
 	QObject::connect(tray_icon_, SIGNAL(activated(QSystemTrayIcon::ActivationReason)), this, SLOT(iconActivated(QSystemTrayIcon::ActivationReason)));
 
-	resize(280, 1);
 	setWindowTitle("µTimer");
 	setWindowFlags(windowFlags() &(~Qt::WindowMaximizeButtonHint));
 }
@@ -58,15 +57,13 @@ void MainWin::showMsgBox(QString text)
 
 void MainWin::iconActivated(QSystemTrayIcon::ActivationReason reason)
 {
-	if (reason == QSystemTrayIcon::DoubleClick) {
-		if (isVisible()) {
-			minToTray();
-		}
-		else {
-			activateWindow();
-			show();
-		}
-	}
+	if (reason != QSystemTrayIcon::DoubleClick)
+		return;
+
+	if (isVisible())
+		minToTray();
+	else
+		showMainWin();
 }
 
 void MainWin::minToTray()
@@ -76,20 +73,32 @@ void MainWin::minToTray()
 
 void MainWin::toggleAlwaysOnTop()
 {
-	setWindowFlags(windowFlags() ^ (Qt::CustomizeWindowHint | Qt::WindowStaysOnTopHint));
+	toggleAlwaysOnTopFlag();
+	showMainWin();
+}
+
+void MainWin::showMainWin()
+{
 	activateWindow();
 	show();
+}
+
+void MainWin::toggleAlwaysOnTopFlag()
+{
+	setWindowFlags(windowFlags() ^ (Qt::CustomizeWindowHint | Qt::WindowStaysOnTopHint));
 }
 
 void MainWin::start()
 {
 	if (settings_.isPinnedStartEnabled())
-		setWindowFlags(windowFlags() ^ (Qt::CustomizeWindowHint | Qt::WindowStaysOnTopHint));
+		toggleAlwaysOnTopFlag();
 
 	if(settings_.isMinimizedStartEnabled())
 		minToTray();
 	else
-		show();
+		showMainWin();
+
+	resize(0,0);
 
 	if (settings_.isAutostartTimingEnabled())
 		content_widget_->pressedStartPauseButton();
@@ -105,4 +114,6 @@ void MainWin::reactOnLockState(LockEvent event)
 	else if (event == LockEvent::LongOngoingLock)
 		content_widget_->setGUItoPause();
 }
+
+
 
