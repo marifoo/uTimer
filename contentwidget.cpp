@@ -5,6 +5,7 @@
 #include <QColor>
 #include <QStringList>
 #include <QApplication>
+#include "helpers.h"
 
 ContentWidget::ContentWidget(Settings & settings, QWidget *parent /* = nullptr */) : QWidget(parent), settings_(settings)
 {
@@ -96,10 +97,10 @@ void ContentWidget::setupButtonRows()
 void ContentWidget::applyStartupSettingsToGui()
 {
 	if (settings_.isAutopauseEnabled())
-		doButtonColorToggle(autopause_button_, button_hold_color_);
+		toggleButtonColor(autopause_button_, button_hold_color_);
 
 	if (settings_.isPinnedStartEnabled())
-		doButtonColorToggle(pintotop_button_, button_hold_color_);
+		toggleButtonColor(pintotop_button_, button_hold_color_);
 }
 
 void ContentWidget::pressedStartPauseButton()
@@ -130,25 +131,16 @@ void ContentWidget::pressedMinToTrayButton()
 
 void ContentWidget::pressedPinToTopButton()
 {
-	doButtonColorToggle(pintotop_button_, button_hold_color_);
+	toggleButtonColor(pintotop_button_, button_hold_color_);
 	settings_.setPinToTopState(!settings_.isPinnedStartEnabled());
 	emit toggleAlwaysOnTop();
 }
 
 void ContentWidget::pressedAutoPauseButton()
 {
-	doButtonColorToggle(autopause_button_, button_hold_color_);
+	toggleButtonColor(autopause_button_, button_hold_color_);
 	settings_.setAutopauseState(!settings_.isAutopauseEnabled());
 	autopause_button_->setToolTip(settings_.getBackpauseMin() + autopause_tooltip_);
-}
-
-void ContentWidget::doButtonColorToggle(QPushButton *button, const QColor &color)
-{
-	const QString stylesheet_string = QString("QPushButton {background-color: %1;}").arg(color.name());
-	if (button->styleSheet() != stylesheet_string)
-		button->setStyleSheet(stylesheet_string);
-	else
-		button->setStyleSheet("");
 }
 
 void ContentWidget::setActivityTimeTooltip(const QString &hours /* ="0.00" */)
@@ -206,29 +198,11 @@ void ContentWidget::setGUItoPause()
 	pause_time_->setStyleSheet("QLabel { color : green; }");
 }
 
-QString ContentWidget::convertTimeStrToDurationStr(const QString &time_str) const
-{
-	const QStringList split = time_str.split(":");
-
-	QString hours = split[0];
-	if (hours.startsWith("0"))
-		hours.remove(0,1);
-
-	QString hour_frac = QString::number(static_cast<int>(float(100.0) * (split[1].toFloat()*60.0f + split[2].toFloat())/3600.0f));
-	if (hour_frac.length() == 1)
-		hour_frac = "0"+hour_frac;
-
-	return(hours + "." + hour_frac);
-}
-
 void ContentWidget::setAllTimes(const qint64 &t_active, const qint64 &t_pause)
 {
-	const QString activity = QDateTime::fromTime_t(t_active/1000).toUTC().toString("hh:mm:ss");
-	const QString pause = QDateTime::fromTime_t(t_pause/1000).toUTC().toString("hh:mm:ss");
-
-	pause_time_->setText(pause);
-	activity_time_->setText(activity);
-	setActivityTimeTooltip(convertTimeStrToDurationStr(activity));
+	pause_time_->setText(convMSecToTimeStr(t_pause));
+	activity_time_->setText(convMSecToTimeStr(t_active));
+	setActivityTimeTooltip(convTimeStrToDurationStr(convMSecToTimeStr(t_active)));
 }
 
 QString ContentWidget::getTooltip()
@@ -236,7 +210,7 @@ QString ContentWidget::getTooltip()
 	if (startpause_button_->text() == "CONTINUE")
 		return QString("µTimer:  In Pause (Overall " + pause_time_->text() + ")");
 	else if (startpause_button_->text() == "PAUSE")
-		return QString("µTimer:  In Activity (Overall " + convertTimeStrToDurationStr(activity_time_->text()) + "h / " + activity_time_->text() + ")");
+		return QString("µTimer:  In Activity (Overall " + convTimeStrToDurationStr(activity_time_->text()) + "h / " + activity_time_->text() + ")");
 	else
 		return QString("µTimer:  Timing inactive");
 }

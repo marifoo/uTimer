@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "helpers.h"
 
 Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniFormat)
 {
@@ -61,11 +62,6 @@ bool Settings::showNoPauseWarning() const
 bool Settings::showTooMuchActivityWarning() const
 {
 	return warning_activity_;
-}
-
-qint64 Settings::convMinToMsec(const int minutes) const
-{
-	return (static_cast<qint64>(minutes) * 60000);
 }
 
 QString Settings::getBackpauseMin() const

@@ -19,8 +19,6 @@ private:
 	int warning_nopause_min_;
 	int pause_for_warning_nopause_min_;
 	int warning_activity_min_;
-
-	qint64 convMinToMsec(const int minutes) const;
 	void readSettingsFile();
 	void writeSettingsFile();
 

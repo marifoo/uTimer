@@ -3,6 +3,7 @@
 #include <QTime>
 #include <QSystemTrayIcon>
 #include <QMessageBox>
+#include "helpers.h"
 
 
 
@@ -51,22 +52,17 @@ void MainWin::updateAllTimes(qint64 t_active, qint64 t_pause)
 
 void MainWin::showActivityWarnings(const qint64 &t_active, const qint64 &t_pause)
 {
-	auto time_to_string = [](qint64 time)
-	{
-		return QDateTime::fromTime_t(time/1000).toUTC().toString("hh:mm:ss");
-	};
-
 	if ((!warning_activity_shown_)
 			&& (t_active > settings_.getWarnTimeActivityMsec())) {
 		warning_activity_shown_ = true;
-		showMsgBox("Total activity time: " + time_to_string(t_active));
+		showMsgBox("Total activity time: " + convMSecToTimeStr(t_active));
 	}
 
 	if ((!warning_pause_shown_)
 			&& (t_active > settings_.getWarnTimeNoPauseMsec())
 			&& (t_pause < settings_.getPauseTimeForWarnTimeNoPauseMsec())) {
 		warning_pause_shown_ = true;
-		showMsgBox("Pause time: " + time_to_string(t_pause) + "\nwith activity time: " + time_to_string(t_active));
+		showMsgBox("Pause time: " + convMSecToTimeStr(t_pause) + "\nwith activity time: " + convMSecToTimeStr(t_active));
 	}
 }
 

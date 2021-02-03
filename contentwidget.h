@@ -38,8 +38,6 @@ private:
 	void setupTimeRows();
 	void setupButtonRows();
 	void applyStartupSettingsToGui();
-	void doButtonColorToggle(QPushButton * button, const QColor &color);
-	QString convertTimeStrToDurationStr(const QString &time_str) const;
 	void setActivityTimeTooltip(const QString &hours = "0.00");
 	void setPauseTimeTooltip();
 	void resetPauseTimeTooltip();
