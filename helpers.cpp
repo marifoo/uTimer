@@ -21,17 +21,15 @@ void toggleButtonColor(QPushButton * const button, const QColor &color)
 		button->setStyleSheet("");
 }
 
+QString convMinAndSecToHourPctString(const int min, const int sec)
+{
+	return (QString::number((min*60 + sec)/36).rightJustified(2, '0'));
+}
+
 QString convTimeStrToDurationStr(const QString &time_str)
 {
 	const QStringList split = time_str.split(":");
-
-	QString hours = split[0];
-	if (hours.startsWith("0"))
-		hours.remove(0,1);
-
-	QString hour_frac = QString::number(static_cast<int>(float(100.0) * (split[1].toFloat()*60.0f + split[2].toFloat())/3600.0f));
-	if (hour_frac.length() == 1)
-		hour_frac = "0"+hour_frac;
-
+	QString hours = QString::number(split[0].toInt());
+	QString hour_frac = convMinAndSecToHourPctString(split[1].toInt(), split[2].toInt());
 	return (hours + "." + hour_frac);
 }

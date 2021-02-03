@@ -14,6 +14,8 @@ QString convMSecToTimeStr(const qint64 &time);
 
 void toggleButtonColor(QPushButton * const button, const QColor &color);
 
+QString convMinAndSecToHourPctString(const int min, const int sec);
+
 QString convTimeStrToDurationStr(const QString &time_str);
 
 #endif // HELPERS
