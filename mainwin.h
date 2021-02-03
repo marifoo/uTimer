@@ -15,14 +15,16 @@ private:
 	ContentWidget *content_widget_;
 	QSystemTrayIcon *tray_icon_;
 	const Settings & settings_;
-	bool warning_activity_shown;
-	bool warning_pause_shown;
+
+	bool warning_activity_shown_;
+	bool warning_pause_shown_;
 
 	void updateTrayIconTooltip(QString activity, QString pause);
 	void showMsgBox(QString text);
 	void showMainWin();
 	void toggleAlwaysOnTopFlag();
-        
+	void showActivityWarnings(const qint64 &t_active, const qint64 &t_pause);
+
 public:
 	explicit MainWin(Settings & settings, QWidget *parent = nullptr);
 	void start();

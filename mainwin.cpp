@@ -4,7 +4,7 @@
 #include <QSystemTrayIcon>
 #include <QMessageBox>
 
-MainWin::MainWin(Settings &settings, QWidget *parent /* = nullptr */) : QMainWindow(parent), settings_(settings), warning_activity_shown(false), warning_pause_shown(false)
+MainWin::MainWin(Settings &settings, QWidget *parent /* = nullptr */)	: QMainWindow(parent), settings_(settings), warning_activity_shown_(false), warning_pause_shown_(false)
 {
 	content_widget_ = new ContentWidget(settings, this);
 	setCentralWidget(content_widget_);
@@ -28,19 +28,28 @@ void MainWin::updateAllTimes(qint64 t_active, qint64 t_pause)
 	content_widget_->setAllTimes(t_active, t_pause);
 	tray_icon_->setToolTip(content_widget_->getTooltip());
 
-	const QString t_active_string = QDateTime::fromTime_t(t_active/1000).toUTC().toString("hh:mm:ss");
-	const QString t_pause_string = QDateTime::fromTime_t(t_pause/1000).toUTC().toString("hh:mm:ss");
+	if((content_widget_->isGUIinActivity()) && (settings_.showTooMuchActivityWarning() || settings_.showTooMuchActivityWarning()))
+		showActivityWarnings(t_active, t_pause);
+}
 
-	if ((!warning_activity_shown) && (content_widget_->isGUIinActivity())
+void MainWin::showActivityWarnings(const qint64 &t_active, const qint64 &t_pause)
+{
+	auto time_to_string = [](qint64 time)
+	{
+		return QDateTime::fromTime_t(time/1000).toUTC().toString("hh:mm:ss");
+	};
+
+	if ((!warning_activity_shown_)
 			&& (t_active > settings_.getWarnTimeActivityMsec())) {
-		warning_activity_shown = true;
-		showMsgBox("Total activity time: " + t_active_string);
+		warning_activity_shown_ = true;
+		showMsgBox("Total activity time: " + time_to_string(t_active));
 	}
 
-	if ((!warning_pause_shown) && (content_widget_->isGUIinActivity())
-			&& (t_active > settings_.getWarnTimeNoPauseMsec()) && (t_pause < settings_.getPauseTimeForWarnTimeNoPauseMsec())) {
-		warning_pause_shown = true;
-		showMsgBox("Pause time: " + t_pause_string + "\nwith activity time: " + t_active_string);
+	if ((!warning_pause_shown_)
+			&& (t_active > settings_.getWarnTimeNoPauseMsec())
+			&& (t_pause < settings_.getPauseTimeForWarnTimeNoPauseMsec())) {
+		warning_pause_shown_ = true;
+		showMsgBox("Pause time: " + time_to_string(t_pause) + "\nwith activity time: " + time_to_string(t_active));
 	}
 }
 
@@ -53,6 +62,14 @@ void MainWin::showMsgBox(QString text)
 	msgBox.setText(text);
 	msgBox.setIcon(QMessageBox::Warning);
 	msgBox.exec();
+}
+
+void MainWin::reactOnLockState(LockEvent event)
+{
+	if (event == LockEvent::Unlock)
+		content_widget_->setGUItoActivity();
+	else if (event == LockEvent::LongOngoingLock)
+		content_widget_->setGUItoPause();
 }
 
 void MainWin::iconActivated(QSystemTrayIcon::ActivationReason reason)
@@ -103,17 +120,10 @@ void MainWin::start()
 	if (settings_.isAutostartTimingEnabled())
 		content_widget_->pressedStartPauseButton();
 
-	warning_activity_shown = !settings_.showTooMuchActivityWarning();
-	warning_pause_shown = !settings_.showNoPauseWarning();
+	warning_activity_shown_ = !settings_.showTooMuchActivityWarning();
+	warning_pause_shown_ = !settings_.showNoPauseWarning();
 }
 
-void MainWin::reactOnLockState(LockEvent event)
-{
-	if (event == LockEvent::Unlock)
-		content_widget_->setGUItoActivity();
-	else if (event == LockEvent::LongOngoingLock)
-		content_widget_->setGUItoPause();
-}
 
 
 
