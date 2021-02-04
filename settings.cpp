@@ -7,6 +7,7 @@ Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniForm
 	readSettingsFile();
 	sfile_.clear();
 	writeSettingsFile();
+	sfile_.sync();
 }
 
 void Settings::readSettingsFile()
@@ -91,6 +92,7 @@ qint64 Settings::getWarnTimeActivityMsec() const
 
 void Settings::setAutopauseState(const bool autopause_enabled)
 {
+	sfile_.sync();
 	readSettingsFile();
 	autopause_enabled_ = autopause_enabled;
 	writeSettingsFile();
