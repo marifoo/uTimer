@@ -123,12 +123,10 @@ void MainWin::start()
 	if (settings_.isPinnedStartEnabled())
 		toggleAlwaysOnTopFlag();
 
-	if(settings_.isMinimizedStartEnabled())
+	if (settings_.isMinimizedStartEnabled())
 		minToTray();
 	else
 		showMainWin();
-
-	resize(0,0);
 
 	if (settings_.isAutostartTimingEnabled())
 		content_widget_->pressedStartPauseButton();
