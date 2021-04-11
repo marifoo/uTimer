@@ -1,5 +1,6 @@
 #include "settings.h"
 #include "helpers.h"
+#include "logger.h"
 
 Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniFormat)
 {
@@ -8,6 +9,9 @@ Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniForm
 	sfile_.clear();
 	writeSettingsFile();
 	sfile_.sync();
+
+	if (log_to_file_)
+		Logger::Log("Settings are AP.en = " + QString(autopause_enabled_) + " AP.min = " + QString(backpause_min_));
 }
 
 void Settings::readSettingsFile()
@@ -22,6 +26,7 @@ void Settings::readSettingsFile()
 	pause_for_warning_nopause_min_ = 30;
 	warning_activity_ = sfile_.value("uTimer/show_warning_after_9h45min_activity", false).toBool();
 	warning_activity_min_ = 9*60+45;
+	log_to_file_ = sfile_.value("uTimer/debug_log_to_file", false).toBool();
 }
 
 void Settings::writeSettingsFile()
@@ -33,6 +38,7 @@ void Settings::writeSettingsFile()
 	sfile_.setValue("uTimer/start_pinned_to_top", start_pinned_to_top_);
 	sfile_.setValue("uTimer/show_warning_when_not_30min_pause_after_6h_activity", warning_nopause_);
 	sfile_.setValue("uTimer/show_warning_after_9h45min_activity", warning_activity_);
+	sfile_.setValue("uTimer/debug_log_to_file", log_to_file_);
 }
 
 bool Settings::isAutopauseEnabled() const
@@ -63,6 +69,11 @@ bool Settings::showNoPauseWarning() const
 bool Settings::showTooMuchActivityWarning() const
 {
 	return warning_activity_;
+}
+
+bool Settings::logToFile() const
+{
+	return log_to_file_;
 }
 
 QString Settings::getBackpauseMin() const

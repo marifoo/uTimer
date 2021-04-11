@@ -19,6 +19,7 @@ private:
 	int warning_nopause_min_;
 	int pause_for_warning_nopause_min_;
 	int warning_activity_min_;
+	bool log_to_file_;
 	void readSettingsFile();
 	void writeSettingsFile();
 
@@ -30,6 +31,7 @@ public:
 	bool isPinnedStartEnabled() const;
 	bool showNoPauseWarning() const;
 	bool showTooMuchActivityWarning() const;
+	bool logToFile() const;
 	QString getBackpauseMin() const;
 	qint64 getBackpauseMsec() const;
 	qint64 getPauseTimeForWarnTimeNoPauseMsec() const;
