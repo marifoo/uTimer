@@ -10,7 +10,8 @@ HEADERS = \
    $$PWD/lockstatewatcher.h \
    $$PWD/settings.h \
    $$PWD/types.h \
-   $$PWD/helpers.h
+   $$PWD/helpers.h \
+   logger.h
 
 SOURCES = \
    $$PWD/contentwidget.cpp \
@@ -19,7 +20,8 @@ SOURCES = \
    $$PWD/timetracker.cpp \
    $$PWD/lockstatewatcher.cpp \
    $$PWD/settings.cpp \
-   $$PWD/helpers.cpp
+   $$PWD/helpers.cpp \
+   logger.cpp
 
 INCLUDEPATH = \
     $$PWD/.
