@@ -9,9 +9,6 @@ Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniForm
 	sfile_.clear();
 	writeSettingsFile();
 	sfile_.sync();
-
-	if (log_to_file_)
-		Logger::Log("Settings are AP.en = " + QString(autopause_enabled_) + " AP.min = " + QString(backpause_min_));
 }
 
 void Settings::readSettingsFile()
@@ -39,6 +36,9 @@ void Settings::writeSettingsFile()
 	sfile_.setValue("uTimer/show_warning_when_not_30min_pause_after_6h_activity", warning_nopause_);
 	sfile_.setValue("uTimer/show_warning_after_9h45min_activity", warning_activity_);
 	sfile_.setValue("uTimer/debug_log_to_file", log_to_file_);
+
+	if (log_to_file_)
+		Logger::Log("Current settings are AP.en = " + QString::number(autopause_enabled_) + " AP.min = " + QString::number(backpause_min_));
 }
 
 bool Settings::isAutopauseEnabled() const
@@ -111,6 +111,7 @@ void Settings::setAutopauseState(const bool autopause_enabled)
 
 void Settings::setPinToTopState(const bool pin2top_enabled)
 {
+	sfile_.sync();
 	start_pinned_to_top_ = pin2top_enabled;
 	writeSettingsFile();
 }

@@ -21,14 +21,12 @@ LockStateWatcher::Event LockStateWatcher::getEvent() const
 		}
 		else {
 			CloseDesktop(desktop);
-			if (settings_.logToFile())
-				Logger::Log("LockOrUnlock_1 detected");
 			return Event::LockOrUnlock;
 		}
 	}
 	else {
 		if (settings_.logToFile())
-			Logger::Log("LockOrUnlock_2 detected");
+			Logger::Log("[LOCK] Lock Or Unlock detected !?!?");
 		return Event::LockOrUnlock;
 	}
 }
@@ -36,21 +34,25 @@ LockStateWatcher::Event LockStateWatcher::getEvent() const
 LockEvent LockStateWatcher::determineLockEvent(const Event &e)
 {
 	const auto lock_events_in_buffer = std::count(lock_events_.begin(), lock_events_.end(), Event::LockOrUnlock);
-	LockEvent ret;
 
-	if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock) && (lock_events_.front() == Event::None) && (lock_events_in_buffer < buffer_threshold))
-		ret = LockEvent::Lock;
-	else if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock) && (lock_events_.front() == Event::LockOrUnlock) && (lock_events_in_buffer > buffer_threshold))
-		ret = LockEvent::Unlock;
-	else if (lock_timer_.isValid() && (lock_timer_.elapsed() >= settings_.getBackpauseMsec()))
-		ret = LockEvent::LongOngoingLock;
-	else
-		ret = LockEvent::None;
-
-	if ((settings_.logToFile()) && (ret != LockEvent::None))
-		Logger::Log(QString(": LockEvent ") + (((int)ret==1) ? "Unlock" : (((int)ret==2) ? "Lock" : "LongLock")) + " determined");
-
-	return ret;
+	if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock) && (lock_events_.front() == Event::None) && (lock_events_in_buffer < buffer_threshold)) {
+		if (settings_.logToFile())
+			Logger::Log("[LOCK] >> Lock determined");
+		return LockEvent::Lock;
+	}
+	else if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock) && (lock_events_.front() == Event::LockOrUnlock) && (lock_events_in_buffer > buffer_threshold)) {
+		if (settings_.logToFile())
+			Logger::Log("[LOCK] Unlock determined <<");
+		return LockEvent::Unlock;
+	}
+	else if (lock_timer_.isValid() && (lock_timer_.elapsed() >= settings_.getBackpauseMsec())) {
+		if (settings_.logToFile())
+			Logger::Log("[LOCK] Ongoing Lock is long enough to be counted as a Pause");
+		return LockEvent::LongOngoingLock;
+	}
+	else {
+		return LockEvent::None;
+	}
 }
 
 void LockStateWatcher::update()

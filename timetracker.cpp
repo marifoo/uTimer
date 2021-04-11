@@ -1,6 +1,7 @@
 #include "timetracker.h"
 #include <QtDebug>
 #include <QDateTime>
+#include "logger.h"
 
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent) : QObject(parent), settings_(settings)
 {
@@ -13,12 +14,16 @@ void TimeTracker::startTimer()
 		qint64 t_pause = timer_.restart();
 		pauses_.push_back(t_pause);
 		mode_ = Mode::Activity;
+		if (settings_.logToFile())
+			Logger::Log("[TIMER] > Timer unpaused");
 	}
 	else if (mode_ == Mode::None) {
 		activities_.clear();
 		pauses_.clear();
 		timer_.start();
 		mode_ = Mode::Activity;
+		if (settings_.logToFile())
+			Logger::Log("[TIMER] >> Timer started");
 	}
 }
 
@@ -28,6 +33,8 @@ void TimeTracker::pauseTimer()
 		qint64 t_active = timer_.restart();
 		activities_.push_back(t_active);
 		mode_ = Mode::Pause;
+		if (settings_.logToFile())
+			Logger::Log("[TIMER] Timer paused <");
 	}
 }
 
@@ -38,6 +45,8 @@ void TimeTracker::backpauseTimer()
 		pauses_.push_back(backpause_msec);
 		activities_.push_back(-backpause_msec);
 		pauseTimer();
+		if (settings_.logToFile())
+			Logger::Log("[TIMER] Timer retroactively added Pause");
 	}
 }
 
@@ -47,11 +56,15 @@ void TimeTracker::stopTimer()
 		qint64 t_pause = timer_.elapsed();
 		pauses_.push_back(t_pause);
 		mode_ = Mode::None;
+		if (settings_.logToFile())
+			Logger::Log("[TIMER] Timer unpaused < and stopped <<");
 	}
 	else if (mode_ == Mode::Activity) {
 		qint64 t_active = timer_.elapsed();
 		activities_.push_back(t_active);
 		mode_ = Mode::None;
+		if (settings_.logToFile())
+			Logger::Log("[TIMER] Timer stopped <<");
 	}
 }
 

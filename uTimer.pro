@@ -1,6 +1,3 @@
-# Created by and for Qt Creator This file was created for editing the project sources only.
-# You may attempt to use it for building too, by modifying this file here.
-
 TARGET = uTimer
 
 HEADERS = \
@@ -11,7 +8,7 @@ HEADERS = \
    $$PWD/settings.h \
    $$PWD/types.h \
    $$PWD/helpers.h \
-   logger.h
+   $$PWD/logger.h
 
 SOURCES = \
    $$PWD/contentwidget.cpp \
@@ -21,7 +18,7 @@ SOURCES = \
    $$PWD/lockstatewatcher.cpp \
    $$PWD/settings.cpp \
    $$PWD/helpers.cpp \
-   logger.cpp
+   $$PWD/logger.cpp
 
 INCLUDEPATH = \
     $$PWD/.

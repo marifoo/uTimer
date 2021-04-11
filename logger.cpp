@@ -7,7 +7,7 @@ Logger::Logger()
 	logfile_ = new QFile();
 	logfile_->setFileName("utimer.log");
 	logfile_->open(QIODevice::ReadWrite | QIODevice::Truncate | QIODevice::Text);
-	log("uTimer started");
+	log("uTimer Startup <3");
 }
 
 void Logger::Log(const QString &text)
@@ -27,6 +27,7 @@ void Logger::log(const QString &text)
 
 Logger::~Logger()
 {
+	log("uTimer Shutdown");
 	if (logfile_ != 0)
 		logfile_->close();
 }
