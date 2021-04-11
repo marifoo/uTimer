@@ -2,6 +2,7 @@
 #include <QDebug>
 #include <QDateTime>
 #include <algorithm>
+#include "logger.h"
 
 LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent) : QWidget(parent), settings_(settings)
 {
@@ -20,21 +21,36 @@ LockStateWatcher::Event LockStateWatcher::getEvent() const
 		}
 		else {
 			CloseDesktop(desktop);
+			if (settings_.logToFile())
+				Logger::Log("LockOrUnlock_1 detected");
+			return Event::LockOrUnlock;
 		}
 	}
-	return Event::LockOrUnlock;
+	else {
+		if (settings_.logToFile())
+			Logger::Log("LockOrUnlock_2 detected");
+		return Event::LockOrUnlock;
+	}
 }
 
 LockEvent LockStateWatcher::determineLockEvent(const Event &e)
 {
-	if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock) && (lock_events_.front() == Event::None))
-		return LockEvent::Lock;
-	else if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock) && (lock_events_.front() == Event::LockOrUnlock))
-		return LockEvent::Unlock;
+	const auto lock_events_in_buffer = std::count(lock_events_.begin(), lock_events_.end(), Event::LockOrUnlock);
+	LockEvent ret;
+
+	if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock) && (lock_events_.front() == Event::None) && (lock_events_in_buffer < buffer_threshold))
+		ret = LockEvent::Lock;
+	else if ((e == Event::None) && (lock_events_.back() == Event::LockOrUnlock) && (lock_events_.front() == Event::LockOrUnlock) && (lock_events_in_buffer > buffer_threshold))
+		ret = LockEvent::Unlock;
 	else if (lock_timer_.isValid() && (lock_timer_.elapsed() >= settings_.getBackpauseMsec()))
-		return LockEvent::LongOngoingLock;
+		ret = LockEvent::LongOngoingLock;
 	else
-		return LockEvent::None;
+		ret = LockEvent::None;
+
+	if ((settings_.logToFile()) && (ret != LockEvent::None))
+		Logger::Log(QString(": LockEvent ") + (((int)ret==1) ? "Unlock" : (((int)ret==2) ? "Lock" : "LongLock")) + " determined");
+
+	return ret;
 }
 
 void LockStateWatcher::update()
