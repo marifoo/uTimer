@@ -31,8 +31,6 @@ QT += widgets
 
 LIBS += -lUser32
 
-QMAKE_CXXFLAGS += -Wall -Wextra
-
 RESOURCES += \
     icon.qrc
 
