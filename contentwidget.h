@@ -28,7 +28,7 @@ private:
 	QPushButton *mintotray_button_;
 	QPushButton * pintotop_button_;
 	QPushButton *autopause_button_;
-	Qt::GlobalColor button_hold_color_;
+	QColor button_hold_color_;
 	QString autopause_tooltip_;
 	QString activity_time_tooltip_base_;
 

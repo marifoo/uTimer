@@ -93,7 +93,7 @@ void LockStateWatcher::update()
 	}
 	else if (lock_event == LockEvent::Unlock) {
 		if (settings_.logToFile() && lock_timer_.isValid())
-			Logger::Log("[LOCK] Current Lock Duration=" + QString::number(lock_timer_.elapsed()));
+			Logger::Log("[LOCK] Current Lock Duration = " + QString::number(lock_timer_.elapsed()) + "ms");
 		lock_timer_.invalidate();
 		if (settings_.logToFile())
 			Logger::Log("[LOCK] Unlock determined <<");
