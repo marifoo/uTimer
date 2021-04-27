@@ -14,7 +14,7 @@ Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniForm
 void Settings::readSettingsFile()
 {
 	autostart_timing_ = sfile_.value("uTimer/press_start_button_on_app_start", true).toBool();
-	autopause_enabled_ = sfile_.value("uTimer/autopause_enabled", false).toBool();
+	autopause_enabled_ = sfile_.value("uTimer/autopause_enabled", true).toBool();
 	backpause_min_ = qBound(0, sfile_.value("uTimer/autopause_threshold_minutes", 15).toInt(), 99);
 	start_minimized_ = sfile_.value("uTimer/start_minimized_to_tray", false).toBool();
 	start_pinned_to_top_ = sfile_.value("uTimer/start_pinned_to_top", false).toBool();
@@ -23,7 +23,7 @@ void Settings::readSettingsFile()
 	pause_for_warning_nopause_min_ = 30;
 	warning_activity_ = sfile_.value("uTimer/show_warning_after_9h45min_activity", false).toBool();
 	warning_activity_min_ = 9*60+45;
-	log_to_file_ = sfile_.value("uTimer/debug_log_to_file", false).toBool();
+	log_to_file_ = sfile_.value("uTimer/debug_log_to_file", true).toBool();
 }
 
 void Settings::writeSettingsFile()
