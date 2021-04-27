@@ -7,7 +7,7 @@
 
 
 
-MainWin::MainWin(Settings &settings, QWidget *parent)	: QMainWindow(parent), settings_(settings), warning_activity_shown_(false), warning_pause_shown_(false)
+MainWin::MainWin(Settings &settings, QWidget *parent)	: QMainWindow(parent), settings_(settings), warning_activity_shown_(false), warning_pause_shown_(false), was_active_before_autopause_(false)
 {
 	setupCentralWidget(settings);
 
@@ -79,10 +79,22 @@ void MainWin::showMsgBox(const QString &text)
 
 void MainWin::reactOnLockState(LockEvent event)
 {
-	if (event == LockEvent::Unlock)
-		content_widget_->setGUItoActivity();
-	else if (event == LockEvent::LongOngoingLock)
-		content_widget_->setGUItoPause();
+	if (settings_.isAutopauseEnabled()) {
+		if (event == LockEvent::LongOngoingLock) {
+			if (content_widget_->isGUIinActivity()) {
+				was_active_before_autopause_ = true;
+				content_widget_->setGUItoPause();
+			}
+			else {
+				was_active_before_autopause_ = false;
+			}
+		}
+		else if (event == LockEvent::Unlock) {
+			if (was_active_before_autopause_)
+				content_widget_->setGUItoActivity();
+			was_active_before_autopause_ = false;
+		}
+	}
 }
 
 void MainWin::iconActivated(QSystemTrayIcon::ActivationReason reason)

@@ -16,11 +16,12 @@ class TimeTracker : public QObject
 private:
 	enum class Mode {Activity, Pause, None};
 
+	const Settings & settings_;
 	QElapsedTimer timer_;
 	std::vector<qint64> activities_;
 	std::vector<qint64> pauses_;
 	Mode mode_;
-	const Settings & settings_;
+	bool was_active_before_autopause_;	
 
 	qint64 getActiveTime() const;
 	qint64 getPauseTime() const;

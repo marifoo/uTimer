@@ -3,10 +3,8 @@
 #include <QDateTime>
 #include "logger.h"
 
-TimeTracker::TimeTracker(const Settings &settings, QObject *parent) : QObject(parent), settings_(settings)
-{
-	mode_ = Mode::None;
-}
+TimeTracker::TimeTracker(const Settings &settings, QObject *parent) : QObject(parent), settings_(settings), mode_(Mode::None), was_active_before_autopause_(false)
+{ }
 
 void TimeTracker::startTimer()
 {
@@ -41,12 +39,14 @@ void TimeTracker::pauseTimer()
 void TimeTracker::backpauseTimer()
 {
 	if (mode_ == Mode::Activity) {
-		qint64 backpause_msec = settings_.getBackpauseMsec();
-		pauses_.push_back(backpause_msec);
-		activities_.push_back(-backpause_msec);
+		if (settings_.isAutopauseEnabled()) {
+			qint64 backpause_msec = settings_.getBackpauseMsec();
+			pauses_.push_back(backpause_msec);
+			activities_.push_back(-backpause_msec);
+			if (settings_.logToFile())
+				Logger::Log("[TIMER] Timer retroactively going to Pause");
+		}
 		pauseTimer();
-		if (settings_.logToFile())
-			Logger::Log("[TIMER] Timer retroactively added Pause");
 	}
 }
 
@@ -78,10 +78,22 @@ void TimeTracker::useTimerViaButton(Button button) {
 }
 
 void TimeTracker::useTimerViaLockEvent(LockEvent event) {
-	if (event == LockEvent::Unlock)
-		startTimer();
-	else if (event == LockEvent::LongOngoingLock)
-		backpauseTimer();
+	if (settings_.isAutopauseEnabled()) {
+		if (event == LockEvent::LongOngoingLock) {
+				if (mode_ == Mode::Activity) {
+					was_active_before_autopause_ = true;
+					backpauseTimer();
+				}
+				else {
+					was_active_before_autopause_ = false;
+				}
+			}
+		else if (event == LockEvent::Unlock) {
+			if (was_active_before_autopause_)
+				startTimer();
+			was_active_before_autopause_ = false;
+		}
+	}
 }
 
 void TimeTracker::sendTimes()

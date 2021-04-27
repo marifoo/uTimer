@@ -18,6 +18,7 @@ private:
 
 	bool warning_activity_shown_;
 	bool warning_pause_shown_;
+	bool was_active_before_autopause_;
 
 	void updateTrayIconTooltip(QString activity, QString pause);
 	void showMsgBox(const QString &text);
