@@ -14,12 +14,12 @@ Written by [Mario H.](https://github.com/marifoo)
 
 Icon by [icons8.com](https://icons8.com)
 
-Build with [Qt 5.14](https://www.qt.io) and [MinGW-w64 7.3.0](https://mingw-w64.org)
+Build with [Qt 5.14](https://www.qt.io) and MSVC2017 Compiler
 
 
 License
 ------
-Copyright (c) 2020 Mario H.
+Copyright (c) 2021 Mario H.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
