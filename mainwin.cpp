@@ -7,7 +7,7 @@
 
 
 
-MainWin::MainWin(Settings &settings, QWidget *parent /* = nullptr */)	: QMainWindow(parent), settings_(settings), warning_activity_shown_(false), warning_pause_shown_(false)
+MainWin::MainWin(Settings &settings, QWidget *parent)	: QMainWindow(parent), settings_(settings), warning_activity_shown_(false), warning_pause_shown_(false)
 {
 	setupCentralWidget(settings);
 

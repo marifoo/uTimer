@@ -14,17 +14,16 @@
 class LockStateWatcher : public QWidget
 {
 	Q_OBJECT
-private:
-	enum class Event {None, LockOrUnlock};
 
+private:
 	const Settings & settings_;
 	QElapsedTimer lock_timer_;
-	std::deque<Event> lock_events_;
-	const decltype(lock_events_)::size_type buffer_size_with_100ms_timing_ = 9;
-	const decltype(lock_events_)::difference_type buffer_threshold = 5;
+	std::deque<bool> lock_state_buffer_;
+	const std::deque<bool> buffer_for_lock;
+	const std::deque<bool> buffer_for_unlock;
 
-	Event getEvent() const;
-	LockEvent determineLockEvent(const Event &e);
+	bool isSessionLocked();
+	LockEvent determineLockEvent(bool session_locked);
 
 public:
 	explicit LockStateWatcher(const Settings & settings, QWidget *parent = nullptr);
