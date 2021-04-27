@@ -9,7 +9,7 @@ qint64 convMinToMsec(const int &minutes)
 
 QString convMSecToTimeStr(const qint64 &time)
 {
-	return (QDateTime::fromTime_t(time/1000).toUTC().toString("hh:mm:ss"));
+	return (QDateTime::fromTime_t(static_cast<unsigned int>(time/1000)).toUTC().toString("hh:mm:ss"));
 }
 
 void toggleButtonColor(QPushButton * const button, const QColor &color)

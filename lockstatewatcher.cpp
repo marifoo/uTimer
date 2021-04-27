@@ -18,7 +18,6 @@ LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent)
 bool LockStateWatcher::isSessionLocked()
 {
 	// https://stackoverflow.com/questions/29326685/c-check-if-computer-is-locked/43055326#43055326
-
 	typedef BOOL( PASCAL * WTSQuerySessionInformation )( HANDLE hServer, DWORD SessionId, WTS_INFO_CLASS WTSInfoClass, LPTSTR* ppBuffer, DWORD* pBytesReturned );
 	typedef void ( PASCAL * WTSFreeMemory )( PVOID pMemory );
 
@@ -31,40 +30,33 @@ bool LockStateWatcher::isSessionLocked()
 	WTSQuerySessionInformation pWTSQuerySessionInformation = NULL;
 	WTSFreeMemory pWTSFreeMemory = NULL;
 
-	HMODULE hLib = LoadLibraryW( L"wtsapi32.dll" );
-	if( !hLib )
-	{
-			return false;
+	HMODULE hLib = LoadLibraryW(L"wtsapi32.dll");
+	if (!hLib) {
+		return false;
 	}
-	pWTSQuerySessionInformation = (WTSQuerySessionInformation) GetProcAddress( hLib, "WTSQuerySessionInformationW" );
-	if( pWTSQuerySessionInformation )
-	{
-			pWTSFreeMemory = (WTSFreeMemory) GetProcAddress( hLib, "WTSFreeMemory" );
-			if( pWTSFreeMemory != NULL )
-			{
-					DWORD dwSessionID = WTSGetActiveConsoleSessionId();
-					if( pWTSQuerySessionInformation( WTS_CURRENT_SERVER_HANDLE, dwSessionID, wtsic, &ppBuffer, &dwBytesReturned ) )
-					{
-							if( dwBytesReturned > 0 )
-							{
-									pInfo = (WTSINFOEXW*) ppBuffer;
-									if( pInfo->Level == 1 )
-									{
-											dwFlags = pInfo->Data.WTSInfoExLevel1.SessionFlags;
-									}
-									if( dwFlags == WTS_SESSIONSTATE_LOCK )
-									{
-											bRet = true;
-									}
-							}
-							pWTSFreeMemory( ppBuffer );
-							ppBuffer = NULL;
+
+	pWTSQuerySessionInformation = (WTSQuerySessionInformation) GetProcAddress(hLib, "WTSQuerySessionInformationW");
+	if (pWTSQuerySessionInformation) {
+		pWTSFreeMemory = (WTSFreeMemory) GetProcAddress(hLib, "WTSFreeMemory");
+		if (pWTSFreeMemory != NULL) {
+			DWORD dwSessionID = WTSGetActiveConsoleSessionId();
+			if (pWTSQuerySessionInformation( WTS_CURRENT_SERVER_HANDLE, dwSessionID, wtsic, &ppBuffer, &dwBytesReturned)) {
+				if (dwBytesReturned > 0) {
+					pInfo = (WTSINFOEXW*) ppBuffer;
+					if (pInfo->Level == 1) {
+						dwFlags = pInfo->Data.WTSInfoExLevel1.SessionFlags;
 					}
+					if (dwFlags == WTS_SESSIONSTATE_LOCK) {
+						bRet = true;
+					}
+				}
+				pWTSFreeMemory(ppBuffer);
+				ppBuffer = NULL;
 			}
+		}
 	}
-	if( hLib != NULL )
-	{
-			FreeLibrary( hLib );
+	if (hLib != NULL) {
+		FreeLibrary(hLib);
 	}
 	return bRet;
 }
