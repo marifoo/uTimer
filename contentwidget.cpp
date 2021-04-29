@@ -7,10 +7,8 @@
 #include <QApplication>
 #include "helpers.h"
 
-ContentWidget::ContentWidget(Settings & settings, QWidget *parent) : QWidget(parent), settings_(settings)
+ContentWidget::ContentWidget(Settings & settings, QWidget *parent) : QWidget(parent), settings_(settings), button_hold_color_(QColor(180,216,228,255))
 {
-	button_hold_color_ = QColor(195,229,239,255);
-
 	setupGUI();
 
 	QObject::connect(startpause_button_, SIGNAL(clicked()), this, SLOT(pressedStartPauseButton()));

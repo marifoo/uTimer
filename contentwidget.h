@@ -13,7 +13,10 @@
 class ContentWidget : public QWidget
 {
 	Q_OBJECT
+
 private:
+	Settings & settings_;
+
 	QVBoxLayout *rows_;
 	QHBoxLayout *activity_row_;
 	QLabel *activity_text_;
@@ -28,11 +31,9 @@ private:
 	QPushButton *mintotray_button_;
 	QPushButton * pintotop_button_;
 	QPushButton *autopause_button_;
-	QColor button_hold_color_;
+	const QColor button_hold_color_;
 	QString autopause_tooltip_;
-	QString activity_time_tooltip_base_;
-
-	Settings & settings_;
+	QString activity_time_tooltip_base_;	
 
 	void setupGUI();
 	void setupTimeRows();
