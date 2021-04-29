@@ -17,32 +17,32 @@ LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent)
 
 bool LockStateWatcher::isSessionLocked()
 {
-	// https://stackoverflow.com/questions/29326685/c-check-if-computer-is-locked/43055326#43055326
+	// taken from https://stackoverflow.com/questions/29326685/c-check-if-computer-is-locked/43055326#43055326
 	typedef BOOL( PASCAL * WTSQuerySessionInformation )( HANDLE hServer, DWORD SessionId, WTS_INFO_CLASS WTSInfoClass, LPTSTR* ppBuffer, DWORD* pBytesReturned );
 	typedef void ( PASCAL * WTSFreeMemory )( PVOID pMemory );
 
-	WTSINFOEXW * pInfo = NULL;
+	WTSINFOEXW * pInfo = nullptr;
 	WTS_INFO_CLASS wtsic = WTSSessionInfoEx;
 	bool bRet = false;
-	LPTSTR ppBuffer = NULL;
+	LPTSTR ppBuffer = nullptr;
 	DWORD dwBytesReturned = 0;
 	LONG dwFlags = 0;
-	WTSQuerySessionInformation pWTSQuerySessionInformation = NULL;
-	WTSFreeMemory pWTSFreeMemory = NULL;
+	WTSQuerySessionInformation pWTSQuerySessionInformation = nullptr;
+	WTSFreeMemory pWTSFreeMemory = nullptr;
 
 	HMODULE hLib = LoadLibraryW(L"wtsapi32.dll");
 	if (!hLib) {
 		return false;
 	}
 
-	pWTSQuerySessionInformation = (WTSQuerySessionInformation) GetProcAddress(hLib, "WTSQuerySessionInformationW");
+	pWTSQuerySessionInformation = reinterpret_cast<WTSQuerySessionInformation>(GetProcAddress(hLib, "WTSQuerySessionInformationW"));
 	if (pWTSQuerySessionInformation) {
-		pWTSFreeMemory = (WTSFreeMemory) GetProcAddress(hLib, "WTSFreeMemory");
-		if (pWTSFreeMemory != NULL) {
+		pWTSFreeMemory = reinterpret_cast<WTSFreeMemory>(GetProcAddress(hLib, "WTSFreeMemory"));
+		if (pWTSFreeMemory != nullptr) {
 			DWORD dwSessionID = WTSGetActiveConsoleSessionId();
 			if (pWTSQuerySessionInformation( WTS_CURRENT_SERVER_HANDLE, dwSessionID, wtsic, &ppBuffer, &dwBytesReturned)) {
 				if (dwBytesReturned > 0) {
-					pInfo = (WTSINFOEXW*) ppBuffer;
+					pInfo = reinterpret_cast<WTSINFOEXW*>(ppBuffer);
 					if (pInfo->Level == 1) {
 						dwFlags = pInfo->Data.WTSInfoExLevel1.SessionFlags;
 					}
@@ -51,11 +51,11 @@ bool LockStateWatcher::isSessionLocked()
 					}
 				}
 				pWTSFreeMemory(ppBuffer);
-				ppBuffer = NULL;
+				ppBuffer = nullptr;
 			}
 		}
 	}
-	if (hLib != NULL) {
+	if (hLib != nullptr) {
 		FreeLibrary(hLib);
 	}
 	return bRet;
