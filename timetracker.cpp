@@ -2,9 +2,15 @@
 #include <QtDebug>
 #include <QDateTime>
 #include "logger.h"
+#include "helpers.h"
 
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent) : QObject(parent), settings_(settings), mode_(Mode::None), was_active_before_autopause_(false)
 { }
+
+TimeTracker::~TimeTracker()
+{
+	stopTimer();
+}
 
 void TimeTracker::startTimer()
 {
@@ -56,15 +62,19 @@ void TimeTracker::stopTimer()
 		qint64 t_pause = timer_.elapsed();
 		pauses_.push_back(t_pause);
 		mode_ = Mode::None;
-		if (settings_.logToFile())
+		if (settings_.logToFile()) {
 			Logger::Log("[TIMER] Timer unpaused < and stopped <<");
+			Logger::Log("[TIMER] Total Activity Time was " + convMSecToTimeStr(getActiveTime()) + ", Total Pause Time was " + convMSecToTimeStr(getPauseTime()));
+		}
 	}
 	else if (mode_ == Mode::Activity) {
 		qint64 t_active = timer_.elapsed();
 		activities_.push_back(t_active);
 		mode_ = Mode::None;
-		if (settings_.logToFile())
+		if (settings_.logToFile()) {
 			Logger::Log("[TIMER] Timer stopped <<");
+			Logger::Log("[TIMER] Total Activity Time was " + convMSecToTimeStr(getActiveTime()) + ", Total Pause Time was " + convMSecToTimeStr(getPauseTime()));
+		}
 	}
 }
 

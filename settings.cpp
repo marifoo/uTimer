@@ -38,7 +38,7 @@ void Settings::writeSettingsFile()
 	sfile_.setValue("uTimer/debug_log_to_file", log_to_file_);
 
 	if (log_to_file_)
-		Logger::Log("Current settings are AP.en = " + QString::number(autopause_enabled_) + " AP.min = " + QString::number(backpause_min_));
+		Logger::Log("Current Autopause Settings are: Enabled = " + QString::number(autopause_enabled_) + "; Minutes = " + QString::number(backpause_min_));
 }
 
 bool Settings::isAutopauseEnabled() const

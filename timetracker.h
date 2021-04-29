@@ -33,6 +33,7 @@ private:
 
 public:
 	explicit TimeTracker(const Settings & settings, QObject *parent = nullptr);
+	~TimeTracker();
 
 signals:
 	void sendAllTimes(qint64 t_active, qint64 t_pause);
