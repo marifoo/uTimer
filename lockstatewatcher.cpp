@@ -95,7 +95,7 @@ void LockStateWatcher::update()
 
 	if (lock_timer_.isValid() && (lock_timer_.elapsed() >= settings_.getBackpauseMsec())) {
 		if (settings_.logToFile() && lock_timer_.isValid())
-			Logger::Log("[LOCK] Current Lock Duration=" + QString::number(lock_timer_.elapsed()));
+			Logger::Log("[LOCK] Current Lock Duration = " + QString::number(lock_timer_.elapsed()) + "ms");
 		lock_timer_.invalidate();
 		if (settings_.logToFile())
 			Logger::Log("[LOCK] Ongoing Lock is long enough to be counted as a Pause");
