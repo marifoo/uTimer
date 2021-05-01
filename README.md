@@ -7,9 +7,13 @@ Main feature is *Auto-Pause*, which sends the timer retroactively into Pause mod
 This app is open-source and available at [Github](https://github.com/marifoo/uTimer). The latest pre-compiled release can be found there under *Releases*.
 
 
+Screenshot
+------
+![Screenshot](screenshot.png)
+
+
 Info
 ------
-
 Written by [Mario H.](https://github.com/marifoo)
 
 Icon by [icons8.com](https://icons8.com)
