@@ -33,9 +33,6 @@ private:
 	Mode mode_;
 	bool was_active_before_autopause_;
 
-	qint64 getActiveTime() const;
-	qint64 getPauseTime() const;
-
 	void startTimer();
 	void stopTimer();
 	void pauseTimer();
@@ -44,6 +41,11 @@ private:
 public:
 	explicit TimeTracker(const Settings & settings, QObject *parent = nullptr);
 	~TimeTracker();
+
+	qint64 getActiveTime() const;
+	qint64 getPauseTime() const;
+	const std::deque<TimeDuration>& getDurations() const;
+    void setDurationType(size_t idx, DurationType type); // Add setter
 
 signals:
 	void sendAllTimes(qint64 t_active, qint64 t_pause);

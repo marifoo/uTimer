@@ -7,9 +7,9 @@
 
 
 
-MainWin::MainWin(Settings &settings, QWidget *parent)	: QMainWindow(parent), settings_(settings), warning_activity_shown_(false), warning_pause_shown_(false), was_active_before_autopause_(false)
+MainWin::MainWin(Settings& settings, TimeTracker& timetracker, QWidget *parent)	: QMainWindow(parent), settings_(settings), warning_activity_shown_(false), warning_pause_shown_(false), was_active_before_autopause_(false)
 {
-	setupCentralWidget(settings);
+	setupCentralWidget(settings, timetracker);
 
 	setupIcon();
 
@@ -17,9 +17,9 @@ MainWin::MainWin(Settings &settings, QWidget *parent)	: QMainWindow(parent), set
 	setWindowFlags(windowFlags() &(~Qt::WindowMaximizeButtonHint));
 }
 
-void MainWin::setupCentralWidget(Settings &settings)
+void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
 {
-	content_widget_ = new ContentWidget(settings, this);
+	content_widget_ = new ContentWidget(settings, timetracker, this);
 
 	setCentralWidget(content_widget_);
 
@@ -50,7 +50,7 @@ void MainWin::updateAllTimes(qint64 t_active, qint64 t_pause)
 		showActivityWarnings(t_active, t_pause);
 }
 
-void MainWin::showActivityWarnings(const qint64 &t_active, const qint64 &t_pause)
+void MainWin::showActivityWarnings(const qint64 t_active, const qint64 t_pause)
 {
 	if ((!warning_activity_shown_)
 			&& (t_active > settings_.getWarnTimeActivityMsec())) {

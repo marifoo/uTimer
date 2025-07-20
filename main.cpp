@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
 	Settings settings("user-settings.ini");
 	LockStateWatcher lockstate_watcher(settings);
 	TimeTracker time_tracker(settings);
-	MainWin main_win(settings);
+	MainWin main_win(settings, time_tracker);
 
 	QObject::connect(&main_win, SIGNAL(sendButtons(Button)),	&time_tracker, SLOT(useTimerViaButton(Button)));
 

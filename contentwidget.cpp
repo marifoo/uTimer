@@ -5,9 +5,16 @@
 #include <QColor>
 #include <QStringList>
 #include <QApplication>
+#include <QDialog>
+#include <QVBoxLayout>
+#include <QLabel>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QCheckBox>
 #include "helpers.h"
 
-ContentWidget::ContentWidget(Settings & settings, QWidget *parent) : QWidget(parent), settings_(settings), button_hold_color_(QColor(180,216,228,255))
+ContentWidget::ContentWidget(Settings & settings, TimeTracker &timetracker, QWidget *parent) 
+	: QWidget(parent), settings_(settings), button_hold_color_(QColor(180,216,228,255)), timetracker_(timetracker)
 {
 	setupGUI();
 
@@ -16,6 +23,7 @@ ContentWidget::ContentWidget(Settings & settings, QWidget *parent) : QWidget(par
 	QObject::connect(mintotray_button_, SIGNAL(clicked()), this, SLOT(pressedMinToTrayButton()));
 	QObject::connect(pintotop_button_, SIGNAL(clicked()), this, SLOT(pressedPinToTopButton()));
 	QObject::connect(autopause_button_, SIGNAL(clicked()), this, SLOT(pressedAutoPauseButton()));
+	QObject::connect(show_durations_button_, SIGNAL(clicked()), this, SLOT(pressedShowDurationsButton()));
 }
 
 void ContentWidget::setupGUI()
@@ -64,7 +72,7 @@ void ContentWidget::setupButtonRows()
 	QFont button_font = QApplication::font();
 	button_font.setPointSize(8);
 
-	// [START] [STOP]
+	// [START] [STOP] [SHOW DURATIONS]
 	button_row_ = new QHBoxLayout();
 	startpause_button_ = new QPushButton("START");
 	startpause_button_->setFont(button_font);
@@ -72,8 +80,12 @@ void ContentWidget::setupButtonRows()
 	stop_button_ = new QPushButton("STOP");
 	stop_button_->setFont(button_font);
 	stop_button_->setToolTip("Stop all Timing");
+	show_durations_button_ = new QPushButton("Show Durations");
+	show_durations_button_->setFont(button_font);
+	show_durations_button_->setToolTip("Show all durations");
 	button_row_->addWidget(startpause_button_);
 	button_row_->addWidget(stop_button_);
+	button_row_->addWidget(show_durations_button_);
 
 	// [Min to Tray] [Stay on Top] [Auto-Pause]
 	optionbutton_row_ = new QHBoxLayout();
@@ -139,6 +151,54 @@ void ContentWidget::pressedAutoPauseButton()
 	toggleButtonColor(autopause_button_, button_hold_color_);
 	settings_.setAutopauseState(!settings_.isAutopauseEnabled());
 	autopause_button_->setToolTip(settings_.getBackpauseMin() + autopause_tooltip_);
+}
+
+void ContentWidget::pressedShowDurationsButton()
+{
+	QDialog dlg(this);
+	dlg.setWindowTitle("Durations");
+	QVBoxLayout* layout = new QVBoxLayout(&dlg);
+
+	QTableWidget* table = new QTableWidget(&dlg);
+	table->setColumnCount(4);
+	table->setHorizontalHeaderLabels({ "Type", "Start - End", "Duration", "Activity" });
+	table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+	table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+	table->setSelectionMode(QAbstractItemView::NoSelection);
+
+	auto& durations = timetracker_.getDurations();
+	table->setRowCount(static_cast<int>(durations.size()));
+	int row = 0;
+	for (const auto& d : durations) {
+		QString typeStr = (d.type == DurationType::Activity) ? "Activity" : "Pause";
+		table->setItem(row, 0, new QTableWidgetItem(typeStr));
+
+		QString startEndStr = d.endTime.addMSecs(-d.duration).toString("yyyy-MM-dd hh:mm:ss") + " - " + d.endTime.toString("yyyy-MM-dd hh:mm:ss");
+		table->setItem(row, 1, new QTableWidgetItem(startEndStr));
+
+		QString durationStr = convMSecToTimeStr(d.duration);
+		table->setItem(row, 2, new QTableWidgetItem(durationStr));
+
+		QCheckBox* box = new QCheckBox(table);
+		box->setChecked(d.type == DurationType::Activity);
+		table->setCellWidget(row, 3, box);
+
+
+		QObject::connect(box, &QCheckBox::stateChanged, this, [this, table, row](int state) {
+			DurationType newType = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
+			timetracker_.setDurationType(row, newType);
+			// Update type column text
+			QString typeStr = (newType == DurationType::Activity) ? "Activity" : "Pause";
+			table->item(row, 0)->setText(typeStr);
+			});
+		++row;
+	}
+
+	layout->addWidget(table);
+	dlg.setLayout(layout);
+	dlg.resize(500, 400);
+	dlg.resize(700, 400);
+	dlg.exec();
 }
 
 void ContentWidget::setActivityTimeTooltip(const QString &hours /* ="0.00" */)
@@ -217,3 +277,4 @@ bool ContentWidget::isGUIinActivity()
 {
 	return (startpause_button_->text() == "PAUSE");
 }
+

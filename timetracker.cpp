@@ -146,4 +146,12 @@ qint64 TimeTracker::getPauseTime() const
 	return sum;
 }
 
+const std::deque<TimeDuration>& TimeTracker::getDurations() const {
+	return durations_;
+}
 
+void TimeTracker::setDurationType(size_t idx, DurationType type) {
+    if (idx < durations_.size()) {
+        durations_[idx].type = type;
+    }
+}

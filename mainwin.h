@@ -24,12 +24,12 @@ private:
 	void showMsgBox(const QString &text);
 	void showMainWin();
 	void toggleAlwaysOnTopFlag();
-	void showActivityWarnings(const qint64 &t_active, const qint64 &t_pause);
+	void showActivityWarnings(const qint64 t_active, const qint64 t_pause);
 	void setupIcon();
-	void setupCentralWidget(Settings &settings);
+	void setupCentralWidget(Settings &settings, TimeTracker &timetracker);
 
 public:
-	explicit MainWin(Settings & settings, QWidget *parent = nullptr);
+	explicit MainWin(Settings &settings, TimeTracker &timetracker, QWidget *parent = nullptr);
 	void start();
 
 signals:

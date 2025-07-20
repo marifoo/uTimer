@@ -9,13 +9,15 @@
 #include <QPushButton>
 #include "settings.h"
 #include "types.h"
+#include "timetracker.h"
 
 class ContentWidget : public QWidget
 {
 	Q_OBJECT
 
 private:
-	Settings & settings_;
+	Settings &settings_;
+	TimeTracker &timetracker_;
 
 	QVBoxLayout *rows_;
 	QHBoxLayout *activity_row_;
@@ -27,13 +29,14 @@ private:
 	QHBoxLayout *button_row_;
 	QPushButton *startpause_button_;
 	QPushButton *stop_button_;
+	QPushButton *show_durations_button_;
 	QHBoxLayout *optionbutton_row_;
 	QPushButton *mintotray_button_;
 	QPushButton * pintotop_button_;
 	QPushButton *autopause_button_;
 	const QColor button_hold_color_;
 	QString autopause_tooltip_;
-	QString activity_time_tooltip_base_;	
+	QString activity_time_tooltip_base_;
 
 	void setupGUI();
 	void setupTimeRows();
@@ -45,7 +48,7 @@ private:
 	void manageTooltipsForActivity();
         
 public:
-	explicit ContentWidget(Settings & settings, QWidget *parent = nullptr);
+	explicit ContentWidget(Settings &settings, TimeTracker& timetracker, QWidget *parent = nullptr);
 	void setAllTimes(const qint64 &t_active, const qint64 &t_pause);
 	QString getTooltip();
 	bool isGUIinActivity();
@@ -61,6 +64,7 @@ public slots:
 	void pressedMinToTrayButton();
 	void pressedPinToTopButton();
 	void pressedAutoPauseButton();
+	void pressedShowDurationsButton();
 	void setGUItoActivity();
 	void setGUItoStop();
 	void setGUItoPause();
