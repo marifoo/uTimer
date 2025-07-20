@@ -23,7 +23,7 @@ void Settings::readSettingsFile()
 	pause_for_warning_nopause_min_ = 30;
 	warning_activity_ = sfile_.value("uTimer/show_warning_after_9h45min_activity", false).toBool();
 	warning_activity_min_ = 9*60+45;
-	log_to_file_ = sfile_.value("uTimer/debug_log_to_file", true).toBool();
+	log_to_file_ = sfile_.value("uTimer/debug_log_to_file", false).toBool();
 }
 
 void Settings::writeSettingsFile()
@@ -37,8 +37,12 @@ void Settings::writeSettingsFile()
 	sfile_.setValue("uTimer/show_warning_after_9h45min_activity", warning_activity_);
 	sfile_.setValue("uTimer/debug_log_to_file", log_to_file_);
 
-	if (log_to_file_)
-		Logger::Log("Current Autopause Settings are: Enabled = " + QString::number(autopause_enabled_) + "; Minutes = " + QString::number(backpause_min_));
+	if (log_to_file_) {
+		if (autopause_enabled_)
+			Logger::Log("Autopause is enabled with Threshold = " + QString::number(backpause_min_) + "min");
+		else
+			Logger::Log("Autopause is disabled");
+	}
 }
 
 bool Settings::isAutopauseEnabled() const

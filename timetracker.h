@@ -4,11 +4,22 @@
 #include <QObject>
 #include <QtGlobal>
 #include <QElapsedTimer>
-#include <vector>
+#include <QDateTime>
+#include <deque>
 #include <memory>
 #include "settings.h"
 #include "types.h"
 
+enum class DurationType { Activity, Pause };
+
+struct TimeDuration {
+	DurationType type;
+    qint64 duration;
+    QDateTime endTime;
+    
+    TimeDuration(DurationType type, qint64 dur, QDateTime end)
+        : type(type) ,duration(dur), endTime(end) {}
+};
 
 class TimeTracker : public QObject
 {
@@ -18,10 +29,9 @@ private:
 
 	const Settings & settings_;
 	QElapsedTimer timer_;
-	std::vector<qint64> activities_;
-	std::vector<qint64> pauses_;
+	std::deque<TimeDuration> durations_;
 	Mode mode_;
-	bool was_active_before_autopause_;	
+	bool was_active_before_autopause_;
 
 	qint64 getActiveTime() const;
 	qint64 getPauseTime() const;

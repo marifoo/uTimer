@@ -4,7 +4,8 @@
 #include "logger.h"
 #include "helpers.h"
 
-TimeTracker::TimeTracker(const Settings &settings, QObject *parent) : QObject(parent), settings_(settings), mode_(Mode::None), was_active_before_autopause_(false)
+TimeTracker::TimeTracker(const Settings &settings, QObject *parent) 
+    : QObject(parent), settings_(settings), mode_(Mode::None), was_active_before_autopause_(false)
 { }
 
 TimeTracker::~TimeTracker()
@@ -16,14 +17,19 @@ void TimeTracker::startTimer()
 {
 	if (mode_ == Mode::Pause) {
 		qint64 t_pause = timer_.restart();
-		pauses_.push_back(t_pause);
+		if (durations_.empty() || durations_.back().type != DurationType::Pause) {
+			durations_.emplace_back(TimeDuration(DurationType::Pause, t_pause, QDateTime::currentDateTime()));
+		}
+		else {
+			durations_.back().endTime = QDateTime::currentDateTime();
+			durations_.back().duration += t_pause;
+		}
 		mode_ = Mode::Activity;
 		if (settings_.logToFile())
 			Logger::Log("[TIMER] > Timer unpaused");
 	}
 	else if (mode_ == Mode::None) {
-		activities_.clear();
-		pauses_.clear();
+		durations_.clear();
 		timer_.start();
 		mode_ = Mode::Activity;
 		if (settings_.logToFile())
@@ -35,7 +41,7 @@ void TimeTracker::pauseTimer()
 {
 	if (mode_ == Mode::Activity) {
 		qint64 t_active = timer_.restart();
-		activities_.push_back(t_active);
+		durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, QDateTime::currentDateTime()));
 		mode_ = Mode::Pause;
 		if (settings_.logToFile())
 			Logger::Log("[TIMER] Timer paused <");
@@ -47,12 +53,15 @@ void TimeTracker::backpauseTimer()
 	if (mode_ == Mode::Activity) {
 		if (settings_.isAutopauseEnabled()) {
 			qint64 backpause_msec = settings_.getBackpauseMsec();
-			pauses_.push_back(backpause_msec);
-			activities_.push_back(-backpause_msec);
+			durations_.emplace_back(TimeDuration(DurationType::Pause, backpause_msec, QDateTime::currentDateTime()));
+
+			qint64 t_active = timer_.restart() - backpause_msec;
+			QDateTime activiy_end = QDateTime::currentDateTime().addMSecs(-backpause_msec);
+			durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, activiy_end));
+			mode_ = Mode::Pause;
 			if (settings_.logToFile())
-				Logger::Log("[TIMER] Timer retroactively going to Pause");
+				Logger::Log("[TIMER] Timer retroactively paused <");
 		}
-		pauseTimer();
 	}
 }
 
@@ -60,7 +69,7 @@ void TimeTracker::stopTimer()
 {
 	if (mode_ == Mode::Pause) {
 		qint64 t_pause = timer_.elapsed();
-		pauses_.push_back(t_pause);
+		durations_.emplace_back(TimeDuration(DurationType::Pause, t_pause, QDateTime::currentDateTime()));
 		mode_ = Mode::None;
 		if (settings_.logToFile()) {
 			Logger::Log("[TIMER] Timer unpaused < and stopped <<");
@@ -69,7 +78,7 @@ void TimeTracker::stopTimer()
 	}
 	else if (mode_ == Mode::Activity) {
 		qint64 t_active = timer_.elapsed();
-		activities_.push_back(t_active);
+		durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, QDateTime::currentDateTime()));
 		mode_ = Mode::None;
 		if (settings_.logToFile()) {
 			Logger::Log("[TIMER] Timer stopped <<");
@@ -114,8 +123,11 @@ void TimeTracker::sendTimes()
 qint64 TimeTracker::getActiveTime() const
 {
 	qint64 sum = 0;
-	for(auto & t : activities_)
-		sum += t;
+	for (const auto& t : durations_) {
+		if (t.type == DurationType::Activity)
+			sum += t.duration;
+	}
+		
 	if (mode_ == Mode::Activity)
 		sum += timer_.elapsed();
 	return sum;
@@ -124,8 +136,11 @@ qint64 TimeTracker::getActiveTime() const
 qint64 TimeTracker::getPauseTime() const
 {
 	qint64 sum = 0;
-	for(auto & t : pauses_)
-		sum += t;
+	for (const auto& t : durations_) {
+		if (t.type == DurationType::Pause)
+			sum += t.duration;
+	}
+
 	if (mode_ == Mode::Pause)
 		sum += timer_.elapsed();
 	return sum;
