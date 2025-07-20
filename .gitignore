@@ -1,3 +1,14 @@
+# Timer files
+utimer.log
+user-settings.ini
+
+# VS project files
+.vs/
+debug/
+release/
+*.filters
+*.user
+
 # C++ objects and libs
 *.slo
 *.lo
