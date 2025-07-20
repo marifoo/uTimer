@@ -15,16 +15,16 @@ private:
 	ContentWidget *content_widget_;
 	QSystemTrayIcon *tray_icon_;
 	const Settings & settings_;
+	const TimeTracker& timetracker_;
 
 	bool warning_activity_shown_;
 	bool warning_pause_shown_;
 	bool was_active_before_autopause_;
 
-	void updateTrayIconTooltip(QString activity, QString pause);
 	void showMsgBox(const QString &text);
 	void showMainWin();
 	void toggleAlwaysOnTopFlag();
-	void showActivityWarnings(const qint64 t_active, const qint64 t_pause);
+	void showActivityWarnings();
 	void setupIcon();
 	void setupCentralWidget(Settings &settings, TimeTracker &timetracker);
 
@@ -36,7 +36,7 @@ signals:
 	void sendButtons(Button button);
 
 public slots:
-	void updateAllTimes(qint64 t_active, qint64 t_pause);	
+	void update();
 	void iconActivated(QSystemTrayIcon::ActivationReason reason);
 	void minToTray();
 	void toggleAlwaysOnTop();

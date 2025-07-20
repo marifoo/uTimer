@@ -49,7 +49,7 @@ private:
         
 public:
 	explicit ContentWidget(Settings &settings, TimeTracker& timetracker, QWidget *parent = nullptr);
-	void setAllTimes(const qint64 &t_active, const qint64 &t_pause);
+	void updateTimes();
 	QString getTooltip();
 	bool isGUIinActivity();
 

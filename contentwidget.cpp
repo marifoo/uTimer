@@ -159,10 +159,15 @@ void ContentWidget::pressedShowDurationsButton()
 	dlg.setWindowTitle("Durations");
 	QVBoxLayout* layout = new QVBoxLayout(&dlg);
 
+	QString spacer = "  ";
+
 	QTableWidget* table = new QTableWidget(&dlg);
 	table->setColumnCount(4);
-	table->setHorizontalHeaderLabels({ "Type", "Start - End", "Duration", "Activity" });
-	table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+	table->setHorizontalHeaderLabels({ "Type  ", "Start - End  ", "Duration  ", "Activity  " });
+	table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents); // Type
+	table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch); // Start - End
+	table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents); // Duration
+	table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents); // Activity
 	table->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	table->setSelectionMode(QAbstractItemView::NoSelection);
 
@@ -170,13 +175,13 @@ void ContentWidget::pressedShowDurationsButton()
 	table->setRowCount(static_cast<int>(durations.size()));
 	int row = 0;
 	for (const auto& d : durations) {
-		QString typeStr = (d.type == DurationType::Activity) ? "Activity" : "Pause";
+		QString typeStr = (d.type == DurationType::Activity) ? "Activity" + spacer : "Pause" + spacer;
 		table->setItem(row, 0, new QTableWidgetItem(typeStr));
 
-		QString startEndStr = d.endTime.addMSecs(-d.duration).toString("yyyy-MM-dd hh:mm:ss") + " - " + d.endTime.toString("yyyy-MM-dd hh:mm:ss");
+		QString startEndStr = d.endTime.addMSecs(-d.duration).toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss");
 		table->setItem(row, 1, new QTableWidgetItem(startEndStr));
 
-		QString durationStr = convMSecToTimeStr(d.duration);
+		QString durationStr = convMSecToTimeStr(d.duration) + spacer;
 		table->setItem(row, 2, new QTableWidgetItem(durationStr));
 
 		QCheckBox* box = new QCheckBox(table);
@@ -184,11 +189,11 @@ void ContentWidget::pressedShowDurationsButton()
 		table->setCellWidget(row, 3, box);
 
 
-		QObject::connect(box, &QCheckBox::stateChanged, this, [this, table, row](int state) {
+		QObject::connect(box, &QCheckBox::stateChanged, this, [this, table, row, spacer](int state) {
 			DurationType newType = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
 			timetracker_.setDurationType(row, newType);
 			// Update type column text
-			QString typeStr = (newType == DurationType::Activity) ? "Activity" : "Pause";
+			QString typeStr = (newType == DurationType::Activity) ? "Activity" + spacer : "Pause" + spacer;
 			table->item(row, 0)->setText(typeStr);
 			});
 		++row;
@@ -196,8 +201,7 @@ void ContentWidget::pressedShowDurationsButton()
 
 	layout->addWidget(table);
 	dlg.setLayout(layout);
-	dlg.resize(500, 400);
-	dlg.resize(700, 400);
+	dlg.resize(400, 400);
 	dlg.exec();
 }
 
@@ -256,8 +260,10 @@ void ContentWidget::setGUItoPause()
 	pause_time_->setStyleSheet("QLabel { color : green; }");
 }
 
-void ContentWidget::setAllTimes(const qint64 &t_active, const qint64 &t_pause)
+void ContentWidget::updateTimes()
 {
+	qint64 t_active = timetracker_.getActiveTime();
+	qint64 t_pause = timetracker_.getPauseTime();
 	pause_time_->setText(convMSecToTimeStr(t_pause));
 	activity_time_->setText(convMSecToTimeStr(t_active));
 	setActivityTimeTooltip(convTimeStrToDurationStr(convMSecToTimeStr(t_active)));

@@ -25,10 +25,9 @@ int main(int argc, char *argv[])
 	TimeTracker time_tracker(settings);
 	MainWin main_win(settings, time_tracker);
 
-	QObject::connect(&main_win, SIGNAL(sendButtons(Button)),	&time_tracker, SLOT(useTimerViaButton(Button)));
+	QObject::connect(&main_win, SIGNAL(sendButtons(Button)), &time_tracker, SLOT(useTimerViaButton(Button)));
 
-	QObject::connect(&timer, SIGNAL(timeout()), &time_tracker, SLOT(sendTimes()));
-	QObject::connect(&time_tracker, SIGNAL(sendAllTimes(qint64,qint64)), &main_win, SLOT(updateAllTimes(qint64,qint64)));
+	QObject::connect(&timer, SIGNAL(timeout()), &main_win, SLOT(update()));
 
 	QObject::connect(&timer, SIGNAL(timeout()), &lockstate_watcher, SLOT(update()));
 	QObject::connect(&lockstate_watcher, SIGNAL(desktopLockEvent(LockEvent)),	&time_tracker, SLOT(useTimerViaLockEvent(LockEvent)));

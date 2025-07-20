@@ -45,15 +45,11 @@ public:
 	qint64 getActiveTime() const;
 	qint64 getPauseTime() const;
 	const std::deque<TimeDuration>& getDurations() const;
-    void setDurationType(size_t idx, DurationType type); // Add setter
-
-signals:
-	void sendAllTimes(qint64 t_active, qint64 t_pause);
+    void setDurationType(size_t idx, DurationType type);
 
 public slots:
 	void useTimerViaButton(Button button);
 	void useTimerViaLockEvent(LockEvent event);
-	void sendTimes();
 };
 
 #endif // TIMETRACKER_H

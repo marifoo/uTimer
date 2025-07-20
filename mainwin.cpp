@@ -7,7 +7,8 @@
 
 
 
-MainWin::MainWin(Settings& settings, TimeTracker& timetracker, QWidget *parent)	: QMainWindow(parent), settings_(settings), warning_activity_shown_(false), warning_pause_shown_(false), was_active_before_autopause_(false)
+MainWin::MainWin(Settings& settings, TimeTracker& timetracker, QWidget *parent)	
+	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), warning_pause_shown_(false), was_active_before_autopause_(false)
 {
 	setupCentralWidget(settings, timetracker);
 
@@ -41,17 +42,20 @@ void MainWin::setupIcon()
 	QObject::connect(tray_icon_, SIGNAL(activated(QSystemTrayIcon::ActivationReason)), this, SLOT(iconActivated(QSystemTrayIcon::ActivationReason)));
 }
 
-void MainWin::updateAllTimes(qint64 t_active, qint64 t_pause)
+void MainWin::update()
 {
-	content_widget_->setAllTimes(t_active, t_pause);
+	content_widget_->updateTimes();
 	tray_icon_->setToolTip(content_widget_->getTooltip());
 
-	if((content_widget_->isGUIinActivity()) && (settings_.showTooMuchActivityWarning() || settings_.showTooMuchActivityWarning()))
-		showActivityWarnings(t_active, t_pause);
+	if ((content_widget_->isGUIinActivity()) && (settings_.showTooMuchActivityWarning() || settings_.showTooMuchActivityWarning()))
+		showActivityWarnings();
 }
 
-void MainWin::showActivityWarnings(const qint64 t_active, const qint64 t_pause)
+void MainWin::showActivityWarnings()
 {
+	const qint64 t_active = timetracker_.getActiveTime();
+	const qint64 t_pause = timetracker_.getPauseTime();
+
 	if ((!warning_activity_shown_)
 			&& (t_active > settings_.getWarnTimeActivityMsec())) {
 		warning_activity_shown_ = true;
