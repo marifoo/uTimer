@@ -11,6 +11,7 @@
 #include "types.h"
 #include "timetracker.h"
 
+
 class ContentWidget : public QWidget
 {
 	Q_OBJECT

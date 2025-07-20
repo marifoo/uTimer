@@ -171,6 +171,12 @@ void ContentWidget::pressedShowDurationsButton()
 	table->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	table->setSelectionMode(QAbstractItemView::NoSelection);
 
+	struct PendingChange {
+		size_t row;
+		DurationType newType;
+	};
+	std::vector<PendingChange> pendingChanges;
+
 	auto& durations = timetracker_.getDurations();
 	table->setRowCount(static_cast<int>(durations.size()));
 	int row = 0;
@@ -188,21 +194,42 @@ void ContentWidget::pressedShowDurationsButton()
 		box->setChecked(d.type == DurationType::Activity);
 		table->setCellWidget(row, 3, box);
 
-
-		QObject::connect(box, &QCheckBox::stateChanged, this, [this, table, row, spacer](int state) {
+		QObject::connect(box, &QCheckBox::stateChanged, [&pendingChanges, table, row, spacer](int state) {
 			DurationType newType = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
-			timetracker_.setDurationType(row, newType);
-			// Update type column text
-			QString typeStr = (newType == DurationType::Activity) ? "Activity" + spacer : "Pause" + spacer;
+			QString typeStr = (newType == DurationType::Activity) ? "Activity *  " : "Pause *  ";
 			table->item(row, 0)->setText(typeStr);
-			});
+
+			auto it = std::find_if(pendingChanges.begin(), pendingChanges.end(),
+				[row](const PendingChange& pc) { return pc.row == row; });
+			if (it != pendingChanges.end()) {
+				it->newType = newType;
+			} else {
+				pendingChanges.push_back({static_cast<size_t>(row), newType});
+			}
+		});
 		++row;
 	}
 
+	QHBoxLayout* buttonLayout = new QHBoxLayout();
+	QPushButton* okButton = new QPushButton("OK", &dlg);
+	QPushButton* cancelButton = new QPushButton("Cancel", &dlg);
+	buttonLayout->addStretch();
+	buttonLayout->addWidget(okButton);
+	buttonLayout->addWidget(cancelButton);
+
 	layout->addWidget(table);
+	layout->addLayout(buttonLayout);
 	dlg.setLayout(layout);
 	dlg.resize(400, 400);
-	dlg.exec();
+
+	QObject::connect(okButton, &QPushButton::clicked, &dlg, &QDialog::accept);
+	QObject::connect(cancelButton, &QPushButton::clicked, &dlg, &QDialog::reject);
+	
+	if (dlg.exec() == QDialog::Accepted) {
+		for (const auto& change : pendingChanges) {
+			timetracker_.setDurationType(change.row, change.newType);
+		}
+	}
 }
 
 void ContentWidget::setActivityTimeTooltip(const QString &hours /* ="0.00" */)
