@@ -20,7 +20,8 @@ public:
 private:
     QSqlDatabase db;
 	uint history_days_to_keep_;
-    bool lazyInit();
+    bool lazyOpen();
+    void lazyClose();
 };
 
 #endif // DATABASEMANAGER_H

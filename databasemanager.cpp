@@ -15,25 +15,10 @@ DatabaseManager::DatabaseManager(int history_days_to_keep, QObject *parent)
 
 DatabaseManager::~DatabaseManager()
 {
-    if (db.isOpen()) {
-        if (db.transaction()) {
-            QSqlQuery query;
-            query.prepare("DELETE FROM durations WHERE end_date < date('now', :days || ' days')");
-            query.bindValue(":days", QString::number((-1)*((int)history_days_to_keep_)));
-            if (!query.exec()) {
-                db.rollback();
-                Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
-            } else {
-                db.commit();
-            }
-        } else {
-            Logger::Log("[DB] Error starting transaction: " + db.lastError().text());
-        }
-        db.close();
-    }
+    lazyClose();
 }
 
-bool DatabaseManager::lazyInit()
+bool DatabaseManager::lazyOpen()
 {
     if (history_days_to_keep_ == 0) {
         return false;
@@ -59,9 +44,37 @@ bool DatabaseManager::lazyInit()
     );
 }
 
+void DatabaseManager::lazyClose() 
+{
+    if (db.isOpen()) {
+        if (db.transaction()) {
+            QSqlQuery query;
+            if (history_days_to_keep_ == 0) {
+                query.prepare("DELETE FROM durations");
+            }
+            else {
+                query.prepare("DELETE FROM durations WHERE end_date < date('now', :days || ' days')");
+                query.bindValue(":days", QString::number((-1) * ((int)history_days_to_keep_)));
+            }
+
+            if (!query.exec()) {
+                db.rollback();
+                Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
+            }
+            else {
+                db.commit();
+            }
+        }
+        else {
+            Logger::Log("[DB] Error starting transaction: " + db.lastError().text());
+        }
+        db.close();
+    }
+}
+
 bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
-    if (!lazyInit()) {
+    if (!lazyOpen()) {
         return false;
     }
 
@@ -88,7 +101,7 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
         query.bindValue(":type", int(d.type));
         query.bindValue(":duration", qint64(d.duration));
         query.bindValue(":end_date", d.endTime.date().toString(Qt::ISODate));
-        query.bindValue(":end_time", d.endTime.time().toString(Qt::ISODate));
+        query.bindValue(":end_time", d.endTime.time().toString("HH:mm:ss.zzz"));
         
         if (!query.exec()) {
             db.rollback();
@@ -97,14 +110,18 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
         }
     }
 
-    return db.commit();
+    bool ret = db.commit();
+
+    lazyClose();
+
+    return ret;
 }
 
 std::deque<TimeDuration> DatabaseManager::loadDurations()
 {
     std::deque<TimeDuration> durations;
 
-    if (!lazyInit()) {
+    if (!lazyOpen()) {
         return durations;
     }
 
@@ -113,10 +130,12 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
         DurationType type = static_cast<DurationType>(query.value(0).toInt());
         qint64 duration = query.value(1).toLongLong();
         QDate endDate = QDate::fromString(query.value(2).toString(), Qt::ISODate);
-        QTime endTime = QTime::fromString(query.value(3).toString(), Qt::ISODate);
+        QTime endTime = QTime::fromString(query.value(3).toString(), "HH:mm:ss.zzz");
         QDateTime endDateTime(endDate, endTime);
         durations.emplace_back(TimeDuration(type, duration, endDateTime));
     }
+
+    lazyClose();
     
     return durations;
 }
