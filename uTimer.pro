@@ -2,6 +2,7 @@ TARGET = uTimer
 
 HEADERS = \
    $$PWD/contentwidget.h \
+   $$PWD/databasemanager.h \
    $$PWD/mainwin.h \
    $$PWD/timetracker.h \
    $$PWD/lockstatewatcher.h \
@@ -12,6 +13,7 @@ HEADERS = \
 
 SOURCES = \
    $$PWD/contentwidget.cpp \
+   $$PWD/databasemanager.cpp \
    $$PWD/main.cpp \
    $$PWD/mainwin.cpp \
    $$PWD/timetracker.cpp \
@@ -27,7 +29,7 @@ TEMPLATE = app
 
 CONFIG += qt c++14
 
-QT += widgets
+QT += widgets sql
 
 LIBS += -lUser32
 

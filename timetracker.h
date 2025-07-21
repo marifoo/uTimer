@@ -9,17 +9,8 @@
 #include <memory>
 #include "settings.h"
 #include "types.h"
+#include "databasemanager.h"
 
-enum class DurationType { Activity, Pause };
-
-struct TimeDuration {
-	DurationType type;
-    qint64 duration;
-    QDateTime endTime;
-    
-    TimeDuration(DurationType type, qint64 dur, QDateTime end)
-        : type(type) ,duration(dur), endTime(end) {}
-};
 
 class TimeTracker : public QObject
 {
@@ -32,6 +23,7 @@ private:
 	std::deque<TimeDuration> durations_;
 	Mode mode_;
 	bool was_active_before_autopause_;
+	DatabaseManager db_;
 
 	void startTimer();
 	void stopTimer();
@@ -44,8 +36,11 @@ public:
 
 	qint64 getActiveTime() const;
 	qint64 getPauseTime() const;
-	const std::deque<TimeDuration>& getDurations() const;
+	const std::deque<TimeDuration>& getCurrentDurations() const;
+	std::deque<TimeDuration> TimeTracker::getDurationsHistory();
     void setDurationType(size_t idx, DurationType type);
+	bool appendDurationsToDB();
+	bool replaceDurationsInDB(const std::deque<TimeDuration>& durations);
 
 public slots:
 	void useTimerViaButton(Button button);

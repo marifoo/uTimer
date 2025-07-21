@@ -27,16 +27,18 @@ private:
 	QHBoxLayout *pause_row_;
 	QLabel *pause_text_;
 	QLabel *pause_time_;
-	QHBoxLayout *button_row_;
+	QHBoxLayout *timerbutton_row_;
 	QPushButton *startpause_button_;
 	QPushButton *stop_button_;
-	QPushButton *show_durations_button_;
 	QHBoxLayout *optionbutton_row_;
-	QPushButton *mintotray_button_;
-	QPushButton * pintotop_button_;
+	QPushButton *show_history_button_;
 	QPushButton *autopause_button_;
+	QHBoxLayout* windowcontrolbutton_row_;
+	QPushButton* mintotray_button_;
+	QPushButton* pintotop_button_;
 	const QColor button_hold_color_;
-	QString autopause_tooltip_;
+	QString autopause_tooltip1_;
+	QString autopause_tooltip2_;
 	QString activity_time_tooltip_base_;
 
 	void setupGUI();
@@ -65,7 +67,7 @@ public slots:
 	void pressedMinToTrayButton();
 	void pressedPinToTopButton();
 	void pressedAutoPauseButton();
-	void pressedShowDurationsButton();
+	void pressedShowHistoryButton();
 	void setGUItoActivity();
 	void setGUItoStop();
 	void setGUItoPause();

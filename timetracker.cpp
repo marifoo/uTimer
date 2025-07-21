@@ -5,12 +5,15 @@
 #include "helpers.h"
 
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent) 
-    : QObject(parent), settings_(settings), mode_(Mode::None), was_active_before_autopause_(false)
-{ }
+    : QObject(parent), settings_(settings), mode_(Mode::None), 
+      was_active_before_autopause_(false)
+{
+	;
+}
 
 TimeTracker::~TimeTracker()
 {
-	stopTimer();
+    stopTimer();
 }
 
 void TimeTracker::startTimer()
@@ -53,11 +56,14 @@ void TimeTracker::backpauseTimer()
 	if (mode_ == Mode::Activity) {
 		if (settings_.isAutopauseEnabled()) {
 			qint64 backpause_msec = settings_.getBackpauseMsec();
-			durations_.emplace_back(TimeDuration(DurationType::Pause, backpause_msec, QDateTime::currentDateTime()));
+			QDateTime now = QDateTime::currentDateTime();
 
 			qint64 t_active = timer_.restart() - backpause_msec;
-			QDateTime activiy_end = QDateTime::currentDateTime().addMSecs(-backpause_msec);
+			QDateTime activiy_end = now.addMSecs(-backpause_msec);
 			durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, activiy_end));
+
+			durations_.emplace_back(TimeDuration(DurationType::Pause, backpause_msec, now));
+
 			mode_ = Mode::Pause;
 			if (settings_.logToFile())
 				Logger::Log("[TIMER] Timer retroactively paused <");
@@ -83,6 +89,12 @@ void TimeTracker::stopTimer()
 		if (settings_.logToFile()) {
 			Logger::Log("[TIMER] Timer stopped <<");
 			Logger::Log("[TIMER] Total Activity Time was " + convMSecToTimeStr(getActiveTime()) + ", Total Pause Time was " + convMSecToTimeStr(getPauseTime()));
+		}
+	}
+
+	if (!db_.saveDurations(durations_, TransactionMode::Append)) {
+		if (settings_.logToFile()) {
+			Logger::Log("[TIMER] Database not updated");
 		}
 	}
 }
@@ -141,14 +153,31 @@ qint64 TimeTracker::getPauseTime() const
 	return sum;
 }
 
-const std::deque<TimeDuration>& TimeTracker::getDurations() const 
+const std::deque<TimeDuration>& TimeTracker::getCurrentDurations() const 
 {
 	return durations_;
 }
 
-void TimeTracker::setDurationType(size_t idx, DurationType type) 
+void TimeTracker::setDurationType(size_t idx, DurationType type)
 {
-    if (idx < durations_.size()) {
-        durations_[idx].type = type;
-    }
+	if (idx < durations_.size()) {
+		durations_[idx].type = type;
+	}
 }
+
+std::deque<TimeDuration> TimeTracker::getDurationsHistory()
+{
+	return db_.loadDurations();
+}
+
+bool TimeTracker::appendDurationsToDB()
+{
+	return db_.saveDurations(this->durations_, TransactionMode::Append);
+}
+
+bool TimeTracker::replaceDurationsInDB(const std::deque<TimeDuration> &durations)
+{
+	return db_.saveDurations(durations, TransactionMode::Replace);
+}
+
+
