@@ -7,7 +7,7 @@
 #include "logger.h"
 
 DatabaseManager::DatabaseManager(int history_days_to_keep, QObject *parent)
-    : history_days_to_keep_(history_days_to_keep), QObject(parent)
+    : history_days_to_keep_(std::max(history_days_to_keep, 0)), QObject(parent)
 {
     db = QSqlDatabase::addDatabase("QSQLITE");
     db.setDatabaseName("uTimer.sqlite");
@@ -19,7 +19,7 @@ DatabaseManager::~DatabaseManager()
         if (db.transaction()) {
             QSqlQuery query;
             query.prepare("DELETE FROM durations WHERE end_date < date('now', :days || ' days')");
-            query.bindValue(":days", QString::number(-history_days_to_keep_));
+            query.bindValue(":days", QString::number((-1)*((int)history_days_to_keep_)));
             if (!query.exec()) {
                 db.rollback();
                 Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
@@ -35,6 +35,10 @@ DatabaseManager::~DatabaseManager()
 
 bool DatabaseManager::lazyInit()
 {
+    if (history_days_to_keep_ == 0) {
+        return false;
+    }
+
     if (db.isOpen()) {
         return true;
 	}

@@ -19,7 +19,7 @@ public:
 
 private:
     QSqlDatabase db;
-	int history_days_to_keep_;
+	uint history_days_to_keep_;
     bool lazyInit();
 };
 
