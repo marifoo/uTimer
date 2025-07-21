@@ -30,10 +30,10 @@ private:
 	QHBoxLayout *timerbutton_row_;
 	QPushButton *startpause_button_;
 	QPushButton *stop_button_;
-	QHBoxLayout *optionbutton_row_;
+	QHBoxLayout *historybutton_row_;
 	QPushButton *show_history_button_;
 	QPushButton *autopause_button_;
-	QHBoxLayout* windowcontrolbutton_row_;
+	QHBoxLayout* optionbutton_row_;
 	QPushButton* mintotray_button_;
 	QPushButton* pintotop_button_;
 	const QColor button_hold_color_;
