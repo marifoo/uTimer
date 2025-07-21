@@ -20,13 +20,16 @@ void TimeTracker::startTimer()
 {
 	if (mode_ == Mode::Pause) {
 		qint64 t_pause = timer_.restart();
-		if (durations_.empty() || durations_.back().type != DurationType::Pause) {
-			durations_.emplace_back(TimeDuration(DurationType::Pause, t_pause, QDateTime::currentDateTime()));
-		}
-		else {
-			durations_.back().endTime = QDateTime::currentDateTime();
-			durations_.back().duration += t_pause;
-		}
+		QDateTime now = QDateTime::currentDateTime();
+		if (t_pause > 0) {
+			if (durations_.empty() || durations_.back().type != DurationType::Pause) {
+				durations_.emplace_back(TimeDuration(DurationType::Pause, t_pause, now));
+			}
+			else {
+				durations_.back().endTime = now;
+				durations_.back().duration += t_pause;
+			}
+		}		
 		mode_ = Mode::Activity;
 		if (settings_.logToFile())
 			Logger::Log("[TIMER] > Timer unpaused");
@@ -60,7 +63,15 @@ void TimeTracker::backpauseTimer()
 
 			qint64 t_active = timer_.restart() - backpause_msec;
 			QDateTime activiy_end = now.addMSecs(-backpause_msec);
-			durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, activiy_end));
+			if (t_active > 0) {
+				if (durations_.empty() || durations_.back().type != DurationType::Activity) {
+					durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, activiy_end));
+				}
+				else {
+					durations_.back().endTime = activiy_end;
+					durations_.back().duration += t_active;
+				}
+			}
 
 			durations_.emplace_back(TimeDuration(DurationType::Pause, backpause_msec, now));
 
@@ -91,6 +102,8 @@ void TimeTracker::stopTimer()
 			Logger::Log("[TIMER] Total Activity Time was " + convMSecToTimeStr(getActiveTime()) + ", Total Pause Time was " + convMSecToTimeStr(getPauseTime()));
 		}
 	}
+
+	cleanDurations(durations_);
 
 	if (db_.saveDurations(durations_, TransactionMode::Append)) {
 		durations_.clear();
@@ -178,12 +191,39 @@ std::deque<TimeDuration> TimeTracker::getDurationsHistory()
 
 bool TimeTracker::appendDurationsToDB()
 {
+	cleanDurations(this->durations_);
 	return db_.saveDurations(this->durations_, TransactionMode::Append);
 }
 
-bool TimeTracker::replaceDurationsInDB(const std::deque<TimeDuration> &durations)
+bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> &durations)
 {
+	cleanDurations(durations);
 	return db_.saveDurations(durations, TransactionMode::Replace);
 }
 
+static void cleanDurations(std::deque<TimeDuration>& durations)
+{
+	if (durations.size() < 2) {
+		return;
+	}
+	for (auto it = durations.begin() + 1; it != durations.end(); /* ! */) {
+		auto prevIt = std::prev(it);
 
+		if (prevIt->type == it->type) {
+			qint64 endTimeDiff = std::abs(prevIt->endTime.toMSecsSinceEpoch() - it->endTime.toMSecsSinceEpoch());
+			qint64 DurDiff = std::abs(prevIt->duration - it->duration);
+			qint64 startEndDiff = std::abs(prevIt->endTime.toMSecsSinceEpoch() - (it->endTime.toMSecsSinceEpoch() - it->duration));
+
+			if (endTimeDiff < 50 && DurDiff < 50) {
+				it = durations.erase(it);
+				continue;
+			}
+			else if (startEndDiff < 500) {
+				prevIt->duration += it->duration;
+				it = durations.erase(it);
+				continue;
+			}
+		}
+		++it;
+	}
+}

@@ -11,6 +11,7 @@
 #include "types.h"
 #include "databasemanager.h"
 
+static void cleanDurations(std::deque<TimeDuration>& durations);
 
 class TimeTracker : public QObject
 {
@@ -29,7 +30,7 @@ private:
 	void stopTimer();
 	void pauseTimer();
 	void backpauseTimer();
-
+	
 public:
 	explicit TimeTracker(const Settings & settings, QObject *parent = nullptr);
 	~TimeTracker();
@@ -40,7 +41,7 @@ public:
 	std::deque<TimeDuration> TimeTracker::getDurationsHistory();
     void setDurationType(size_t idx, DurationType type);
 	bool appendDurationsToDB();
-	bool replaceDurationsInDB(const std::deque<TimeDuration>& durations);
+	bool replaceDurationsInDB(std::deque<TimeDuration>& durations);
 
 public slots:
 	void useTimerViaButton(Button button);
