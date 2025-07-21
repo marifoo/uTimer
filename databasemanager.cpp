@@ -16,9 +16,19 @@ DatabaseManager::DatabaseManager(int history_days_to_keep, QObject *parent)
 DatabaseManager::~DatabaseManager()
 {
     if (db.isOpen()) {
-
-        
-
+        if (db.transaction()) {
+            QSqlQuery query;
+            query.prepare("DELETE FROM durations WHERE end_date < date('now', :days || ' days')");
+            query.bindValue(":days", QString::number(-history_days_to_keep_));
+            if (!query.exec()) {
+                db.rollback();
+                Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
+            } else {
+                db.commit();
+            }
+        } else {
+            Logger::Log("[DB] Error starting transaction: " + db.lastError().text());
+        }
         db.close();
     }
 }
@@ -51,7 +61,10 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
         return false;
     }
 
-    db.transaction();
+    if (!db.transaction()) {
+        Logger::Log("[DB] Error starting transaction for Saving: " + db.lastError().text());
+        return false;
+    }
 
     if (mode == TransactionMode::Replace) {
         // clear existing entries
