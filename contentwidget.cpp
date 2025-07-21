@@ -161,25 +161,33 @@ void ContentWidget::pressedAutoPauseButton()
 
 void ContentWidget::pressedShowHistoryButton()
 {
-    auto currentDurations = timetracker_.getCurrentDurations();
-    auto historyDurations = timetracker_.getDurationsHistory();
+	auto currentDurations = timetracker_.getCurrentDurations();
+	auto historyDurations = timetracker_.getDurationsHistory();
 
-    QMap<QDate, std::vector<TimeDuration>> historyByDay;
-    for (const auto& d : historyDurations) {
-        historyByDay[d.endTime.date()].push_back(d);
-    }
-    QList<QDate> historyDates = historyByDay.keys();
-    std::sort(historyDates.begin(), historyDates.end());
+	QMap<QDate, std::vector<TimeDuration>> historyByDay;
+	for (const auto& d : historyDurations) {
+		historyByDay[d.endTime.date()].push_back(d);
+	}
+	QList<QDate> historyDates = historyByDay.keys();
+	std::sort(historyDates.begin(), historyDates.end());
 
-    struct Page {
-        QString title;
-        std::vector<TimeDuration> durations;
-        bool isCurrent;
-    };
-    std::vector<Page> pages;
-    pages.push_back({"Current Session", std::vector<TimeDuration>(currentDurations.begin(), currentDurations.end()), true});
+	struct Page {
+		QString title;
+		std::vector<TimeDuration> durations;
+		bool isCurrent;
+	};
+	std::vector<Page> pages;
+	pages.push_back({
+		QString("Current Session (entries: ") + QString::number(currentDurations.size()) + QString(")"),
+		std::vector<TimeDuration>(currentDurations.begin(), currentDurations.end()),
+		true
+	});
     for (const QDate& date : historyDates) {
-        pages.push_back({date.toString("yyyy-MM-dd"), historyByDay[date], false});
+        pages.push_back({
+			date.toString("yyyy-MM-dd") + QString(" (entries: ") + QString::number(historyByDay[date].size()) + QString(")"),
+			historyByDay[date], 
+			false
+		});
     }
 
     int pageIndex = 0;
