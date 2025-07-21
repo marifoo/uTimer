@@ -7,6 +7,7 @@
 class Logger
 {
 	QFile *logfile_;
+	const static int max_lines_ = 1024;
 
 	Logger();
 	void log(const QString & text);
