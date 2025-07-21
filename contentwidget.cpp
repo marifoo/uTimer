@@ -171,24 +171,38 @@ void ContentWidget::pressedShowHistoryButton()
 	QList<QDate> historyDates = historyByDay.keys();
 	std::sort(historyDates.begin(), historyDates.end());
 
+	auto calculateTotals = [](const std::vector<DurationType>& types, const std::vector<TimeDuration>& durations) {
+		qint64 totalActivity = 0;
+		qint64 totalPause = 0;
+		for (size_t i = 0; i < durations.size(); ++i) {
+			if (types[i] == DurationType::Activity)
+				totalActivity += durations[i].duration;
+			else
+				totalPause += durations[i].duration;
+		}
+		return std::make_pair(totalActivity, totalPause);
+	};
+
 	struct Page {
 		QString title;
 		std::vector<TimeDuration> durations;
 		bool isCurrent;
 	};
 	std::vector<Page> pages;
+
 	pages.push_back({
 		QString("Current Session (entries: ") + QString::number(currentDurations.size()) + QString(")"),
 		std::vector<TimeDuration>(currentDurations.begin(), currentDurations.end()),
 		true
 	});
-    for (const QDate& date : historyDates) {
-        pages.push_back({
+
+	for (const QDate& date : historyDates) {
+		pages.push_back({
 			date.toString("yyyy-MM-dd") + QString(" (entries: ") + QString::number(historyByDay[date].size()) + QString(")"),
-			historyByDay[date], 
+			historyByDay[date],
 			false
 		});
-    }
+	}
 
     int pageIndex = 0;
     std::vector<std::vector<DurationType>> edits(pages.size());
@@ -230,10 +244,16 @@ void ContentWidget::pressedShowHistoryButton()
     dlg.setLayout(layout);
     dlg.resize(500, 400);
 
+    auto updateTotalsLabel = [&](int idx) {
+        auto totals = calculateTotals(edits[idx], pages[idx].durations);
+        QString totalsStr = QString("\nActivity: ") + convMSecToTimeStr(totals.first) + QString("  Pause: ") + convMSecToTimeStr(totals.second);
+        pageLabel->setText(pages[idx].title + totalsStr);
+    };
+
     auto updateTable = [&](int idx) {
         table->clearContents();
         table->setRowCount(static_cast<int>(pages[idx].durations.size()));
-        pageLabel->setText(pages[idx].title);
+        updateTotalsLabel(idx);
         for (int row = 0; row < int(pages[idx].durations.size()); ++row) {
             const auto& d = pages[idx].durations[row];
             QString typeStr = (edits[idx][row] == DurationType::Activity) ? "Activity    " : "Pause    ";
@@ -249,25 +269,26 @@ void ContentWidget::pressedShowHistoryButton()
                 edits[idx][row] = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
                 QString typeStr = (edits[idx][row] == DurationType::Activity) ? "Activity *  " : "Pause *  ";
                 table->item(row, 0)->setText(typeStr);
+                updateTotalsLabel(idx);
             });
         }
         nextButton->setEnabled(idx > 0);
-		prevButton->setEnabled(idx < int(pages.size()) - 1);
+        prevButton->setEnabled(idx < int(pages.size()) - 1);
     };
 
     updateTable(pageIndex);
 
     QObject::connect(prevButton, &QPushButton::clicked, [&]() {
-		if (pageIndex < int(pages.size()) - 1) {
-			pageIndex++;
-			updateTable(pageIndex);
-		}
+        if (pageIndex < int(pages.size()) - 1) {
+            pageIndex++;
+            updateTable(pageIndex);
+        }
     });
     QObject::connect(nextButton, &QPushButton::clicked, [&]() {
-		if (pageIndex > 0) {
-			pageIndex--;
-			updateTable(pageIndex);
-		}
+        if (pageIndex > 0) {
+            pageIndex--;
+            updateTable(pageIndex);
+        }
     });
     QObject::connect(okButton, &QPushButton::clicked, &dlg, &QDialog::accept);
     QObject::connect(cancelButton, &QPushButton::clicked, &dlg, &QDialog::reject);
