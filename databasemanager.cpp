@@ -6,7 +6,8 @@
 #include <QVariant>
 #include "logger.h"
 
-DatabaseManager::DatabaseManager(QObject *parent) : QObject(parent)
+DatabaseManager::DatabaseManager(int history_days_to_keep, QObject *parent)
+    : history_days_to_keep_(history_days_to_keep), QObject(parent)
 {
     db = QSqlDatabase::addDatabase("QSQLITE");
     db.setDatabaseName("uTimer.sqlite");
@@ -15,6 +16,9 @@ DatabaseManager::DatabaseManager(QObject *parent) : QObject(parent)
 DatabaseManager::~DatabaseManager()
 {
     if (db.isOpen()) {
+
+        
+
         db.close();
     }
 }

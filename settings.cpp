@@ -23,7 +23,9 @@ void Settings::readSettingsFile()
 	pause_for_warning_nopause_min_ = 30;
 	warning_activity_ = sfile_.value("uTimer/show_warning_after_9h45min_activity", false).toBool();
 	warning_activity_min_ = 9*60+45;
+	history_days_to_keep_ = sfile_.value("uTimer/history_days_to_keep", 99).toInt();
 	log_to_file_ = sfile_.value("uTimer/debug_log_to_file", false).toBool();
+	
 }
 
 void Settings::writeSettingsFile()
@@ -36,6 +38,7 @@ void Settings::writeSettingsFile()
 	sfile_.setValue("uTimer/show_warning_when_not_30min_pause_after_6h_activity", warning_nopause_);
 	sfile_.setValue("uTimer/show_warning_after_9h45min_activity", warning_activity_);
 	sfile_.setValue("uTimer/debug_log_to_file", log_to_file_);
+	sfile_.setValue("uTimer/history_days_to_keep", history_days_to_keep_);
 
 	if (log_to_file_) {
 		if (autopause_enabled_)
@@ -43,6 +46,11 @@ void Settings::writeSettingsFile()
 		else
 			Logger::Log("Autopause is disabled");
 	}
+}
+
+int Settings::getHistoryDays() const
+{
+	return history_days_to_keep_;
 }
 
 bool Settings::isAutopauseEnabled() const

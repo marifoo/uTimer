@@ -6,7 +6,7 @@
 
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent) 
     : QObject(parent), settings_(settings), mode_(Mode::None), 
-      was_active_before_autopause_(false)
+	was_active_before_autopause_(false), db_(settings.getHistoryDays()), timer_()
 {
 	;
 }

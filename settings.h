@@ -20,11 +20,13 @@ private:
 	int pause_for_warning_nopause_min_;
 	int warning_activity_min_;
 	bool log_to_file_;
+	int history_days_to_keep_;
 	void readSettingsFile();
 	void writeSettingsFile();
 
 public:
 	Settings(const QString filename);
+	int getHistoryDays() const;
 	bool isAutopauseEnabled() const;
 	bool isAutostartTimingEnabled() const;
 	bool isMinimizedStartEnabled() const;

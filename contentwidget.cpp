@@ -84,8 +84,7 @@ void ContentWidget::setupButtonRows()
 	timerbutton_row_->addWidget(startpause_button_);
 	timerbutton_row_->addWidget(stop_button_);
 
-
-	// [History]
+	// [History..]
 	historybutton_row_ = new QHBoxLayout();
 	show_history_button_ = new QPushButton("History..");
 	show_history_button_->setFont(button_font);

@@ -11,7 +11,7 @@ class DatabaseManager : public QObject
 {
     Q_OBJECT
 public:
-    explicit DatabaseManager(QObject *parent = nullptr);
+    explicit DatabaseManager(int history_days_to_keep, QObject *parent = nullptr);
     ~DatabaseManager();
 
     bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode);
@@ -19,7 +19,7 @@ public:
 
 private:
     QSqlDatabase db;
-
+	int history_days_to_keep_;
     bool lazyInit();
 };
 
