@@ -92,9 +92,15 @@ void TimeTracker::stopTimer()
 		}
 	}
 
-	if (!db_.saveDurations(durations_, TransactionMode::Append)) {
+	if (db_.saveDurations(durations_, TransactionMode::Append)) {
+		durations_.clear();
 		if (settings_.logToFile()) {
-			Logger::Log("[TIMER] Database not updated");
+			Logger::Log("[TIMER] Database updated");
+		}
+	}
+	else {
+		if (settings_.logToFile()) {
+			Logger::Log("[TIMER] Database Update Error");
 		}
 	}
 }
