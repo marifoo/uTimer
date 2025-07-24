@@ -169,7 +169,7 @@ void ContentWidget::pressedShowHistoryButton()
 		historyByDay[d.endTime.date()].push_back(d);
 	}
 	QList<QDate> historyDates = historyByDay.keys();
-	std::sort(historyDates.begin(), historyDates.end());
+	std::sort(historyDates.begin(), historyDates.end(), std::greater<QDate>());
 
 	auto calculateTotals = [](const std::vector<DurationType>& types, const std::vector<TimeDuration>& durations) {
 		qint64 totalActivity = 0;
@@ -204,7 +204,7 @@ void ContentWidget::pressedShowHistoryButton()
 		});
 	}
 
-    int pageIndex = 0;
+    uint pageIndex = 0;
     std::vector<std::vector<DurationType>> edits(pages.size());
     for (size_t i = 0; i < pages.size(); ++i) {
         edits[i].resize(pages[i].durations.size());
@@ -272,14 +272,14 @@ void ContentWidget::pressedShowHistoryButton()
                 updateTotalsLabel(idx);
             });
         }
-        nextButton->setEnabled(idx > 0);
-        prevButton->setEnabled(idx < int(pages.size()) - 1);
+        prevButton->setEnabled(pageIndex < pages.size() - 1); // Enable if there are older days
+        nextButton->setEnabled(pageIndex > 0);                // Enable if we can go back to newer days
     };
 
     updateTable(pageIndex);
 
     QObject::connect(prevButton, &QPushButton::clicked, [&]() {
-        if (pageIndex < int(pages.size()) - 1) {
+        if (pageIndex < pages.size() - 1) {
             pageIndex++;
             updateTable(pageIndex);
         }
