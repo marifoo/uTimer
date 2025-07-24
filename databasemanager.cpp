@@ -5,9 +5,10 @@
 #include <QSqlError>
 #include <QVariant>
 #include "logger.h"
+#include "settings.h"
 
-DatabaseManager::DatabaseManager(int history_days_to_keep, QObject *parent)
-    : history_days_to_keep_(std::max(history_days_to_keep, 0)), QObject(parent)
+DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
+    : history_days_to_keep_(std::max(settings.getHistoryDays(), 0)), QObject(parent), settings_(settings)
 {
     db = QSqlDatabase::addDatabase("QSQLITE");
     db.setDatabaseName("uTimer.sqlite");
@@ -28,7 +29,8 @@ bool DatabaseManager::lazyOpen()
         return true;
 	}
     if (!db.open()) {
-        Logger::Log("[DB] Error opening database: " + db.lastError().text());
+        if (settings_.logToFile())
+            Logger::Log("[DB] Error opening database: " + db.lastError().text());
         return false;
     }
 
@@ -59,14 +61,16 @@ void DatabaseManager::lazyClose()
 
             if (!query.exec()) {
                 db.rollback();
-                Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
+                if (settings_.logToFile())
+                    Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
             }
             else {
                 db.commit();
             }
         }
         else {
-            Logger::Log("[DB] Error starting transaction: " + db.lastError().text());
+            if (settings_.logToFile())
+                Logger::Log("[DB] Error starting transaction: " + db.lastError().text());
         }
         db.close();
     }
@@ -79,7 +83,8 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
     }
 
     if (!db.transaction()) {
-        Logger::Log("[DB] Error starting transaction for Saving: " + db.lastError().text());
+        if (settings_.logToFile())
+            Logger::Log("[DB] Error starting transaction for Saving: " + db.lastError().text());
         return false;
     }
 
@@ -88,7 +93,8 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
         QSqlQuery clearQuery("DELETE FROM durations");
         if (!clearQuery.exec()) {
             db.rollback();
-            Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
+            if (settings_.logToFile())
+                Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
             return false;
         }
 	}
@@ -105,7 +111,8 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
         
         if (!query.exec()) {
             db.rollback();
-            Logger::Log("[DB] Error inserting duration: " + query.lastError().text());
+            if (settings_.logToFile())
+                Logger::Log("[DB] Error inserting duration: " + query.lastError().text());
             return false;
         }
     }

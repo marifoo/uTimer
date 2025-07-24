@@ -6,12 +6,13 @@
 #include <QDateTime>
 #include <deque>
 #include "types.h"
+#include "settings.h"
 
 class DatabaseManager : public QObject
 {
     Q_OBJECT
 public:
-    explicit DatabaseManager(int history_days_to_keep, QObject *parent = nullptr);
+    explicit DatabaseManager(const Settings& settings, QObject *parent = nullptr);
     ~DatabaseManager();
 
     bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode);
@@ -19,7 +20,8 @@ public:
 
 private:
     QSqlDatabase db;
-	uint history_days_to_keep_;
+    uint history_days_to_keep_;
+    const Settings& settings_;
     bool lazyOpen();
     void lazyClose();
 };

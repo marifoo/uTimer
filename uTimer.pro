@@ -27,7 +27,7 @@ INCLUDEPATH = \
 
 TEMPLATE = app
 
-CONFIG += qt c++14
+CONFIG += qt c++17
 
 QT += widgets sql
 

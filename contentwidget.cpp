@@ -392,3 +392,8 @@ bool ContentWidget::isGUIinActivity()
 	return (startpause_button_->text() == "PAUSE");
 }
 
+bool ContentWidget::isGUIinPause() 
+{ 
+	return startpause_button_->text() == "CONTINUE"; 
+}
+

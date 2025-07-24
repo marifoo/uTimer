@@ -6,7 +6,7 @@
 
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent) 
     : QObject(parent), settings_(settings), mode_(Mode::None), 
-	was_active_before_autopause_(false), db_(settings.getHistoryDays()), timer_()
+	was_active_before_autopause_(false), db_(settings, parent), timer_()
 {
 	;
 }
@@ -108,12 +108,12 @@ void TimeTracker::stopTimer()
 	if (db_.saveDurations(durations_, TransactionMode::Append)) {
 		durations_.clear();
 		if (settings_.logToFile()) {
-			Logger::Log("[TIMER] Database updated");
+			Logger::Log("[DB] Database updated");
 		}
 	}
 	else {
 		if (settings_.logToFile()) {
-			Logger::Log("[TIMER] Database Update Error");
+			Logger::Log("[DB] Database Update Error");
 		}
 	}
 }

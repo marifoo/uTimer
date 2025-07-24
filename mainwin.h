@@ -15,7 +15,7 @@ private:
 	ContentWidget *content_widget_;
 	QSystemTrayIcon *tray_icon_;
 	const Settings & settings_;
-	const TimeTracker& timetracker_;
+	TimeTracker& timetracker_;
 
 	bool warning_activity_shown_;
 	bool warning_pause_shown_;
@@ -27,6 +27,10 @@ private:
 	void showActivityWarnings();
 	void setupIcon();
 	void setupCentralWidget(Settings &settings, TimeTracker &timetracker);
+	void shutdown();
+
+protected:
+	bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
 
 public:
 	explicit MainWin(Settings &settings, TimeTracker &timetracker, QWidget *parent = nullptr);
@@ -41,6 +45,7 @@ public slots:
 	void minToTray();
 	void toggleAlwaysOnTop();
 	void reactOnLockState(LockEvent event);
+	void onAboutToQuit();
 };
 
 #endif // MAINWIN_H

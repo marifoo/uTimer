@@ -33,6 +33,8 @@ int main(int argc, char *argv[])
 	QObject::connect(&lockstate_watcher, SIGNAL(desktopLockEvent(LockEvent)),	&time_tracker, SLOT(useTimerViaLockEvent(LockEvent)));
 	QObject::connect(&lockstate_watcher, SIGNAL(desktopLockEvent(LockEvent)), &main_win, SLOT(reactOnLockState(LockEvent)));
 
+	QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &main_win, &MainWin::onAboutToQuit);
+
 	timer.setInterval(100);
 	timer.start();
 

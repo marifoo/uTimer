@@ -55,6 +55,7 @@ public:
 	void updateTimes();
 	QString getTooltip();
 	bool isGUIinActivity();
+	bool isGUIinPause();
 
 signals:
 	void minToTray();

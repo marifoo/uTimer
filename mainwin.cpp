@@ -3,9 +3,12 @@
 #include <QTime>
 #include <QSystemTrayIcon>
 #include <QMessageBox>
+#include "logger.h"
 #include "helpers.h"
 
-
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 MainWin::MainWin(Settings& settings, TimeTracker& timetracker, QWidget *parent)	
 	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), warning_pause_shown_(false), was_active_before_autopause_(false)
@@ -151,6 +154,40 @@ void MainWin::start()
 	warning_pause_shown_ = !settings_.showNoPauseWarning();
 }
 
+void MainWin::shutdown()
+{
+	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
+		timetracker_.useTimerViaButton(Button::Stop);
+		emit sendButtons(Button::Stop);
+	}
 
+	if (settings_.logToFile())
+		Logger::Log("Shutdown requested");
+}
 
+void MainWin::onAboutToQuit()
+{
+	shutdown();
+}
 
+bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* message, long* result)
+{
+#ifdef Q_OS_WIN
+	MSG* msg = static_cast<MSG*>(message);
+	if (msg->message == WM_QUERYENDSESSION)
+	{
+		// Windows is asking if we can shutdown - allow it
+		*result = TRUE;
+		return true;
+	}
+	else if (msg->message == WM_ENDSESSION && msg->wParam)
+	{
+		// Windows is shutting down - stop the timer if it's running
+		shutdown();
+
+		*result = 0;
+		return true;
+	}
+#endif
+	return QMainWindow::nativeEvent(eventType, message, result);
+}
