@@ -191,6 +191,7 @@
     <ClCompile Include="contentwidget.cpp" />
     <ClCompile Include="databasemanager.cpp" />
     <ClCompile Include="helpers.cpp" />
+    <ClCompile Include="historydialog.cpp" />
     <ClCompile Include="lockstatewatcher.cpp" />
     <ClCompile Include="logger.cpp" />
     <ClCompile Include="main.cpp" />
@@ -203,6 +204,7 @@
     <QtMoc Include="databasemanager.h" />
     <ClInclude Include="helpers.h" />
     <QtMoc Include="lockstatewatcher.h" />
+    <QtMoc Include="historydialog.h" />
     <ClInclude Include="logger.h" />
     <QtMoc Include="mainwin.h" />
     <ClInclude Include="settings.h" />

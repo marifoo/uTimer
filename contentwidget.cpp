@@ -12,6 +12,7 @@
 #include <QHeaderView>
 #include <QCheckBox>
 #include "helpers.h"
+#include "historydialog.h"
 
 ContentWidget::ContentWidget(Settings & settings, TimeTracker &timetracker, QWidget *parent) 
 	: QWidget(parent), settings_(settings), button_hold_color_(QColor(180,216,228,255)), timetracker_(timetracker)
@@ -161,156 +162,8 @@ void ContentWidget::pressedAutoPauseButton()
 
 void ContentWidget::pressedShowHistoryButton()
 {
-	auto currentDurations = timetracker_.getCurrentDurations();
-	auto historyDurations = timetracker_.getDurationsHistory();
-
-	QMap<QDate, std::vector<TimeDuration>> historyByDay;
-	for (const auto& d : historyDurations) {
-		historyByDay[d.endTime.date()].push_back(d);
-	}
-	QList<QDate> historyDates = historyByDay.keys();
-	std::sort(historyDates.begin(), historyDates.end(), std::greater<QDate>());
-
-	auto calculateTotals = [](const std::vector<DurationType>& types, const std::vector<TimeDuration>& durations) {
-		qint64 totalActivity = 0;
-		qint64 totalPause = 0;
-		for (size_t i = 0; i < durations.size(); ++i) {
-			if (types[i] == DurationType::Activity)
-				totalActivity += durations[i].duration;
-			else
-				totalPause += durations[i].duration;
-		}
-		return std::make_pair(totalActivity, totalPause);
-	};
-
-	struct Page {
-		QString title;
-		std::vector<TimeDuration> durations;
-		bool isCurrent;
-	};
-	std::vector<Page> pages;
-
-	pages.push_back({
-		QString("Current Session (entries: ") + QString::number(currentDurations.size()) + QString(")"),
-		std::vector<TimeDuration>(currentDurations.begin(), currentDurations.end()),
-		true
-	});
-
-	for (const QDate& date : historyDates) {
-		pages.push_back({
-			date.toString("yyyy-MM-dd") + QString(" (entries: ") + QString::number(historyByDay[date].size()) + QString(")"),
-			historyByDay[date],
-			false
-		});
-	}
-
-    uint pageIndex = 0;
-    std::vector<std::vector<DurationType>> edits(pages.size());
-    for (size_t i = 0; i < pages.size(); ++i) {
-        edits[i].resize(pages[i].durations.size());
-        for (size_t j = 0; j < pages[i].durations.size(); ++j) {
-            edits[i][j] = pages[i].durations[j].type;
-        }
-    }
-
-    QDialog dlg(this);
-    dlg.setWindowTitle("History");
-    QVBoxLayout* layout = new QVBoxLayout(&dlg);
-    QLabel* pageLabel = new QLabel(&dlg);
-    layout->addWidget(pageLabel);
-    QTableWidget* table = new QTableWidget(&dlg);
-    table->setColumnCount(4);
-    table->setHorizontalHeaderLabels({ "Type      ", "Start - End   ", "Duration   ", "Activity   " });
-    table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    table->setSelectionMode(QAbstractItemView::NoSelection);
-    layout->addWidget(table);
-    QHBoxLayout* navLayout = new QHBoxLayout();
-    QPushButton* prevButton = new QPushButton("Previous", &dlg);
-    QPushButton* nextButton = new QPushButton("Next", &dlg);
-    navLayout->addWidget(prevButton);
-    navLayout->addWidget(nextButton);
-    layout->addLayout(navLayout);
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
-    QPushButton* okButton = new QPushButton("OK", &dlg);
-    QPushButton* cancelButton = new QPushButton("Cancel", &dlg);
-    buttonLayout->addStretch();
-    buttonLayout->addWidget(okButton);
-    buttonLayout->addWidget(cancelButton);
-    layout->addLayout(buttonLayout);
-    dlg.setLayout(layout);
-    dlg.resize(500, 400);
-
-    auto updateTotalsLabel = [&](int idx) {
-        auto totals = calculateTotals(edits[idx], pages[idx].durations);
-        QString totalsStr = QString("\nActivity: ") + convMSecToTimeStr(totals.first) + QString("  Pause: ") + convMSecToTimeStr(totals.second);
-        pageLabel->setText(pages[idx].title + totalsStr);
-    };
-
-    auto updateTable = [&](int idx) {
-        table->clearContents();
-        table->setRowCount(static_cast<int>(pages[idx].durations.size()));
-        updateTotalsLabel(idx);
-        for (int row = 0; row < int(pages[idx].durations.size()); ++row) {
-            const auto& d = pages[idx].durations[row];
-            QString typeStr = (edits[idx][row] == DurationType::Activity) ? "Activity    " : "Pause    ";
-            table->setItem(row, 0, new QTableWidgetItem(typeStr));
-            QString startEndStr = d.endTime.addMSecs(-d.duration).toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss");
-            table->setItem(row, 1, new QTableWidgetItem(startEndStr));
-            QString durationStr = convMSecToTimeStr(d.duration) + "  ";
-            table->setItem(row, 2, new QTableWidgetItem(durationStr));
-            QCheckBox* box = new QCheckBox(table);
-            box->setChecked(edits[idx][row] == DurationType::Activity);
-            table->setCellWidget(row, 3, box);
-            QObject::connect(box, &QCheckBox::stateChanged, [&, idx, row, box](int state) {
-                edits[idx][row] = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
-                QString typeStr = (edits[idx][row] == DurationType::Activity) ? "Activity *  " : "Pause *  ";
-                table->item(row, 0)->setText(typeStr);
-                updateTotalsLabel(idx);
-            });
-        }
-        prevButton->setEnabled(pageIndex < pages.size() - 1); // Enable if there are older days
-        nextButton->setEnabled(pageIndex > 0);                // Enable if we can go back to newer days
-    };
-
-    updateTable(pageIndex);
-
-    QObject::connect(prevButton, &QPushButton::clicked, [&]() {
-        if (pageIndex < pages.size() - 1) {
-            pageIndex++;
-            updateTable(pageIndex);
-        }
-    });
-    QObject::connect(nextButton, &QPushButton::clicked, [&]() {
-        if (pageIndex > 0) {
-            pageIndex--;
-            updateTable(pageIndex);
-        }
-    });
-    QObject::connect(okButton, &QPushButton::clicked, &dlg, &QDialog::accept);
-    QObject::connect(cancelButton, &QPushButton::clicked, &dlg, &QDialog::reject);
-
-    if (dlg.exec() == QDialog::Accepted) {
-        for (size_t i = 0; i < pages.size(); ++i) {
-            for (size_t j = 0; j < pages[i].durations.size(); ++j) {
-                if (pages[i].isCurrent) {
-                    timetracker_.setDurationType(j, edits[i][j]);
-                } else {
-                    pages[i].durations[j].type = edits[i][j];
-                }
-            }
-        }
-        std::deque<TimeDuration> allHistory;
-        for (size_t i = 1; i < pages.size(); ++i) {
-            allHistory.insert(allHistory.end(), pages[i].durations.begin(), pages[i].durations.end());
-        }
-        if (!allHistory.empty()) {
-            timetracker_.replaceDurationsInDB(allHistory);
-        }
-    }
+    HistoryDialog dlg(timetracker_, this);
+    dlg.exec();
 }
 
 void ContentWidget::setActivityTimeTooltip(const QString &hours /* ="0.00" */)

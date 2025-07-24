@@ -9,7 +9,8 @@ HEADERS = \
    $$PWD/settings.h \
    $$PWD/types.h \
    $$PWD/helpers.h \
-   $$PWD/logger.h
+   $$PWD/logger.h \
+   $$PWD/historydialog.h
 
 SOURCES = \
    $$PWD/contentwidget.cpp \
@@ -18,9 +19,11 @@ SOURCES = \
    $$PWD/mainwin.cpp \
    $$PWD/timetracker.cpp \
    $$PWD/lockstatewatcher.cpp \
+   $$PWD/historydialog.cpp \
    $$PWD/settings.cpp \
    $$PWD/helpers.cpp \
-   $$PWD/logger.cpp
+   $$PWD/logger.cpp \
+   $$PWD/historydialog.cpp
 
 INCLUDEPATH = \
     $$PWD/.
@@ -37,5 +40,6 @@ RESOURCES += \
     icon.qrc
 
 DISTFILES += \
-    README.md
+    README.md \
+	QT-LICENSE.md
 
