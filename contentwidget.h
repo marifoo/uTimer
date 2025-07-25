@@ -27,6 +27,9 @@ private:
 	QHBoxLayout *pause_row_;
 	QLabel *pause_text_;
 	QLabel *pause_time_;
+	QHBoxLayout *starttime_row_;
+	QLabel *starttime_text_;
+	QLabel *starttime_value_;
 	QHBoxLayout *timerbutton_row_;
 	QPushButton *startpause_button_;
 	QPushButton *stop_button_;

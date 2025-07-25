@@ -34,6 +34,7 @@ void ContentWidget::setupGUI()
 	setupTimeRows();
 	setupButtonRows();
 
+	rows_->addLayout(starttime_row_);
 	rows_->addLayout(activity_row_);
 	rows_->addLayout(pause_row_);
 	rows_->addLayout(timerbutton_row_);
@@ -47,6 +48,16 @@ void ContentWidget::setupTimeRows()
 {
 	QFont label_font = QApplication::font();
 	label_font.setPointSize(9);
+
+	// Start Time: --:--
+	starttime_row_ = new QHBoxLayout();
+	starttime_text_ = new QLabel("Start Time:");
+	starttime_text_->setFont(label_font);
+	starttime_value_ = new QLabel("--:--");
+	starttime_value_->setFont(label_font);
+	starttime_value_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+	starttime_row_->addWidget(starttime_text_);
+	starttime_row_->addWidget(starttime_value_);
 
 	// Activity Time:  00:00:00
 	activity_row_ = new QHBoxLayout();
@@ -189,9 +200,11 @@ void ContentWidget::manageTooltipsForActivity()
 	const bool from_pause = (startpause_button_->text() == "CONTINUE");
 
 	if (from_stopped) {
-		activity_time_tooltip_base_ = "h overall since " + QTime::currentTime().toString("hh:mm") + " o'clock";
+		activity_time_tooltip_base_ = "h overall since " + QTime::currentTime().toString("HH:mm") + " o'clock";
 		setActivityTimeTooltip();
 		resetPauseTimeTooltip();
+		// Update start time when starting from stopped state
+		starttime_value_->setText(QTime::currentTime().toString("HH:mm"));
 	}
 	else if (from_pause) {
 		setPauseTimeTooltip();
@@ -205,6 +218,11 @@ void ContentWidget::setGUItoActivity()
 	startpause_button_->setText("PAUSE");
 	activity_time_->setStyleSheet("QLabel {color : green; }");
 	pause_time_->setStyleSheet("QLabel { color : black; }");
+	
+	// Update start time when starting from stopped state
+	if (startpause_button_->text() == "START") {
+		starttime_value_->setText(QTime::currentTime().toString("HH:mm"));
+	}
 }
 
 void ContentWidget::setGUItoStop()
@@ -212,6 +230,7 @@ void ContentWidget::setGUItoStop()
 	startpause_button_->setText("START");
 	activity_time_->setStyleSheet("QLabel {color : black; }");
 	pause_time_->setStyleSheet("QLabel { color : black; }");
+	starttime_value_->setText("--:--");
 }
 
 void ContentWidget::setGUItoPause()
