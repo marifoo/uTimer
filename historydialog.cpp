@@ -6,7 +6,11 @@
 #include <QHeaderView>
 #include <QCheckBox>
 #include <QPushButton>
+#include <QMenu>
+#include <QMessageBox>
 #include "helpers.h"
+#include <QSlider>
+#include <QDialogButtonBox>
 
 HistoryDialog::HistoryDialog(TimeTracker& timetracker, QWidget* parent)
     : QDialog(parent), timetracker_(timetracker), pageIndex_(0)
@@ -14,6 +18,8 @@ HistoryDialog::HistoryDialog(TimeTracker& timetracker, QWidget* parent)
     createPages();
     setupUI();
     updateTable(pageIndex_);
+    table_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(table_, &QTableWidget::customContextMenuRequested, this, &HistoryDialog::showContextMenu);
 }
 
 void HistoryDialog::createPages()
@@ -91,7 +97,7 @@ void HistoryDialog::setupUI()
     connect(okButton, &QPushButton::clicked, this, &QDialog::accept);
     connect(cancelButton, &QPushButton::clicked, this, &QDialog::reject);
 
-    resize(500, 400);
+    resize(400, 400);
 }
 
 std::pair<qint64, qint64> HistoryDialog::calculateTotals(const std::vector<DurationType>& types, const std::vector<TimeDuration>& durations)
@@ -183,4 +189,69 @@ void HistoryDialog::saveChanges()
             timetracker_.replaceDurationsInDB(allHistory);
         }
     }
+}
+
+void HistoryDialog::showContextMenu(const QPoint& pos)
+{
+    int row = table_->rowAt(pos.y());
+    if (row < 0) return;
+    contextMenuRow_ = row;
+    QMenu menu(this);
+    QAction* splitAction = menu.addAction("Split..");
+    connect(splitAction, &QAction::triggered, this, &HistoryDialog::onSplitRow);
+    menu.exec(table_->viewport()->mapToGlobal(pos));
+}
+
+void HistoryDialog::onSplitRow()
+{
+    if (contextMenuRow_ < 0) return;
+    int idx = pageIndex_;
+    const TimeDuration& duration = pages_[idx].durations[contextMenuRow_];
+    QDateTime start = duration.endTime.addMSecs(-duration.duration);
+    QDateTime end = duration.endTime;
+    SplitDialog dlg(start, end, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        QDateTime splitTime = dlg.getSplitTime();
+        // TODO: Implement actual split logic here
+        QMessageBox::information(this, "Split", QString("Split at %1").arg(splitTime.toString("hh:mm:ss")));
+    }
+}
+
+SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* parent)
+    : QDialog(parent), start_(start), end_(end)
+{
+    setWindowTitle("Split Duration");
+    QVBoxLayout* layout = new QVBoxLayout(this);
+    QHBoxLayout* rowLayout = new QHBoxLayout();
+    QLabel* startLabel = new QLabel(QString("Start: %1").arg(start.toString("hh:mm:ss")), this);
+    QLabel* endLabel = new QLabel(QString("End: %1").arg(end.toString("hh:mm:ss")), this);
+    slider_ = new QSlider(Qt::Horizontal, this);
+    slider_->setMinimum(1);
+    int totalSecs = start.secsTo(end) - 1;
+    slider_->setMaximum(totalSecs);
+    slider_->setValue(totalSecs / 2);
+    rowLayout->addWidget(startLabel);
+    rowLayout->addWidget(slider_);
+    rowLayout->addWidget(endLabel);
+    layout->addLayout(rowLayout);
+    splitTimeLabel_ = new QLabel(this);
+    layout->addWidget(splitTimeLabel_);
+    updateSplitLabel(slider_->value());
+    connect(slider_, &QSlider::valueChanged, this, &SplitDialog::updateSplitLabel);
+    QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    layout->addWidget(buttons);
+    resize(450, height());
+}
+
+void SplitDialog::updateSplitLabel(int value)
+{
+    QDateTime split = start_.addSecs(value);
+    splitTimeLabel_->setText(QString("Split Time: %1").arg(split.toString("hh:mm:ss")));
+}
+
+QDateTime SplitDialog::getSplitTime() const
+{
+    return start_.addSecs(slider_->value());
 }
