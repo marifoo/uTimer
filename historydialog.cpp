@@ -67,7 +67,8 @@ void HistoryDialog::setupUI()
     table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     table_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    table_->setSelectionMode(QAbstractItemView::NoSelection);
+    table_->setSelectionMode(QAbstractItemView::SingleSelection);
+    table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     layout->addWidget(table_);
 
     QHBoxLayout* navLayout = new QHBoxLayout();
