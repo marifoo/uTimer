@@ -55,6 +55,7 @@ void HistoryDialog::createPages()
             edits_[i][j] = pages_[i].durations[j].type;
         }
     }
+    editedRows_.resize(pages_.size());
 }
 
 void HistoryDialog::setupUI()
@@ -113,14 +114,14 @@ std::pair<qint64, qint64> HistoryDialog::calculateTotals(const std::vector<Durat
     return std::make_pair(totalActivity, totalPause);
 }
 
-void HistoryDialog::updateTotalsLabel(int idx)
+void HistoryDialog::updateTotalsLabel(uint idx)
 {
     auto totals = calculateTotals(edits_[idx], pages_[idx].durations);
     QString totalsStr = QString("\nActivity: ") + convMSecToTimeStr(totals.first) + QString("  Pause: ") + convMSecToTimeStr(totals.second);
     pageLabel_->setText(pages_[idx].title + totalsStr);
 }
 
-void HistoryDialog::updateTable(int idx)
+void HistoryDialog::updateTable(uint idx)
 {
     table_->clearContents();
     table_->setRowCount(static_cast<int>(pages_[idx].durations.size()));
@@ -128,14 +129,13 @@ void HistoryDialog::updateTable(int idx)
 
     for (int row = 0; row < int(pages_[idx].durations.size()); ++row) {
         const auto& d = pages_[idx].durations[row];
-        QString typeStr = (edits_[idx][row] == DurationType::Activity) ? "Activity    " : "Pause    ";
-        table_->setItem(row, 0, new QTableWidgetItem(typeStr));
-
-        QString startEndStr = d.endTime.addMSecs(-d.duration).toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss");
-        table_->setItem(row, 1, new QTableWidgetItem(startEndStr));
-
-        QString durationStr = convMSecToTimeStr(d.duration) + "  ";
-        table_->setItem(row, 2, new QTableWidgetItem(durationStr));
+        QString typeStr = (edits_[idx][row] == DurationType::Activity) ? "Activity  " : "Pause  ";
+        QTableWidgetItem* typeItem = new QTableWidgetItem(typeStr);
+        QTableWidgetItem* startEndItem = new QTableWidgetItem(d.endTime.addMSecs(-d.duration).toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss"));
+        QTableWidgetItem* durationItem = new QTableWidgetItem(convMSecToTimeStr(d.duration) + "  ");
+        table_->setItem(row, 0, typeItem);
+        table_->setItem(row, 1, startEndItem);
+        table_->setItem(row, 2, durationItem);
 
         QCheckBox* box = new QCheckBox(table_);
         box->setChecked(edits_[idx][row] == DurationType::Activity);
@@ -143,10 +143,23 @@ void HistoryDialog::updateTable(int idx)
 
         connect(box, &QCheckBox::stateChanged, [this, idx, row](int state) {
             edits_[idx][row] = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
-            QString typeStr = (edits_[idx][row] == DurationType::Activity) ? "Activity *  " : "Pause *  ";
+            QString typeStr = (edits_[idx][row] == DurationType::Activity) ? "Activity  " : "Pause  ";
             table_->item(row, 0)->setText(typeStr);
             updateTotalsLabel(idx);
+            editedRows_[idx].insert(row);
+            for (int col = 0; col < table_->columnCount(); ++col) {
+                if (table_->item(row, col))
+                    table_->item(row, col)->setBackground(QColor(180, 216, 228, 255));
+            }
         });
+
+        // Highlight edited/split rows
+        if (editedRows_.size() > idx && editedRows_[idx].count(row)) {
+            for (int col = 0; col < table_->columnCount(); ++col) {
+                if (table_->item(row, col))
+                    table_->item(row, col)->setBackground(QColor(180, 216, 228, 255));
+            }
+        }
     }
 
     prevButton_->setEnabled(pageIndex_ < pages_.size() - 1);
@@ -206,14 +219,31 @@ void HistoryDialog::onSplitRow()
 {
     if (contextMenuRow_ < 0) return;
     int idx = pageIndex_;
-    const TimeDuration& duration = pages_[idx].durations[contextMenuRow_];
+    TimeDuration& duration = pages_[idx].durations[contextMenuRow_];
     QDateTime start = duration.endTime.addMSecs(-duration.duration);
     QDateTime end = duration.endTime;
     SplitDialog dlg(start, end, this);
     if (dlg.exec() == QDialog::Accepted) {
         QDateTime splitTime = dlg.getSplitTime();
-        // TODO: Implement actual split logic here
-        QMessageBox::information(this, "Split", QString("Split at %1").arg(splitTime.toString("hh:mm:ss")));
+        qint64 firstDuration = start.msecsTo(splitTime);
+        qint64 secondDuration = splitTime.msecsTo(end);
+        DurationType type = duration.type;
+        TimeDuration first(type, firstDuration, splitTime);
+        TimeDuration second(type, secondDuration, end);
+        auto& durationsVec = pages_[idx].durations;
+        durationsVec.erase(durationsVec.begin() + contextMenuRow_);
+        durationsVec.insert(durationsVec.begin() + contextMenuRow_, second);
+        durationsVec.insert(durationsVec.begin() + contextMenuRow_, first);
+        auto& editsVec = edits_[idx];
+        editsVec.erase(editsVec.begin() + contextMenuRow_);
+        editsVec.insert(editsVec.begin() + contextMenuRow_, type);
+        editsVec.insert(editsVec.begin() + contextMenuRow_, type);
+        // Mark both split rows as edited
+        if (editedRows_.size() > idx) {
+            editedRows_[idx].insert(contextMenuRow_);
+            editedRows_[idx].insert(contextMenuRow_ + 1);
+        }
+        updateTable(idx);
     }
 }
 
@@ -254,4 +284,9 @@ void SplitDialog::updateSplitLabel(int value)
 QDateTime SplitDialog::getSplitTime() const
 {
     return start_.addSecs(slider_->value());
+}
+
+HistoryDialog::~HistoryDialog() {
+    // Clear edited rows when dialog is closed
+    editedRows_.clear();
 }

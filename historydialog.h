@@ -6,6 +6,7 @@
 #include <QMap>
 #include <vector>
 #include <deque>
+#include <set>
 #include "types.h"
 #include "timetracker.h"
 
@@ -30,6 +31,7 @@ private:
     TimeTracker& timetracker_;
     std::vector<Page> pages_;
     std::vector<std::vector<DurationType>> edits_;
+    std::vector<std::set<int>> editedRows_; // Track edited/split rows per page
     uint pageIndex_;
     int contextMenuRow_ = -1;
 
@@ -40,8 +42,8 @@ private:
 
     void setupUI();
     void createPages();
-    void updateTotalsLabel(int idx);
-    void updateTable(int idx);
+    void updateTotalsLabel(uint idx);
+    void updateTable(uint idx);
     std::pair<qint64, qint64> calculateTotals(const std::vector<DurationType>& types, const std::vector<TimeDuration>& durations);
     void saveChanges();
     void showContextMenu(const QPoint& pos);
@@ -53,7 +55,7 @@ private slots:
 
 public:
     explicit HistoryDialog(TimeTracker& timetracker, QWidget* parent = nullptr);
-    ~HistoryDialog() = default;
+    ~HistoryDialog();
 
     int exec() override {
         int result = QDialog::exec();
