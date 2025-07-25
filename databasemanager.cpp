@@ -12,6 +12,10 @@ DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
 {
     db = QSqlDatabase::addDatabase("QSQLITE");
     db.setDatabaseName("uTimer.sqlite");
+
+    if ((history_days_to_keep_ == 0) && settings.logToFile()) {
+        Logger::Log("[DB] History days to keep is set to 0, database will not be used.");
+	}
 }
 
 DatabaseManager::~DatabaseManager()
@@ -79,6 +83,9 @@ void DatabaseManager::lazyClose()
 bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
     if (!lazyOpen()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Could not lazy open DB to save Durations");
+        }
         return false;
     }
 
@@ -129,6 +136,9 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
     std::deque<TimeDuration> durations;
 
     if (!lazyOpen()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Could not lazy open DB to load Durations");
+        }
         return durations;
     }
 

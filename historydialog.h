@@ -29,6 +29,7 @@ private:
     };
 
     TimeTracker& timetracker_;
+    const Settings& settings_;
     std::vector<Page> pages_;
     std::vector<std::vector<DurationType>> edits_;
     std::vector<std::set<int>> editedRows_; // Track edited/split rows per page
@@ -54,7 +55,7 @@ private slots:
     void onSplitRow();
 
 public:
-    explicit HistoryDialog(TimeTracker& timetracker, QWidget* parent = nullptr);
+    explicit HistoryDialog(TimeTracker& timetracker, const Settings& settings, QWidget* parent = nullptr);
     ~HistoryDialog();
 
     int exec() override {

@@ -173,7 +173,7 @@ void ContentWidget::pressedAutoPauseButton()
 
 void ContentWidget::pressedShowHistoryButton()
 {
-    HistoryDialog dlg(timetracker_, this);
+    HistoryDialog dlg(timetracker_, settings_, this);
     dlg.exec();
 }
 

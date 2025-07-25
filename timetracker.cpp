@@ -84,6 +84,10 @@ void TimeTracker::backpauseTimer()
 
 void TimeTracker::stopTimer()
 {
+	if (mode_ == Mode::None) {
+		return;
+	}
+
 	if (mode_ == Mode::Pause) {
 		qint64 t_pause = timer_.elapsed();
 		durations_.emplace_back(TimeDuration(DurationType::Pause, t_pause, QDateTime::currentDateTime()));
@@ -103,9 +107,7 @@ void TimeTracker::stopTimer()
 		}
 	}
 
-	cleanDurations(durations_);
-
-	if (db_.saveDurations(durations_, TransactionMode::Append)) {
+	if (appendDurationsToDB()) {
 		durations_.clear();
 		if (settings_.logToFile()) {
 			Logger::Log("[DB] Database updated");
@@ -184,25 +186,32 @@ void TimeTracker::setDurationType(size_t idx, DurationType type)
 	}
 }
 
+void TimeTracker::setCurrentDurations(const std::vector<TimeDuration>& newDurations)
+{
+    durations_.clear();
+    durations_.insert(durations_.end(), newDurations.begin(), newDurations.end());
+}
+
 std::deque<TimeDuration> TimeTracker::getDurationsHistory()
 {
 	return db_.loadDurations();
 }
 
 bool TimeTracker::appendDurationsToDB()
-{
-	cleanDurations(this->durations_);
-	return db_.saveDurations(this->durations_, TransactionMode::Append);
+{ 
+	cleanDurations(&durations_);
+	return db_.saveDurations(durations_, TransactionMode::Append);
 }
 
-bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> &durations)
+bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> durations)
 {
-	cleanDurations(durations);
+	cleanDurations(&durations);
 	return db_.saveDurations(durations, TransactionMode::Replace);
 }
 
-static void cleanDurations(std::deque<TimeDuration>& durations)
+static void cleanDurations(std::deque<TimeDuration>* pDurations)
 {
+	auto& durations = *pDurations;
 	if (durations.size() < 2) {
 		return;
 	}

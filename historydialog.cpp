@@ -9,17 +9,35 @@
 #include <QMenu>
 #include <QMessageBox>
 #include "helpers.h"
+#include "logger.h"
 #include <QSlider>
 #include <QDialogButtonBox>
 
-HistoryDialog::HistoryDialog(TimeTracker& timetracker, QWidget* parent)
-    : QDialog(parent), timetracker_(timetracker), pageIndex_(0)
+HistoryDialog::HistoryDialog(TimeTracker& timetracker, const Settings& settings, QWidget* parent)
+    : QDialog(parent), timetracker_(timetracker), settings_(settings), pageIndex_(0)
 {
     createPages();
     setupUI();
     updateTable(pageIndex_);
     table_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(table_, &QTableWidget::customContextMenuRequested, this, &HistoryDialog::showContextMenu);
+
+    // Log initial state of containers
+    if (settings_.logToFile()) {
+        Logger::Log("[HISTORY] Dialog opened");
+        
+        // Get total rows in database
+        auto historyDurations = timetracker_.getDurationsHistory();
+        Logger::Log(QString("[HISTORY] Loaded %1 total durations from DB").arg(historyDurations.size()));
+
+        for (size_t i = 0; i < pages_.size(); ++i) {
+            Logger::Log(QString("[HISTORY] Page %1 - Title: %2, Entries: %3, IsCurrent: %4")
+                .arg(i)
+                .arg(pages_[i].title)
+                .arg(pages_[i].durations.size())
+                .arg(pages_[i].isCurrent));
+        }
+    }
 }
 
 void HistoryDialog::createPages()
@@ -185,6 +203,20 @@ void HistoryDialog::onNextClicked()
 void HistoryDialog::saveChanges()
 {
     if (result() == QDialog::Accepted) {
+        if (settings_.logToFile())
+            Logger::Log("[HISTORY] Dialog accepted, saving changes");
+        
+        // Log state before saving
+        if (settings_.logToFile()) {
+            for (size_t i = 0; i < pages_.size(); ++i) {
+                Logger::Log(QString("[HISTORY] Page %1 - Entries: %2, EditedRows: %3")
+                    .arg(i)
+                    .arg(pages_[i].durations.size())
+                    .arg(editedRows_[i].size()));
+            }
+        }
+
+        // Update types for all pages
         for (size_t i = 0; i < pages_.size(); ++i) {
             for (size_t j = 0; j < pages_[i].durations.size(); ++j) {
                 if (pages_[i].isCurrent) {
@@ -194,12 +226,33 @@ void HistoryDialog::saveChanges()
                 }
             }
         }
-        std::deque<TimeDuration> allHistory;
-        for (size_t i = 1; i < pages_.size(); ++i) {
-            allHistory.insert(allHistory.end(), pages_[i].durations.begin(), pages_[i].durations.end());
+        // Save all durations (current session + history) to DB
+        std::deque<TimeDuration> allDurations;
+        for (size_t i = 0; i < pages_.size(); ++i) {
+            allDurations.insert(allDurations.end(), pages_[i].durations.begin(), pages_[i].durations.end());
         }
-        if (!allHistory.empty()) {
-            timetracker_.replaceDurationsInDB(allHistory);
+        if (!allDurations.empty()) {
+            if (settings_.logToFile())
+                Logger::Log(QString("[HISTORY] Saving %1 total durations to DB").arg(allDurations.size()));
+            bool result = timetracker_.replaceDurationsInDB(allDurations);
+            if (!result) {
+                if (settings_.logToFile())
+                    Logger::Log("[HISTORY] Failed to save durations to DB");
+            } else {
+                if (settings_.logToFile())
+                    Logger::Log("[HISTORY] Successfully saved durations to DB");
+            }
+        }
+    } else {
+        if (settings_.logToFile()) {
+            Logger::Log("[HISTORY] Dialog cancelled, discarding changes");
+            // Log final state even when cancelling
+            for (size_t i = 0; i < pages_.size(); ++i) {
+                Logger::Log(QString("[HISTORY] Page %1 - Title: %2, Entries: %3")
+                    .arg(i)
+                    .arg(pages_[i].title)
+                    .arg(pages_[i].durations.size()));
+            }
         }
     }
 }
@@ -218,30 +271,74 @@ void HistoryDialog::showContextMenu(const QPoint& pos)
 void HistoryDialog::onSplitRow()
 {
     if (contextMenuRow_ < 0) return;
-    int idx = pageIndex_;
+    uint idx = pageIndex_;
+
+    // Log initial state
+    if (settings_.logToFile()) {
+        Logger::Log(QString("[SPLIT] Starting split operation. Page index: %1, Row: %2").arg(idx).arg(contextMenuRow_));
+        Logger::Log(QString("[SPLIT] Container sizes - Pages: %1, Current page durations: %2, Edits: %3")
+            .arg(pages_.size())
+            .arg(pages_[idx].durations.size())
+            .arg(edits_[idx].size()));
+        Logger::Log(QString("[SPLIT] Is current session: %1").arg(pages_[idx].isCurrent));
+    }
+
     TimeDuration& duration = pages_[idx].durations[contextMenuRow_];
     QDateTime start = duration.endTime.addMSecs(-duration.duration);
     QDateTime end = duration.endTime;
+    
+    if (settings_.logToFile()) {
+        Logger::Log(QString("[SPLIT] Original duration - Start: %1, End: %2, Type: %3")
+            .arg(start.toString("hh:mm:ss"))
+            .arg(end.toString("hh:mm:ss"))
+            .arg(duration.type == DurationType::Activity ? "Activity" : "Pause"));
+    }
+
     SplitDialog dlg(start, end, this);
     if (dlg.exec() == QDialog::Accepted) {
         QDateTime splitTime = dlg.getSplitTime();
         qint64 firstDuration = start.msecsTo(splitTime);
         qint64 secondDuration = splitTime.msecsTo(end);
         DurationType type = duration.type;
+
+        if (settings_.logToFile()) {
+            Logger::Log(QString("[SPLIT] Split point: %1").arg(splitTime.toString("hh:mm:ss")));
+            Logger::Log(QString("[SPLIT] Durations - First: %1, Second: %2")
+                .arg(convMSecToTimeStr(firstDuration))
+                .arg(convMSecToTimeStr(secondDuration)));
+        }
+
         TimeDuration first(type, firstDuration, splitTime);
         TimeDuration second(type, secondDuration, end);
+
         auto& durationsVec = pages_[idx].durations;
         durationsVec.erase(durationsVec.begin() + contextMenuRow_);
         durationsVec.insert(durationsVec.begin() + contextMenuRow_, second);
         durationsVec.insert(durationsVec.begin() + contextMenuRow_, first);
+
         auto& editsVec = edits_[idx];
         editsVec.erase(editsVec.begin() + contextMenuRow_);
         editsVec.insert(editsVec.begin() + contextMenuRow_, type);
         editsVec.insert(editsVec.begin() + contextMenuRow_, type);
+
         // Mark both split rows as edited
         if (editedRows_.size() > idx) {
             editedRows_[idx].insert(contextMenuRow_);
             editedRows_[idx].insert(contextMenuRow_ + 1);
+        }
+
+        // Log final state after split
+        if (settings_.logToFile()) {
+            Logger::Log(QString("[SPLIT] After split - Page durations: %1, Edits: %2")
+                .arg(pages_[idx].durations.size())
+                .arg(edits_[idx].size()));
+        }
+
+        // If current session, also update TimeTracker's durations_ using setCurrentDurations
+        if (pages_[idx].isCurrent) {
+            timetracker_.setCurrentDurations(pages_[idx].durations);
+            if (settings_.logToFile())
+                Logger::Log("[SPLIT] Updated TimeTracker current durations");
         }
         updateTable(idx);
     }
@@ -287,6 +384,8 @@ QDateTime SplitDialog::getSplitTime() const
 }
 
 HistoryDialog::~HistoryDialog() {
-    // Clear edited rows when dialog is closed
+    if (settings_.logToFile()) {
+        Logger::Log("[HISTORY] Dialog closing");
+    }
     editedRows_.clear();
 }
