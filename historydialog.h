@@ -14,6 +14,7 @@ class QLabel;
 class QTableWidget;
 class QPushButton;
 class QSlider;
+class QRadioButton;
 
 class SplitDialog;
 
@@ -67,17 +68,36 @@ public:
     }
 };
 
-class SplitDialog : public QDialog {
+class SplitDialog : public QDialog
+{
     Q_OBJECT
+
 public:
     SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* parent = nullptr);
+
     QDateTime getSplitTime() const;
+    DurationType getFirstSegmentType() const;
+    DurationType getSecondSegmentType() const;
+
+    void setFirstSegmentType(DurationType type);
+    void setSecondSegmentType(DurationType type);
+
+private slots:
+    void updateSplitLabel(int value);
+
 private:
-    QSlider* slider_;
-    QLabel* splitTimeLabel_;
     QDateTime start_;
     QDateTime end_;
-    void updateSplitLabel(int value);
+    QSlider* slider_;
+    QLabel* splitTimeLabel_;
+
+    QRadioButton* firstSegmentActivity_;
+    QRadioButton* firstSegmentPause_;
+    QRadioButton* secondSegmentActivity_;
+    QRadioButton* secondSegmentPause_;
+
+    DurationType firstSegmentType_;
+    DurationType secondSegmentType_;
 };
 
 #endif // HISTORYDIALOG_H

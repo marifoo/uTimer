@@ -12,6 +12,9 @@
 #include "logger.h"
 #include <QSlider>
 #include <QDialogButtonBox>
+#include <QRadioButton>
+#include <QGroupBox>
+#include <QButtonGroup>
 
 HistoryDialog::HistoryDialog(TimeTracker& timetracker, const Settings& settings, QWidget* parent)
     : QDialog(parent), timetracker_(timetracker), settings_(settings), pageIndex_(0)
@@ -315,17 +318,21 @@ void HistoryDialog::onSplitRow()
         QDateTime splitTime = dlg.getSplitTime();
         qint64 firstDuration = start.msecsTo(splitTime);
         qint64 secondDuration = splitTime.msecsTo(end);
-        DurationType type = duration.type;
+        DurationType firstType = dlg.getFirstSegmentType();
+        DurationType secondType = dlg.getSecondSegmentType();
 
         if (settings_.logToFile()) {
             Logger::Log(QString("    [SPLIT] Split point: %1").arg(splitTime.toString("hh:mm:ss")));
             Logger::Log(QString("    [SPLIT] Durations - First: %1, Second: %2")
                 .arg(convMSecToTimeStr(firstDuration))
                 .arg(convMSecToTimeStr(secondDuration)));
+            Logger::Log(QString("    [SPLIT] Types - First: %1, Second: %2")
+                .arg(firstType == DurationType::Activity ? "Activity" : "Pause")
+                .arg(secondType == DurationType::Activity ? "Activity" : "Pause"));
         }
 
-        TimeDuration first(type, firstDuration, splitTime);
-        TimeDuration second(type, secondDuration, end);
+        TimeDuration first(firstType, firstDuration, splitTime);
+        TimeDuration second(secondType, secondDuration, end);
 
         auto& durationsVec = pages_[idx].durations;
         durationsVec.erase(durationsVec.begin() + contextMenuRow_);
@@ -334,8 +341,8 @@ void HistoryDialog::onSplitRow()
 
         auto& editsVec = edits_[idx];
         editsVec.erase(editsVec.begin() + contextMenuRow_);
-        editsVec.insert(editsVec.begin() + contextMenuRow_, type);
-        editsVec.insert(editsVec.begin() + contextMenuRow_, type);
+        editsVec.insert(editsVec.begin() + contextMenuRow_, secondType);
+        editsVec.insert(editsVec.begin() + contextMenuRow_, firstType);
 
         // Mark both split rows as edited
         if (editedRows_.size() > idx) {
@@ -361,10 +368,11 @@ void HistoryDialog::onSplitRow()
 }
 
 SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* parent)
-    : QDialog(parent), start_(start), end_(end)
+    : QDialog(parent), start_(start), end_(end), firstSegmentType_(DurationType::Activity), secondSegmentType_(DurationType::Activity)
 {
     setWindowTitle("Split Duration");
     QVBoxLayout* layout = new QVBoxLayout(this);
+
     QHBoxLayout* rowLayout = new QHBoxLayout();
     QLabel* startLabel = new QLabel(QString("Start: %1").arg(start.toString("hh:mm:ss")), this);
     QLabel* endLabel = new QLabel(QString("End: %1").arg(end.toString("hh:mm:ss")), this);
@@ -373,14 +381,69 @@ SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* 
     int totalSecs = start.secsTo(end) - 1;
     slider_->setMaximum(totalSecs);
     slider_->setValue(totalSecs / 2);
+
+    QFont timeFont = startLabel->font();
+    timeFont.setPointSize(timeFont.pointSize() + 2); // Increase font size
+    startLabel->setFont(timeFont);
+    endLabel->setFont(timeFont);
+
     rowLayout->addWidget(startLabel);
     rowLayout->addWidget(slider_);
     rowLayout->addWidget(endLabel);
     layout->addLayout(rowLayout);
+
     splitTimeLabel_ = new QLabel(this);
+    splitTimeLabel_->setAlignment(Qt::AlignCenter); // Center the label
+    splitTimeLabel_->setFont(timeFont); // Apply increased font size
     layout->addWidget(splitTimeLabel_);
     updateSplitLabel(slider_->value());
     connect(slider_, &QSlider::valueChanged, this, &SplitDialog::updateSplitLabel);
+
+    // Add four-column layout for segment types
+    QHBoxLayout* segmentTypeLayout = new QHBoxLayout();
+
+    // Left Flexible Empty Column
+    QSpacerItem* leftSpacer = new QSpacerItem(1, 1, QSizePolicy::Expanding, QSizePolicy::Minimum);
+    segmentTypeLayout->addItem(leftSpacer);
+
+    // First Segment Column
+    QVBoxLayout* firstSegmentLayout = new QVBoxLayout();
+    QLabel* firstSegmentLabel = new QLabel("First Segment:", this);
+    firstSegmentActivity_ = new QRadioButton("Activity", this);
+    firstSegmentPause_ = new QRadioButton("Pause", this);
+    firstSegmentActivity_->setChecked(true);
+
+    QButtonGroup* firstSegmentGroup = new QButtonGroup(this);
+    firstSegmentGroup->addButton(firstSegmentActivity_);
+    firstSegmentGroup->addButton(firstSegmentPause_);
+
+    firstSegmentLayout->addWidget(firstSegmentLabel);
+    firstSegmentLayout->addWidget(firstSegmentActivity_);
+    firstSegmentLayout->addWidget(firstSegmentPause_);
+    segmentTypeLayout->addLayout(firstSegmentLayout);
+
+    // Second Segment Column
+    QVBoxLayout* secondSegmentLayout = new QVBoxLayout();
+    QLabel* secondSegmentLabel = new QLabel("Second Segment:", this);
+    secondSegmentActivity_ = new QRadioButton("Activity", this);
+    secondSegmentPause_ = new QRadioButton("Pause", this);
+    secondSegmentActivity_->setChecked(true);
+
+    QButtonGroup* secondSegmentGroup = new QButtonGroup(this);
+    secondSegmentGroup->addButton(secondSegmentActivity_);
+    secondSegmentGroup->addButton(secondSegmentPause_);
+
+    secondSegmentLayout->addWidget(secondSegmentLabel);
+    secondSegmentLayout->addWidget(secondSegmentActivity_);
+    secondSegmentLayout->addWidget(secondSegmentPause_);
+    segmentTypeLayout->addLayout(secondSegmentLayout);
+
+    // Right Flexible Empty Column
+    QSpacerItem* rightSpacer = new QSpacerItem(1, 1, QSizePolicy::Expanding, QSizePolicy::Minimum);
+    segmentTypeLayout->addItem(rightSpacer);
+
+    layout->addLayout(segmentTypeLayout);
+
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -397,6 +460,34 @@ void SplitDialog::updateSplitLabel(int value)
 QDateTime SplitDialog::getSplitTime() const
 {
     return start_.addSecs(slider_->value());
+}
+
+DurationType SplitDialog::getFirstSegmentType() const
+{
+    return firstSegmentActivity_->isChecked() ? DurationType::Activity : DurationType::Pause;
+}
+
+DurationType SplitDialog::getSecondSegmentType() const
+{
+    return secondSegmentActivity_->isChecked() ? DurationType::Activity : DurationType::Pause;
+}
+
+void SplitDialog::setFirstSegmentType(DurationType type)
+{
+    if (type == DurationType::Activity) {
+        firstSegmentActivity_->setChecked(true);
+    } else {
+        firstSegmentPause_->setChecked(true);
+    }
+}
+
+void SplitDialog::setSecondSegmentType(DurationType type)
+{
+    if (type == DurationType::Activity) {
+        secondSegmentActivity_->setChecked(true);
+    } else {
+        secondSegmentPause_->setChecked(true);
+    }
 }
 
 HistoryDialog::~HistoryDialog() {
