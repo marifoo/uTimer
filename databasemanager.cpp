@@ -156,3 +156,30 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
     
     return durations;
 }
+
+bool DatabaseManager::hasEntriesForDate(const QDate& date)
+{
+    if (!lazyOpen()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Could not lazy open DB to check entries for date");
+        }
+        return false;
+    }
+
+    QSqlQuery query;
+    query.prepare("SELECT COUNT(*) FROM durations WHERE end_date = :date");
+    query.bindValue(":date", date.toString(Qt::ISODate));
+    
+    bool hasEntries = false;
+    if (query.exec() && query.next()) {
+        int count = query.value(0).toInt();
+        hasEntries = (count > 0);
+    } else {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error checking entries for date: " + query.lastError().text());
+        }
+    }
+
+    lazyClose();
+    return hasEntries;
+}

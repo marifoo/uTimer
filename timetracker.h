@@ -43,6 +43,7 @@ public:
     void setDurationType(size_t idx, DurationType type);
 	bool appendDurationsToDB();
 	bool replaceDurationsInDB(std::deque<TimeDuration> durations);
+	bool hasEntriesForToday();
 
 public slots:
 	void useTimerViaButton(Button button);

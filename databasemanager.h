@@ -17,6 +17,7 @@ public:
 
     bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode);
     std::deque<TimeDuration> loadDurations();
+    bool hasEntriesForDate(const QDate& date);
 
 private:
     QSqlDatabase db;

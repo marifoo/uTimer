@@ -7,9 +7,7 @@
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent) 
     : QObject(parent), settings_(settings), mode_(Mode::None), 
 	was_active_before_autopause_(false), db_(settings, parent), timer_()
-{
-	;
-}
+{ }
 
 TimeTracker::~TimeTracker()
 {
@@ -37,14 +35,17 @@ void TimeTracker::startTimer()
 	else if (mode_ == Mode::None) {
 		durations_.clear();
 		
-		// Add boot time as Activity duration if configured
+		// Add boot time as Activity duration if configured and no entries exist for today
 		unsigned int boot_time_sec = settings_.getBootTimeSec();
-		if (boot_time_sec > 0) {
+		if (boot_time_sec > 0 && !hasEntriesForToday()) {
 			QDateTime now = QDateTime::currentDateTime();
 			qint64 boot_time_msec = static_cast<qint64>(boot_time_sec) * 1000;
 			durations_.emplace_back(TimeDuration(DurationType::Activity, boot_time_msec, now));
 			if (settings_.logToFile())
-				Logger::Log("[TIMER] Added boot time: " + QString::number(boot_time_sec) + " seconds");
+				Logger::Log("[TIMER] Added boot time: " + QString::number(boot_time_sec) + " seconds (first session today)");
+		}
+		else if (boot_time_sec > 0 && settings_.logToFile()) {
+			Logger::Log("[TIMER] Boot time not added - entries already exist for today");
 		}
 		
 		timer_.start();
@@ -218,6 +219,11 @@ bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> durations)
 {
 	cleanDurations(&durations);
 	return db_.saveDurations(durations, TransactionMode::Replace);
+}
+
+bool TimeTracker::hasEntriesForToday()
+{
+	return db_.hasEntriesForDate(QDate::currentDate());
 }
 
 static void cleanDurations(std::deque<TimeDuration>* pDurations)
