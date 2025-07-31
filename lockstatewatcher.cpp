@@ -5,13 +5,13 @@
 #include <WtsApi32.h>
 #include "logger.h"
 
-LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent)
-	: QWidget(parent),
-		settings_(settings),
-		lock_state_buffer_{ false, false, false, false, false},
-		buffer_for_lock{ false, false, true, true, true},
-		buffer_for_unlock{ true, true, false, false, false}
+LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent) 
+	: QWidget(parent), 
+	settings_(settings),
+	buffer_for_lock{ false, false, true, true, true }, // fixed pattern for lock detection
+	buffer_for_unlock{ true, true, false, false, false } // fixed pattern for unlock detection
 {
+	std::fill(lock_state_buffer_.begin(), lock_state_buffer_.end(), false);
 	lock_timer_.invalidate();
 }
 
