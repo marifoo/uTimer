@@ -90,10 +90,8 @@ private:
     QSlider* slider_;
     QLabel* splitTimeLabel_;
 
-    QRadioButton* firstSegmentActivity_;
-    QRadioButton* firstSegmentPause_;
-    QRadioButton* secondSegmentActivity_;
-    QRadioButton* secondSegmentPause_;
+    QRadioButton* activityPauseOption_;
+    QRadioButton* pauseActivityOption_;
 };
 
 #endif // HISTORYDIALOG_H

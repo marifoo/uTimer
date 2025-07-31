@@ -341,6 +341,17 @@ void HistoryDialog::onSplitRow()
     QDateTime start = duration.endTime.addMSecs(-duration.duration);
     QDateTime end = duration.endTime;
 
+    // Check if duration is long enough to split meaningfully (at least 2 seconds)
+    if (start.secsTo(end) <= 2) {
+        if (settings_.logToFile()) {
+            Logger::Log(QString("[HISTORY] Error: onSplitRow: Duration too short to split - only %1 seconds")
+                .arg(start.secsTo(end)));
+        }
+        QMessageBox::information(this, "Split Duration", 
+            "This duration is too short to split meaningfully (minimum 3 seconds required).");
+        return;
+    }
+
     // Show split dialog
     SplitDialog dlg(start, end, this);
     if (dlg.exec() == QDialog::Accepted) {
@@ -348,12 +359,14 @@ void HistoryDialog::onSplitRow()
         qint64 firstDuration = start.msecsTo(splitTime);
         qint64 secondDuration = splitTime.msecsTo(end);
         
-        // Validate split results
-        if (firstDuration <= 0 || secondDuration <= 0) {
+        // Validate split results - ensure both segments have at least 1 second
+        if (firstDuration < 1000 || secondDuration < 1000) {
             if (settings_.logToFile()) {
-                Logger::Log(QString("[HISTORY] Error: onSplitRow: Invalid split durations - first: %1, second: %2")
+                Logger::Log(QString("[HISTORY] Error: onSplitRow: Split results too small - first: %1ms, second: %2ms")
                     .arg(firstDuration).arg(secondDuration));
             }
+            QMessageBox::warning(this, "Split Duration", 
+                "Invalid split: both segments must be at least 1 second long.");
             return;
         }
 
@@ -363,11 +376,11 @@ void HistoryDialog::onSplitRow()
         TimeDuration first(firstType, firstDuration, splitTime);
         TimeDuration second(secondType, secondDuration, end);
 
-        // Replace original duration with two new segments
+        // Replace original duration with two new segments - insert in chronological order
         auto& durationsDeque = pendingChanges_[idx];
         durationsDeque.erase(durationsDeque.begin() + contextMenuRow_);
-        durationsDeque.insert(durationsDeque.begin() + contextMenuRow_, second);
-        durationsDeque.insert(durationsDeque.begin() + contextMenuRow_, first);
+        durationsDeque.insert(durationsDeque.begin() + contextMenuRow_, first);   // Insert first segment first
+        durationsDeque.insert(durationsDeque.begin() + contextMenuRow_ + 1, second); // Then insert second segment
        
         updateTable(idx);
     }
@@ -418,47 +431,23 @@ SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* 
     updateSplitLabel(slider_->value());
     connect(slider_, &QSlider::valueChanged, this, &SplitDialog::updateSplitLabel);
 
-    // Segment type selection
-    QHBoxLayout* segmentTypeLayout = new QHBoxLayout();
+    // Segment type selection - simplified to 2 radio buttons
+    QVBoxLayout* segmentTypeLayout = new QVBoxLayout();
+    QLabel* segmentTypeLabel = new QLabel("Split Type:", this);
+    layout->addWidget(segmentTypeLabel);
 
-    QSpacerItem* leftSpacer = new QSpacerItem(1, 1, QSizePolicy::Expanding, QSizePolicy::Minimum);
-    segmentTypeLayout->addItem(leftSpacer);
+    activityPauseOption_ = new QRadioButton("First: Activity, Second: Pause", this);
+    pauseActivityOption_ = new QRadioButton("First: Pause, Second: Activity", this);
+    
+    // Default to "Pause -> Activity" as requested
+    pauseActivityOption_->setChecked(true);
 
-    // First segment options
-    QVBoxLayout* firstSegmentLayout = new QVBoxLayout();
-    QLabel* firstSegmentLabel = new QLabel("First Segment:", this);
-    firstSegmentActivity_ = new QRadioButton("Activity", this);
-    firstSegmentPause_ = new QRadioButton("Pause", this);
-    firstSegmentActivity_->setChecked(true);
+    QButtonGroup* segmentGroup = new QButtonGroup(this);
+    segmentGroup->addButton(activityPauseOption_);
+    segmentGroup->addButton(pauseActivityOption_);
 
-    QButtonGroup* firstSegmentGroup = new QButtonGroup(this);
-    firstSegmentGroup->addButton(firstSegmentActivity_);
-    firstSegmentGroup->addButton(firstSegmentPause_);
-
-    firstSegmentLayout->addWidget(firstSegmentLabel);
-    firstSegmentLayout->addWidget(firstSegmentActivity_);
-    firstSegmentLayout->addWidget(firstSegmentPause_);
-    segmentTypeLayout->addLayout(firstSegmentLayout);
-
-    // Second segment options
-    QVBoxLayout* secondSegmentLayout = new QVBoxLayout();
-    QLabel* secondSegmentLabel = new QLabel("Second Segment:", this);
-    secondSegmentActivity_ = new QRadioButton("Activity", this);
-    secondSegmentPause_ = new QRadioButton("Pause", this);
-    secondSegmentActivity_->setChecked(true);
-
-    QButtonGroup* secondSegmentGroup = new QButtonGroup(this);
-    secondSegmentGroup->addButton(secondSegmentActivity_);
-    secondSegmentGroup->addButton(secondSegmentPause_);
-
-    secondSegmentLayout->addWidget(secondSegmentLabel);
-    secondSegmentLayout->addWidget(secondSegmentActivity_);
-    secondSegmentLayout->addWidget(secondSegmentPause_);
-    segmentTypeLayout->addLayout(secondSegmentLayout);
-
-    QSpacerItem* rightSpacer = new QSpacerItem(1, 1, QSizePolicy::Expanding, QSizePolicy::Minimum);
-    segmentTypeLayout->addItem(rightSpacer);
-
+    segmentTypeLayout->addWidget(activityPauseOption_);
+    segmentTypeLayout->addWidget(pauseActivityOption_);
     layout->addLayout(segmentTypeLayout);
 
     // Dialog buttons
@@ -466,7 +455,9 @@ SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* 
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
-    resize(450, height());
+    
+    // Ensure minimum dialog size for very short durations
+    resize(450, std::max(height(), 120));
 }
 
 void SplitDialog::updateSplitLabel(int value)
@@ -482,29 +473,31 @@ QDateTime SplitDialog::getSplitTime() const
 
 DurationType SplitDialog::getFirstSegmentType() const
 {
-    return firstSegmentActivity_->isChecked() ? DurationType::Activity : DurationType::Pause;
+    return activityPauseOption_->isChecked() ? DurationType::Activity : DurationType::Pause;
 }
 
 DurationType SplitDialog::getSecondSegmentType() const
 {
-    return secondSegmentActivity_->isChecked() ? DurationType::Activity : DurationType::Pause;
+    return activityPauseOption_->isChecked() ? DurationType::Pause : DurationType::Activity;
 }
 
 void SplitDialog::setFirstSegmentType(DurationType type)
 {
     if (type == DurationType::Activity) {
-        firstSegmentActivity_->setChecked(true);
+        activityPauseOption_->setChecked(true);
     } else {
-        firstSegmentPause_->setChecked(true);
+        pauseActivityOption_->setChecked(true);
     }
 }
 
 void SplitDialog::setSecondSegmentType(DurationType type)
 {
-    if (type == DurationType::Activity) {
-        secondSegmentActivity_->setChecked(true);
+    // Since we now have only 2 mutually exclusive options, 
+    // setting the second segment type determines the first as well
+    if (type == DurationType::Pause) {
+        activityPauseOption_->setChecked(true);  // Activity -> Pause
     } else {
-        secondSegmentPause_->setChecked(true);
+        pauseActivityOption_->setChecked(true);  // Pause -> Activity
     }
 }
 
