@@ -21,6 +21,7 @@ private:
 	int warning_activity_min_;
 	bool log_to_file_;
 	int history_days_to_keep_;
+	unsigned int boot_time_sec_;
 	void readSettingsFile();
 	void writeSettingsFile();
 
@@ -39,6 +40,7 @@ public:
 	qint64 getPauseTimeForWarnTimeNoPauseMsec() const;
 	qint64 getWarnTimeNoPauseMsec() const;
 	qint64 getWarnTimeActivityMsec() const;
+	unsigned int getBootTimeSec() const;
 	void setAutopauseState(const bool autopause_enabled);
 	void setPinToTopState(const bool pin2top_enabled);
 };

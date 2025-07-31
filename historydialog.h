@@ -32,8 +32,7 @@ private:
     TimeTracker& timetracker_;
     const Settings& settings_;
     std::vector<Page> pages_;
-    std::vector<std::vector<DurationType>> edits_;
-    std::vector<std::set<int>> editedRows_; // Track edited/split rows per page
+    std::vector<std::vector<TimeDuration>> pendingChanges_; // Store the entire edited page for each page index
     uint pageIndex_;
     int contextMenuRow_ = -1;
 
@@ -46,7 +45,7 @@ private:
     void createPages();
     void updateTotalsLabel(uint idx);
     void updateTable(uint idx);
-    std::pair<qint64, qint64> calculateTotals(const std::vector<DurationType>& types, const std::vector<TimeDuration>& durations);
+    std::pair<qint64, qint64> calculateTotals(const std::vector<TimeDuration>& durations);
     void saveChanges();
     void showContextMenu(const QPoint& pos);
 
@@ -100,4 +99,4 @@ private:
     DurationType secondSegmentType_;
 };
 
-#endif // HISTORYDIALOG_H
+#endif // HISTORYDIALOG_H#endif // HISTORYDIALOG_H

@@ -36,6 +36,17 @@ void TimeTracker::startTimer()
 	}
 	else if (mode_ == Mode::None) {
 		durations_.clear();
+		
+		// Add boot time as Activity duration if configured
+		unsigned int boot_time_sec = settings_.getBootTimeSec();
+		if (boot_time_sec > 0) {
+			QDateTime now = QDateTime::currentDateTime();
+			qint64 boot_time_msec = static_cast<qint64>(boot_time_sec) * 1000;
+			durations_.emplace_back(TimeDuration(DurationType::Activity, boot_time_msec, now));
+			if (settings_.logToFile())
+				Logger::Log("[TIMER] Added boot time: " + QString::number(boot_time_sec) + " seconds");
+		}
+		
 		timer_.start();
 		mode_ = Mode::Activity;
 		if (settings_.logToFile())
@@ -211,11 +222,11 @@ bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> durations)
 
 static void cleanDurations(std::deque<TimeDuration>* pDurations)
 {
-	auto& durations = *pDurations;
+	/*auto& durations = *pDurations;
 	if (durations.size() < 2) {
 		return;
 	}
-	for (auto it = durations.begin() + 1; it != durations.end(); /* ! */) {
+	for (auto it = durations.begin() + 1; it != durations.end(); ) {
 		auto prevIt = std::prev(it);
 
 		if (prevIt->type == it->type) {
@@ -234,5 +245,5 @@ static void cleanDurations(std::deque<TimeDuration>* pDurations)
 			}
 		}
 		++it;
-	}
+	}*/
 }
