@@ -10,9 +10,12 @@
 DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
     : history_days_to_keep_(std::max(settings.getHistoryDays(), 0)), QObject(parent), settings_(settings)
 {
-    db = QSqlDatabase::addDatabase("QSQLITE");
+    // Use unique connection name to avoid conflicts with multiple instances
+    QString connectionName = QString("uTimer_connection_%1").arg(reinterpret_cast<quintptr>(this));
+    db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     db.setDatabaseName("uTimer.sqlite");
 
+    // Log when database is disabled (history_days_to_keep_ = 0 means no history storage)
     if ((history_days_to_keep_ == 0) && settings.logToFile()) {
         Logger::Log("[DB] History days to keep is set to 0, database will not be used.");
 	}
@@ -21,60 +24,88 @@ DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
 DatabaseManager::~DatabaseManager()
 {
     lazyClose();
+    
+    // Remove the database connection to prevent Qt warnings
+    if (QSqlDatabase::contains(db.connectionName())) {
+        QSqlDatabase::removeDatabase(db.connectionName());
+    }
 }
 
 bool DatabaseManager::lazyOpen()
 {
+    // Don't open database if history storage is disabled
     if (history_days_to_keep_ == 0) {
         return false;
     }
 
+    // Return true if already open
     if (db.isOpen()) {
         return true;
 	}
+    
     if (!db.open()) {
         if (settings_.logToFile())
             Logger::Log("[DB] Error opening database: " + db.lastError().text());
         return false;
     }
 
-    QSqlQuery query;
-    return query.exec(
+    // Create the durations table if it doesn't exist
+    QSqlQuery query(db);
+    bool tableCreated = query.exec(
         "CREATE TABLE IF NOT EXISTS durations ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT," 
-        "type INTEGER NOT NULL," 
-        "duration INTEGER NOT NULL," 
-        "end_date DATE NOT NULL," 
-        "end_time TIME NOT NULL"
+        "type INTEGER NOT NULL," // 0 = Activity, 1 = Pause (DurationType enum)
+        "duration INTEGER NOT NULL," // Duration in milliseconds
+        "end_date DATE NOT NULL," // Date when the duration ended
+        "end_time TIME NOT NULL" // Time when the duration ended (with milliseconds)
         ")"
     );
+    
+    if (!tableCreated) {
+        if (settings_.logToFile())
+            Logger::Log("[DB] Error creating table: " + query.lastError().text());
+        db.close();
+        return false;
+    }
+    
+    return true;
 }
 
 void DatabaseManager::lazyClose() 
 {
     if (db.isOpen()) {
+        // Cleanup old entries before closing
         if (db.transaction()) {
-            QSqlQuery query;
+            QSqlQuery query(db);
+            bool querySuccessful = false;
+            
             if (history_days_to_keep_ == 0) {
-                query.prepare("DELETE FROM durations");
+                // If history_days_to_keep_ is 0, we shouldn't be using the database at all
+                // This case should not normally occur, but clean up if it does
+                querySuccessful = query.exec("DELETE FROM durations");
             }
             else {
-                query.prepare("DELETE FROM durations WHERE end_date < date('now', :days || ' days')");
-                query.bindValue(":days", QString::number((-1) * ((int)history_days_to_keep_)));
+                // Delete entries older than the specified number of days
+                query.prepare("DELETE FROM durations WHERE end_date < date('now', '-' || :days || ' days')");
+                query.bindValue(":days", static_cast<int>(history_days_to_keep_));
+                querySuccessful = query.exec();
             }
 
-            if (!query.exec()) {
+            if (!querySuccessful) {
                 db.rollback();
                 if (settings_.logToFile())
                     Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
             }
             else {
-                db.commit();
+                if (!db.commit()) {
+                    if (settings_.logToFile())
+                        Logger::Log("[DB] Error committing cleanup transaction: " + db.lastError().text());
+                }
             }
         }
         else {
             if (settings_.logToFile())
-                Logger::Log("[DB] Error starting transaction: " + db.lastError().text());
+                Logger::Log("[DB] Error starting cleanup transaction: " + db.lastError().text());
         }
         db.close();
     }
@@ -95,10 +126,10 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
         return false;
     }
 
+    // Replace mode: clear existing entries before inserting new ones
     if (mode == TransactionMode::Replace) {
-        // clear existing entries
-        QSqlQuery clearQuery("DELETE FROM durations");
-        if (!clearQuery.exec()) {
+        QSqlQuery clearQuery(db);
+        if (!clearQuery.exec("DELETE FROM durations")) {
             db.rollback();
             if (settings_.logToFile())
                 Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
@@ -106,13 +137,15 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
         }
 	}
 
-    QSqlQuery query;
+    // Prepare insert statement for batch insertion
+    QSqlQuery query(db);
     query.prepare("INSERT INTO durations (type, duration, end_date, end_time) "
                   "VALUES (:type, :duration, :end_date, :end_time)");
 
+    // Insert each duration entry
     for (const auto& d : durations) {
-        query.bindValue(":type", int(d.type));
-        query.bindValue(":duration", qint64(d.duration));
+        query.bindValue(":type", static_cast<int>(d.type));
+        query.bindValue(":duration", d.duration);
         query.bindValue(":end_date", d.endTime.date().toString(Qt::ISODate));
         query.bindValue(":end_time", d.endTime.time().toString("HH:mm:ss.zzz"));
         
@@ -124,11 +157,14 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
         }
     }
 
-    bool ret = db.commit();
+    bool commitSuccessful = db.commit();
+    if (!commitSuccessful && settings_.logToFile()) {
+        Logger::Log("[DB] Error committing save transaction: " + db.lastError().text());
+    }
 
     lazyClose();
 
-    return ret;
+    return commitSuccessful;
 }
 
 std::deque<TimeDuration> DatabaseManager::loadDurations()
@@ -142,14 +178,31 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
         return durations;
     }
 
-    QSqlQuery query("SELECT type, duration, end_date, end_time FROM durations ORDER BY end_date, end_time");
+    // Load all durations ordered by end date and time
+    QSqlQuery query("SELECT type, duration, end_date, end_time FROM durations ORDER BY end_date, end_time", db);
+    if (!query.exec()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error executing load query: " + query.lastError().text());
+        }
+        lazyClose();
+        return durations;
+    }
+    
+    // Parse each row and reconstruct TimeDuration objects
     while (query.next()) {
         DurationType type = static_cast<DurationType>(query.value(0).toInt());
         qint64 duration = query.value(1).toLongLong();
         QDate endDate = QDate::fromString(query.value(2).toString(), Qt::ISODate);
         QTime endTime = QTime::fromString(query.value(3).toString(), "HH:mm:ss.zzz");
         QDateTime endDateTime(endDate, endTime);
-        durations.emplace_back(TimeDuration(type, duration, endDateTime));
+        
+        // Validate parsed data before adding
+        if (endDate.isValid() && endTime.isValid() && duration >= 0) {
+            durations.emplace_back(TimeDuration(type, duration, endDateTime));
+        } else if (settings_.logToFile()) {
+            Logger::Log(QString("[DB] Warning: Skipped invalid duration entry - Date: %1, Time: %2, Duration: %3")
+                .arg(endDate.toString()).arg(endTime.toString()).arg(duration));
+        }
     }
 
     lazyClose();
@@ -166,7 +219,8 @@ bool DatabaseManager::hasEntriesForDate(const QDate& date)
         return false;
     }
 
-    QSqlQuery query;
+    // Check if any entries exist for the specified date
+    QSqlQuery query(db);
     query.prepare("SELECT COUNT(*) FROM durations WHERE end_date = :date");
     query.bindValue(":date", date.toString(Qt::ISODate));
     

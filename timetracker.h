@@ -38,7 +38,7 @@ public:
 	qint64 getActiveTime() const;
 	qint64 getPauseTime() const;
 	const std::deque<TimeDuration>& getCurrentDurations() const;
-	void setCurrentDurations(const std::vector<TimeDuration>& newDurations);
+	void setCurrentDurations(const std::deque<TimeDuration>& newDurations);
 	std::deque<TimeDuration> getDurationsHistory();
     void setDurationType(size_t idx, DurationType type);
 	bool appendDurationsToDB();

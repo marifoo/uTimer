@@ -22,19 +22,20 @@ HistoryDialog::HistoryDialog(TimeTracker& timetracker, const Settings& settings,
     createPages();
     setupUI();
     updateTable(pageIndex_);
+    
+    // Enable right-click context menu for split functionality
     table_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(table_, &QTableWidget::customContextMenuRequested, this, &HistoryDialog::showContextMenu);
 
-    // Log initial state of containers
+    // Log initial state for debugging
     if (settings_.logToFile()) {
-        Logger::Log("  [HISTORY] Dialog opened");
+        Logger::Log("[HISTORY] Dialog opened");
         
-        // Get total rows in database
         auto historyDurations = timetracker_.getDurationsHistory();
-        Logger::Log(QString("  [HISTORY] Loaded %1 total durations from DB").arg(historyDurations.size()));
+        Logger::Log(QString("[HISTORY] Loaded %1 total durations from DB").arg(historyDurations.size()));
 
         for (size_t i = 0; i < pages_.size(); ++i) {
-            Logger::Log(QString("  [HISTORY] Page %1 - Title: %2, Entries: %3, IsCurrent: %4")
+            Logger::Log(QString("[HISTORY] Page %1 - Title: %2, Entries: %3, IsCurrent: %4")
                 .arg(i)
                 .arg(pages_[i].title)
                 .arg(pages_[i].durations.size())
@@ -48,19 +49,22 @@ void HistoryDialog::createPages()
     auto currentDurations = timetracker_.getCurrentDurations();
     auto historyDurations = timetracker_.getDurationsHistory();
 
-    QMap<QDate, std::vector<TimeDuration>> historyByDay;
+    // Group historical durations by date
+    QMap<QDate, std::deque<TimeDuration>> historyByDay;
     for (const auto& d : historyDurations) {
         historyByDay[d.endTime.date()].push_back(d);
     }
     QList<QDate> historyDates = historyByDay.keys();
-    std::sort(historyDates.begin(), historyDates.end(), std::greater<QDate>());
+    std::sort(historyDates.begin(), historyDates.end(), std::greater<QDate>()); // Most recent first
 
+    // Add current session as first page
     pages_.push_back({
         QString("Current Session (entries: ") + QString::number(currentDurations.size()) + QString(")"),
-        std::vector<TimeDuration>(currentDurations.begin(), currentDurations.end()),
+        currentDurations,
         true
     });
 
+    // Add historical pages (one per day)
     for (const QDate& date : historyDates) {
         pages_.push_back({
             date.toString("yyyy-MM-dd") + QString(" (entries: ") + QString::number(historyByDay[date].size()) + QString(")"),
@@ -69,7 +73,7 @@ void HistoryDialog::createPages()
         });
     }
 
-    // Initialize pendingChanges_ as a full copy of pages_
+    // Initialize working copy for pending changes
     pendingChanges_.resize(pages_.size());
     for (size_t i = 0; i < pages_.size(); ++i) {
         pendingChanges_[i] = pages_[i].durations;
@@ -81,9 +85,11 @@ void HistoryDialog::setupUI()
     setWindowTitle("History");
     QVBoxLayout* layout = new QVBoxLayout(this);
 
+    // Page title and totals label
     pageLabel_ = new QLabel(this);
     layout->addWidget(pageLabel_);
 
+    // Main table showing duration entries
     table_ = new QTableWidget(this);
     table_->setColumnCount(4);
     table_->setHorizontalHeaderLabels({ "Type      ", "Start - End   ", "Duration   ", "Activity   " });
@@ -96,6 +102,7 @@ void HistoryDialog::setupUI()
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     layout->addWidget(table_);
 
+    // Navigation buttons for page switching
     QHBoxLayout* navLayout = new QHBoxLayout();
     prevButton_ = new QPushButton("Previous", this);
     nextButton_ = new QPushButton("Next", this);
@@ -103,6 +110,7 @@ void HistoryDialog::setupUI()
     navLayout->addWidget(nextButton_);
     layout->addLayout(navLayout);
 
+    // Dialog control buttons
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     QPushButton* okButton = new QPushButton("OK", this);
     QPushButton* cancelButton = new QPushButton("Cancel", this);
@@ -111,6 +119,7 @@ void HistoryDialog::setupUI()
     buttonLayout->addWidget(cancelButton);
     layout->addLayout(buttonLayout);
 
+    // Connect signals
     connect(prevButton_, &QPushButton::clicked, this, &HistoryDialog::onPrevClicked);
     connect(nextButton_, &QPushButton::clicked, this, &HistoryDialog::onNextClicked);
     connect(okButton, &QPushButton::clicked, this, &QDialog::accept);
@@ -119,7 +128,7 @@ void HistoryDialog::setupUI()
     resize(400, 400);
 }
 
-std::pair<qint64, qint64> HistoryDialog::calculateTotals(const std::vector<TimeDuration>& durations)
+std::pair<qint64, qint64> HistoryDialog::calculateTotals(const std::deque<TimeDuration>& durations)
 {
     qint64 totalActivity = 0;
     qint64 totalPause = 0;
@@ -136,7 +145,7 @@ void HistoryDialog::updateTotalsLabel(uint idx)
 {
     if (idx >= pendingChanges_.size() || idx >= pages_.size()) {
         if (settings_.logToFile()) {
-            Logger::Log(QString("[ERROR] updateTotalsLabel: Invalid index %1").arg(idx));
+            Logger::Log(QString("[HISTORY] Error: updateTotalsLabel: Invalid index %1").arg(idx));
         }
         return;
     }
@@ -148,24 +157,31 @@ void HistoryDialog::updateTotalsLabel(uint idx)
 
 void HistoryDialog::updateTable(uint idx)
 {
-    // Add bounds checking
     if (idx >= pendingChanges_.size() || idx >= pages_.size()) {
         if (settings_.logToFile()) {
-            Logger::Log(QString("[ERROR] updateTable: Invalid index %1").arg(idx));
+            Logger::Log(QString("[HISTORY] Error: updateTable: Invalid index %1").arg(idx));
         }
         return;
+    }
+
+    // Clean up existing checkboxes to prevent memory leaks
+    for (int row = 0; row < table_->rowCount(); ++row) {
+        QWidget* cellWidget = table_->cellWidget(row, 3);
+        if (cellWidget) {
+            cellWidget->disconnect(); // Prevent orphaned signal connections
+            table_->removeCellWidget(row, 3);
+        }
     }
 
     table_->clearContents();
     table_->setRowCount(static_cast<int>(pendingChanges_[idx].size()));
     updateTotalsLabel(idx);
 
-    // Check if the entire page has been modified (different from original)
+    // Determine if this page has been modified
     bool pageModified = false;
     if (pendingChanges_[idx].size() != pages_[idx].durations.size()) {
         pageModified = true;
     } else {
-        // Compare element by element
         for (size_t i = 0; i < pendingChanges_[idx].size(); ++i) {
             const auto& pending = pendingChanges_[idx][i];
             const auto& original = pages_[idx].durations[i];
@@ -178,6 +194,7 @@ void HistoryDialog::updateTable(uint idx)
         }
     }
 
+    // Populate table rows
     for (int row = 0; row < int(pendingChanges_[idx].size()); ++row) {
         const auto& d = pendingChanges_[idx][row];
         QString typeStr = d.type == DurationType::Activity ? "Activity  " : "Pause  ";
@@ -188,31 +205,50 @@ void HistoryDialog::updateTable(uint idx)
         table_->setItem(row, 1, startEndItem);
         table_->setItem(row, 2, durationItem);
 
+        // Add checkbox for Activity/Pause toggle
         QCheckBox* box = new QCheckBox(table_);
         box->setChecked(d.type == DurationType::Activity);
         table_->setCellWidget(row, 3, box);
 
-        connect(box, &QCheckBox::stateChanged, [this, idx, row](int state) {
-            pendingChanges_[idx][row].type = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
-            QString typeStr = pendingChanges_[idx][row].type == DurationType::Activity ? "Activity  " : "Pause  ";
-            table_->item(row, 0)->setText(typeStr);
-            updateTotalsLabel(idx);
-            // Highlight only this edited row
-            for (int col = 0; col < table_->columnCount(); ++col) {
-                if (table_->item(row, col))
-                    table_->item(row, col)->setBackground(QColor(180, 216, 228, 255));
+        // Handle checkbox state changes with proper validation
+        connect(box, &QCheckBox::stateChanged, this, [this, currentIdx = idx, currentRow = row](int state) {
+            if (currentIdx >= pendingChanges_.size() || currentRow >= static_cast<int>(pendingChanges_[currentIdx].size())) {
+                if (settings_.logToFile()) {
+                    Logger::Log(QString("[WARNING] Checkbox callback: Invalid indices - page: %1, row: %2")
+                        .arg(currentIdx).arg(currentRow));
+                }
+                return;
+            }
+            
+            // Update the duration type in pending changes
+            pendingChanges_[currentIdx][currentRow].type = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
+            QString typeStr = pendingChanges_[currentIdx][currentRow].type == DurationType::Activity ? "Activity  " : "Pause  ";
+            
+            // Update UI if still on the same page
+            if (currentIdx == pageIndex_ && table_->item(currentRow, 0)) {
+                table_->item(currentRow, 0)->setText(typeStr);
+                updateTotalsLabel(currentIdx);
+                
+                // Highlight the modified row
+                for (int col = 0; col < table_->columnCount(); ++col) {
+                    if (table_->item(currentRow, col)) {
+                        table_->item(currentRow, col)->setBackground(QColor(180, 216, 228, 255));
+                    }
+                }
             }
         });
 
-        // Only highlight rows if the page has been modified
+        // Highlight all rows if page has been modified
         if (pageModified) {
             for (int col = 0; col < table_->columnCount(); ++col) {
-                if (table_->item(row, col))
+                if (table_->item(row, col)) {
                     table_->item(row, col)->setBackground(QColor(180, 216, 228, 255));
+                }
             }
         }
     }
 
+    // Update navigation button states
     prevButton_->setEnabled(pageIndex_ < pages_.size() - 1);
     nextButton_->setEnabled(pageIndex_ > 0);
 }
@@ -236,25 +272,23 @@ void HistoryDialog::onNextClicked()
 void HistoryDialog::saveChanges()
 {
     if (result() == QDialog::Accepted) {
-        // Apply pendingChanges_ to pages_
+        // Apply all pending changes to the original pages
         for (size_t i = 0; i < pages_.size(); ++i) {
             std::swap(pages_[i].durations, pendingChanges_[i]);
         }
 
-        // Update TimeTracker's current session if the current session was modified
-        bool currentSessionModified = false;
+        // Update TimeTracker's current session if modified
         for (size_t i = 0; i < pages_.size(); ++i) {
             if (pages_[i].isCurrent) {
                 timetracker_.setCurrentDurations(pages_[i].durations);
-                currentSessionModified = true;
                 if (settings_.logToFile()) {
-                    Logger::Log("  [HISTORY] Updated TimeTracker current session");
+                    Logger::Log("[HISTORY] Updated TimeTracker current session");
                 }
                 break;
             }
         }
 
-        // Save all durations (current session + history) to DB
+        // Save all durations to database
         std::deque<TimeDuration> allDurations;
         for (const auto& page : pages_) {
             allDurations.insert(allDurations.end(), page.durations.begin(), page.durations.end());
@@ -262,19 +296,19 @@ void HistoryDialog::saveChanges()
 
         if (!allDurations.empty()) {
             if (settings_.logToFile())
-                Logger::Log(QString("  [HISTORY] Saving %1 total durations to DB").arg(allDurations.size()));
+                Logger::Log(QString("[HISTORY] Saving %1 total durations to DB").arg(allDurations.size()));
             bool result = timetracker_.replaceDurationsInDB(allDurations);
             if (!result) {
                 if (settings_.logToFile())
-                    Logger::Log("  [HISTORY] Failed to save durations to DB");
+                    Logger::Log("[HISTORY] Failed to save durations to DB");
             } else {
                 if (settings_.logToFile())
-                    Logger::Log("  [HISTORY] Successfully saved durations to DB");
+                    Logger::Log("[HISTORY] Successfully saved durations to DB");
             }
         }
     } else {
         if (settings_.logToFile()) {
-            Logger::Log("  [HISTORY] Dialog cancelled, discarding changes");
+            Logger::Log("[HISTORY] Dialog cancelled, discarding changes");
         }
     }
 }
@@ -283,6 +317,7 @@ void HistoryDialog::showContextMenu(const QPoint& pos)
 {
     int row = table_->rowAt(pos.y());
     if (row < 0) return;
+    
     contextMenuRow_ = row;
     QMenu menu(this);
     QAction* splitAction = menu.addAction("Split..");
@@ -295,10 +330,9 @@ void HistoryDialog::onSplitRow()
     if (contextMenuRow_ < 0) return;
     uint idx = pageIndex_;
 
-    // Add bounds checking
     if (idx >= pendingChanges_.size() || contextMenuRow_ >= static_cast<int>(pendingChanges_[idx].size())) {
         if (settings_.logToFile()) {
-            Logger::Log(QString("[ERROR] onSplitRow: Invalid indices - page: %1, row: %2").arg(idx).arg(contextMenuRow_));
+            Logger::Log(QString("[HISTORY] Error: onSplitRow: Invalid indices - page: %1, row: %2").arg(idx).arg(contextMenuRow_));
         }
         return;
     }
@@ -307,16 +341,17 @@ void HistoryDialog::onSplitRow()
     QDateTime start = duration.endTime.addMSecs(-duration.duration);
     QDateTime end = duration.endTime;
 
+    // Show split dialog
     SplitDialog dlg(start, end, this);
     if (dlg.exec() == QDialog::Accepted) {
         QDateTime splitTime = dlg.getSplitTime();
         qint64 firstDuration = start.msecsTo(splitTime);
         qint64 secondDuration = splitTime.msecsTo(end);
         
-        // Validate split durations
+        // Validate split results
         if (firstDuration <= 0 || secondDuration <= 0) {
             if (settings_.logToFile()) {
-                Logger::Log(QString("[ERROR] onSplitRow: Invalid split durations - first: %1, second: %2")
+                Logger::Log(QString("[HISTORY] Error: onSplitRow: Invalid split durations - first: %1, second: %2")
                     .arg(firstDuration).arg(secondDuration));
             }
             return;
@@ -328,21 +363,25 @@ void HistoryDialog::onSplitRow()
         TimeDuration first(firstType, firstDuration, splitTime);
         TimeDuration second(secondType, secondDuration, end);
 
-        auto& durationsVec = pendingChanges_[idx];
-        durationsVec.erase(durationsVec.begin() + contextMenuRow_);
-        durationsVec.insert(durationsVec.begin() + contextMenuRow_, second);
-        durationsVec.insert(durationsVec.begin() + contextMenuRow_, first);
+        // Replace original duration with two new segments
+        auto& durationsDeque = pendingChanges_[idx];
+        durationsDeque.erase(durationsDeque.begin() + contextMenuRow_);
+        durationsDeque.insert(durationsDeque.begin() + contextMenuRow_, second);
+        durationsDeque.insert(durationsDeque.begin() + contextMenuRow_, first);
        
         updateTable(idx);
     }
 }
 
+// === SplitDialog Implementation ===
+
 SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* parent)
-    : QDialog(parent), start_(start), end_(end), firstSegmentType_(DurationType::Activity), secondSegmentType_(DurationType::Activity)
+    : QDialog(parent), start_(start), end_(end)
 {
     setWindowTitle("Split Duration");
     QVBoxLayout* layout = new QVBoxLayout(this);
 
+    // Time range display with slider
     QHBoxLayout* rowLayout = new QHBoxLayout();
     QLabel* startLabel = new QLabel(QString("Start: %1").arg(start.toString("hh:mm:ss")), this);
     QLabel* endLabel = new QLabel(QString("End: %1").arg(end.toString("hh:mm:ss")), this);
@@ -358,11 +397,11 @@ SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* 
     } else {
         slider_->setMinimum(1);
         slider_->setMaximum(totalSecs - 1);
-        slider_->setValue(totalSecs / 2);
+        slider_->setValue(totalSecs / 2); // Start at midpoint
     }
 
     QFont timeFont = startLabel->font();
-    timeFont.setPointSize(timeFont.pointSize() + 2); // Increase font size
+    timeFont.setPointSize(timeFont.pointSize() + 2);
     startLabel->setFont(timeFont);
     endLabel->setFont(timeFont);
 
@@ -371,21 +410,21 @@ SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* 
     rowLayout->addWidget(endLabel);
     layout->addLayout(rowLayout);
 
+    // Split time display
     splitTimeLabel_ = new QLabel(this);
-    splitTimeLabel_->setAlignment(Qt::AlignCenter); // Center the label
-    splitTimeLabel_->setFont(timeFont); // Apply increased font size
+    splitTimeLabel_->setAlignment(Qt::AlignCenter);
+    splitTimeLabel_->setFont(timeFont);
     layout->addWidget(splitTimeLabel_);
     updateSplitLabel(slider_->value());
     connect(slider_, &QSlider::valueChanged, this, &SplitDialog::updateSplitLabel);
 
-    // Add four-column layout for segment types
+    // Segment type selection
     QHBoxLayout* segmentTypeLayout = new QHBoxLayout();
 
-    // Left Flexible Empty Column
     QSpacerItem* leftSpacer = new QSpacerItem(1, 1, QSizePolicy::Expanding, QSizePolicy::Minimum);
     segmentTypeLayout->addItem(leftSpacer);
 
-    // First Segment Column
+    // First segment options
     QVBoxLayout* firstSegmentLayout = new QVBoxLayout();
     QLabel* firstSegmentLabel = new QLabel("First Segment:", this);
     firstSegmentActivity_ = new QRadioButton("Activity", this);
@@ -401,7 +440,7 @@ SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* 
     firstSegmentLayout->addWidget(firstSegmentPause_);
     segmentTypeLayout->addLayout(firstSegmentLayout);
 
-    // Second Segment Column
+    // Second segment options
     QVBoxLayout* secondSegmentLayout = new QVBoxLayout();
     QLabel* secondSegmentLabel = new QLabel("Second Segment:", this);
     secondSegmentActivity_ = new QRadioButton("Activity", this);
@@ -417,12 +456,12 @@ SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* 
     secondSegmentLayout->addWidget(secondSegmentPause_);
     segmentTypeLayout->addLayout(secondSegmentLayout);
 
-    // Right Flexible Empty Column
     QSpacerItem* rightSpacer = new QSpacerItem(1, 1, QSizePolicy::Expanding, QSizePolicy::Minimum);
     segmentTypeLayout->addItem(rightSpacer);
 
     layout->addLayout(segmentTypeLayout);
 
+    // Dialog buttons
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -471,7 +510,19 @@ void SplitDialog::setSecondSegmentType(DurationType type)
 
 HistoryDialog::~HistoryDialog() {
     if (settings_.logToFile()) {
-        Logger::Log("  [HISTORY] Dialog closing");
+        Logger::Log("[HISTORY] Dialog closing");
     }
+    
+    // Clean up cell widgets to prevent memory leaks
+    if (table_) {
+        for (int row = 0; row < table_->rowCount(); ++row) {
+            QWidget* cellWidget = table_->cellWidget(row, 3);
+            if (cellWidget) {
+                cellWidget->disconnect();
+                table_->removeCellWidget(row, 3);
+            }
+        }
+    }
+    
     pendingChanges_.clear();
 }

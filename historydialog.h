@@ -25,14 +25,14 @@ class HistoryDialog : public QDialog
 private:
     struct Page {
         QString title;
-        std::vector<TimeDuration> durations;
+        std::deque<TimeDuration> durations;
         bool isCurrent;
     };
 
     TimeTracker& timetracker_;
     const Settings& settings_;
     std::vector<Page> pages_;
-    std::vector<std::vector<TimeDuration>> pendingChanges_; // Store the entire edited page for each page index
+    std::vector<std::deque<TimeDuration>> pendingChanges_; // Store the entire edited page for each page index
     uint pageIndex_;
     int contextMenuRow_ = -1;
 
@@ -45,7 +45,7 @@ private:
     void createPages();
     void updateTotalsLabel(uint idx);
     void updateTable(uint idx);
-    std::pair<qint64, qint64> calculateTotals(const std::vector<TimeDuration>& durations);
+    std::pair<qint64, qint64> calculateTotals(const std::deque<TimeDuration>& durations);
     void saveChanges();
     void showContextMenu(const QPoint& pos);
 
@@ -94,9 +94,6 @@ private:
     QRadioButton* firstSegmentPause_;
     QRadioButton* secondSegmentActivity_;
     QRadioButton* secondSegmentPause_;
-
-    DurationType firstSegmentType_;
-    DurationType secondSegmentType_;
 };
 
-#endif // HISTORYDIALOG_H#endif // HISTORYDIALOG_H
+#endif // HISTORYDIALOG_H
