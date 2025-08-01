@@ -414,7 +414,7 @@ SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* 
     }
 
     QFont timeFont = startLabel->font();
-    timeFont.setPointSize(timeFont.pointSize() + 2);
+    timeFont.setPointSize(timeFont.pixelSize() + 2);
     startLabel->setFont(timeFont);
     endLabel->setFont(timeFont);
 

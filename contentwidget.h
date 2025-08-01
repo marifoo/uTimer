@@ -33,7 +33,7 @@ private:
 	QHBoxLayout *timerbutton_row_;
 	QPushButton *startpause_button_;
 	QPushButton *stop_button_;
-	QHBoxLayout *historybutton_row_;
+	QHBoxLayout *bottombutton_row_;
 	QPushButton *show_history_button_;
 	QPushButton *autopause_button_;
 	QHBoxLayout* optionbutton_row_;

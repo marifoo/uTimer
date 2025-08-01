@@ -38,8 +38,9 @@ void ContentWidget::setupGUI()
 	rows_->addLayout(activity_row_);
 	rows_->addLayout(pause_row_);
 	rows_->addLayout(timerbutton_row_);
-	rows_->addLayout(historybutton_row_);
 	rows_->addLayout(optionbutton_row_);
+	rows_->addLayout(bottombutton_row_);
+	
 
 	applyStartupSettingsToGui();
 }
@@ -47,7 +48,7 @@ void ContentWidget::setupGUI()
 void ContentWidget::setupTimeRows()
 {
 	QFont label_font = QApplication::font();
-	label_font.setPointSize(9);
+	label_font.setPixelSize(12);
 
 	// Start Time: --:--
 	starttime_row_ = new QHBoxLayout();
@@ -83,31 +84,23 @@ void ContentWidget::setupTimeRows()
 void ContentWidget::setupButtonRows()
 {
 	QFont button_font = QApplication::font();
-	button_font.setPointSize(8);
+	button_font.setPixelSize(11);
 
 	// [START] [STOP]
 	timerbutton_row_ = new QHBoxLayout();
 	startpause_button_ = new QPushButton("START");
 	startpause_button_->setFont(button_font);
 	startpause_button_->setToolTip("Start/Pause Activity Time");
+	startpause_button_->setFixedSize(100,25);
 	stop_button_ = new QPushButton("STOP");
 	stop_button_->setFont(button_font);
 	stop_button_->setToolTip("Stop all Timing");
+	stop_button_->setFixedSize(100, 25);
 	timerbutton_row_->addWidget(startpause_button_);
 	timerbutton_row_->addWidget(stop_button_);
 
-	// [History..]
-	historybutton_row_ = new QHBoxLayout();
-	show_history_button_ = new QPushButton("History..");
-	show_history_button_->setFont(button_font);
-	show_history_button_->setToolTip("Show History");
-	historybutton_row_->addWidget(show_history_button_);
-
-	// [Min to Tray] [Stay on Top] [Auto-Pause]
+	// [Stay on Top] [Auto-Pause]
 	optionbutton_row_ = new QHBoxLayout();
-	mintotray_button_ = new QPushButton("Min to Tray");
-	mintotray_button_->setFont(button_font);
-	mintotray_button_->setToolTip("Minimize to Tray Icon now");
 	pintotop_button_ = new QPushButton("Stay on Top");
 	pintotop_button_->setFont(button_font);
 	pintotop_button_->setToolTip("Keep this Window in Foreground");
@@ -116,10 +109,19 @@ void ContentWidget::setupButtonRows()
 	autopause_tooltip1_ = "min after locking the PC:\nPause the Timer and count these ";
 	autopause_tooltip2_ = "min retroactively as a Pause";
 	autopause_button_->setToolTip(settings_.getBackpauseMin() + autopause_tooltip1_ + settings_.getBackpauseMin() + autopause_tooltip2_);
-	optionbutton_row_->addWidget(mintotray_button_);
 	optionbutton_row_->addWidget(pintotop_button_);
 	optionbutton_row_->addWidget(autopause_button_);
 
+	// [Min to Tray] [History..]
+	bottombutton_row_ = new QHBoxLayout();
+	mintotray_button_ = new QPushButton("Min to Tray");
+	mintotray_button_->setFont(button_font);
+	mintotray_button_->setToolTip("Minimize to Tray Icon now");
+	show_history_button_ = new QPushButton("History..");
+	show_history_button_->setFont(button_font);
+	show_history_button_->setToolTip("Show History");
+	bottombutton_row_->addWidget(mintotray_button_);
+	bottombutton_row_->addWidget(show_history_button_);
 }
 
 void ContentWidget::applyStartupSettingsToGui()
