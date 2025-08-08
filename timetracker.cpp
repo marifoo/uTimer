@@ -19,6 +19,8 @@ void TimeTracker::startTimer()
 {
 	// Resume from pause - capture pause duration and continue activity
 	if (mode_ == Mode::Pause) {
+		if (settings_.logToFile())
+			Logger::Log("[DEBUG] Starting Timer from Pause - D=" + QString::number(durations_.size()));
 		qint64 t_pause = timer_.restart();
 		QDateTime now = QDateTime::currentDateTime();
 		if (t_pause > 0) {
@@ -38,6 +40,8 @@ void TimeTracker::startTimer()
 	}
 	// Start fresh timer session
 	else if (mode_ == Mode::None) {
+		if (settings_.logToFile())
+			Logger::Log("[DEBUG] Starting Timer from Stopped - D=" + QString::number(durations_.size()));
 		durations_.clear();
 		
 		// Add boot time as Activity duration if configured and no entries exist for today
@@ -59,17 +63,27 @@ void TimeTracker::startTimer()
 		if (settings_.logToFile())
 			Logger::Log("[TIMER] >> Timer started");
 	}
+	else {
+		if (settings_.logToFile())
+			Logger::Log("[DEBUG] Trying to Start Timer from Mode " + QString((mode_ == Mode::Activity) ? "Activity" : "Unknown") + " - D = " + QString::number(durations_.size()));
+	}
 }
 
 void TimeTracker::pauseTimer()
 {
 	// Pause active timer - capture activity duration
 	if (mode_ == Mode::Activity) {
+		if (settings_.logToFile())
+			Logger::Log("[DEBUG] Pausing Timer from Activity - D=" + QString::number(durations_.size()));
 		qint64 t_active = timer_.restart();
 		durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, QDateTime::currentDateTime()));
 		mode_ = Mode::Pause;
 		if (settings_.logToFile())
 			Logger::Log("[TIMER] Timer paused <");
+	}
+	else {
+		if (settings_.logToFile())
+			Logger::Log("[DEBUG] Trying to Pause Timer from Mode " + (mode_ == Mode::None) ? "Stopped" : ((mode_ == Mode::Pause) ?  "Paused" : "Unknown"));
 	}
 }
 
@@ -78,6 +92,8 @@ void TimeTracker::backpauseTimer()
 	// Retroactively pause timer - used for autopause when user becomes inactive
 	if (mode_ == Mode::Activity) {
 		if (settings_.isAutopauseEnabled()) {
+			if (settings_.logToFile())
+				Logger::Log("[DEBUG] Backpausing Timer from Activity - D=" + QString::number(durations_.size()));
 			qint64 backpause_msec = settings_.getBackpauseMsec();
 			QDateTime now = QDateTime::currentDateTime();
 
@@ -87,6 +103,9 @@ void TimeTracker::backpauseTimer()
 			// Ensure we don't create negative activity time
 			// This can happen if the backpause time is longer than the elapsed time
 			if (t_active < 0) {
+				if (settings_.logToFile()) {
+					Logger::Log("[DEBUG] Error: Activity time is smaller than Backpüause Time");
+				}
 				// If backpause time is longer than elapsed time, treat the entire period as pause
 				backpause_msec = elapsed_time;
 				t_active = 0;
@@ -96,6 +115,10 @@ void TimeTracker::backpauseTimer()
 			
 			// Only add activity duration if there was actual activity time
 			if (t_active > 0) {
+				if (settings_.logToFile()) {
+					Logger::Log("[DEBUG] Backpausing: Activity time is greater than Zero");
+				}
+
 				if (durations_.empty() || durations_.back().type != DurationType::Activity) {
 					durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, activity_end));
 				}
@@ -113,6 +136,16 @@ void TimeTracker::backpauseTimer()
 			if (settings_.logToFile())
 				Logger::Log("[TIMER] Timer retroactively paused <");
 		}
+		else {
+			if (settings_.logToFile()) {
+				Logger::Log("[DEBUG] Autopause is disabled, backpause ignored - D=" + QString::number(durations_.size()));
+			}
+		}
+	}
+	else {
+		if (settings_.logToFile()) {
+			Logger::Log("[DEBUG] Trying to Backpause Timer from Mode " + (mode_ == Mode::None) ? "Stopped" : ((mode_ == Mode::Pause) ? "Paused" : "Unknown"));
+		}
 	}
 }
 
@@ -120,11 +153,17 @@ void TimeTracker::stopTimer()
 {
 	// Early exit if timer is not running
 	if (mode_ == Mode::None) {
+		if (settings_.logToFile()) {
+			Logger::Log("[DEBUG] Stopping Timer from Stopped is Ignored - D=" + QString::number(durations_.size()));
+		}
 		return;
 	}
 
 	// Stop from pause mode - capture final pause duration
 	if (mode_ == Mode::Pause) {
+		if (settings_.logToFile()) {
+			Logger::Log("[DEBUG] Stopping Timer from Paused - D=" + QString::number(durations_.size()));
+		}
 		qint64 t_pause = timer_.elapsed();
 		durations_.emplace_back(TimeDuration(DurationType::Pause, t_pause, QDateTime::currentDateTime()));
 		mode_ = Mode::None;
@@ -135,6 +174,9 @@ void TimeTracker::stopTimer()
 	}
 	// Stop from activity mode - capture final activity duration
 	else if (mode_ == Mode::Activity) {
+		if (settings_.logToFile()) {
+			Logger::Log("[DEBUG] Stopping Timer from Activity - D=" + QString::number(durations_.size()));
+		}
 		qint64 t_active = timer_.elapsed();
 		durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, QDateTime::currentDateTime()));
 		mode_ = Mode::None;
@@ -172,20 +214,40 @@ void TimeTracker::useTimerViaLockEvent(LockEvent event) {
 	// Handle automatic timer control based on computer lock/unlock events
 	if (settings_.isAutopauseEnabled()) {
 		if (event == LockEvent::LongOngoingLock) {
-				// User has been away for extended period - retroactively pause
-				if (mode_ == Mode::Activity) {
-					was_active_before_autopause_ = true;
-					backpauseTimer();
+			// User has been away for extended period - retroactively pause
+			if (mode_ == Mode::Activity) {
+				if (settings_.logToFile()) {
+					Logger::Log("[DEBUG] Long ongoing lock in Activity detected, backpausing timer");
 				}
-				else {
-					was_active_before_autopause_ = false;
-				}
+				was_active_before_autopause_ = true;
+				backpauseTimer();
 			}
+			else {
+				if (settings_.logToFile()) {
+					Logger::Log("[DEBUG] Long ongoing lock outside of Activity detected, doing nothing");
+				}
+				was_active_before_autopause_ = false;
+			}
+		}
 		else if (event == LockEvent::Unlock) {
 			// User returned - resume if they were active before autopause
-			if (was_active_before_autopause_)
+			if (was_active_before_autopause_) {
+				if (settings_.logToFile()) {
+					Logger::Log("[DEBUG] Unlocking and was in Activity before, restarting Timer");
+				}
 				startTimer();
+			}	
+			else {
+				if (settings_.logToFile()) {
+					Logger::Log("[DEBUG] Unlocking but was not in Activity before, doing nothing");
+				}
+			}
 			was_active_before_autopause_ = false;
+		}
+	}
+	else {
+		if (settings_.logToFile()) {
+			Logger::Log("[DEBUG] Autopause is disabled, lock event ignored");
 		}
 	}
 }

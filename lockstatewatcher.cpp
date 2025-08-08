@@ -11,8 +11,11 @@ LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent)
 	buffer_for_lock{ false, false, true, true, true }, // fixed pattern for lock detection
 	buffer_for_unlock{ true, true, false, false, false } // fixed pattern for unlock detection
 {
-	std::fill(lock_state_buffer_.begin(), lock_state_buffer_.end(), false);
+	lock_state_buffer_ = { false, false, false, false, false};
 	lock_timer_.invalidate();
+
+	if (settings_.logToFile())
+		Logger::Log("[LOCK] LockStateWatcher initialized, BufferSize = " + QString::number(lock_state_buffer_.size()));
 }
 
 bool LockStateWatcher::isSessionLocked()
@@ -63,6 +66,14 @@ bool LockStateWatcher::isSessionLocked()
 
 LockEvent LockStateWatcher::determineLockEvent(bool session_locked)
 {
+	/*if (settings_.logToFile()) {
+		QString lock_state_str;
+		for (const auto& state : lock_state_buffer_) {
+			lock_state_str += state ? "1" : "0";
+		}
+		Logger::Log("[LOCK] Session locked = " + QString(session_locked?"1":"0") + QString("; LockStateBuffer = ") + lock_state_str);
+	}*/
+
 	lock_state_buffer_.push_back(session_locked);
 	lock_state_buffer_.pop_front();
 
@@ -75,7 +86,7 @@ LockEvent LockStateWatcher::determineLockEvent(bool session_locked)
 }
 
 void LockStateWatcher::update()
-{
+{	
 	const LockEvent lock_event = determineLockEvent(isSessionLocked());
 
 	if (lock_event == LockEvent::Lock) {
