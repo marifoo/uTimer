@@ -3,6 +3,7 @@
 #include <QTime>
 #include <QSystemTrayIcon>
 #include <QMessageBox>
+#include <QCloseEvent>
 #include "logger.h"
 #include "helpers.h"
 
@@ -168,6 +169,13 @@ void MainWin::shutdown()
 void MainWin::onAboutToQuit()
 {
 	shutdown();
+}
+
+void MainWin::closeEvent(QCloseEvent *event)
+{
+	// Handle manual window closing (Alt+F4, X button, etc.)
+	shutdown();
+	event->accept();
 }
 
 bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* message, long* result)

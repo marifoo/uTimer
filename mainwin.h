@@ -31,6 +31,7 @@ private:
 
 protected:
 	bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
+	void closeEvent(QCloseEvent *event) override;
 
 public:
 	explicit MainWin(Settings &settings, TimeTracker &timetracker, QWidget *parent = nullptr);
