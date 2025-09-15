@@ -8,6 +8,7 @@
 #include <QPushButton>
 #include <QMenu>
 #include <QMessageBox>
+#include <QApplication>
 #include "helpers.h"
 #include "logger.h"
 #include <QSlider>
@@ -413,11 +414,6 @@ SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* 
         slider_->setValue(totalSecs / 2); // Start at midpoint
     }
 
-    QFont timeFont = startLabel->font();
-    timeFont.setPointSize(timeFont.pixelSize() + 2);
-    startLabel->setFont(timeFont);
-    endLabel->setFont(timeFont);
-
     rowLayout->addWidget(startLabel);
     rowLayout->addWidget(slider_);
     rowLayout->addWidget(endLabel);
@@ -426,7 +422,6 @@ SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* 
     // Split time display
     splitTimeLabel_ = new QLabel(this);
     splitTimeLabel_->setAlignment(Qt::AlignCenter);
-    splitTimeLabel_->setFont(timeFont);
     layout->addWidget(splitTimeLabel_);
     updateSplitLabel(slider_->value());
     connect(slider_, &QSlider::valueChanged, this, &SplitDialog::updateSplitLabel);
