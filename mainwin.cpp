@@ -4,6 +4,7 @@
 #include <QSystemTrayIcon>
 #include <QMessageBox>
 #include <QCloseEvent>
+#include <QCoreApplication>
 #include "logger.h"
 #include "helpers.h"
 
@@ -157,13 +158,24 @@ void MainWin::start()
 
 void MainWin::shutdown()
 {
-	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
-		timetracker_.useTimerViaButton(Button::Stop);
-		emit sendButtons(Button::Stop);
-	}
+	static int already_called = 0;
 
 	if (settings_.logToFile())
-		Logger::Log("Shutdown requested");
+		Logger::Log("Shutdown requested (" + QString::number(already_called) + ")");
+
+	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
+		content_widget_->pressedStopButton();
+	}
+
+	// Allow some time for the timer to fully stop and database operations to complete
+	auto dieTime = QTime::currentTime().addMSecs(500);
+	while (QTime::currentTime() < dieTime)
+		QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+
+	if (settings_.logToFile() && (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()))
+		Logger::Log("Error: Timer did not stop correctly during shutdown");
+
+	++already_called;
 }
 
 void MainWin::onAboutToQuit()
