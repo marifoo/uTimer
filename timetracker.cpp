@@ -350,18 +350,53 @@ static void cleanDurations(std::deque<TimeDuration>* pDurations)
 
 		// Merge consecutive durations of the same type that are close in time
 		if (prevIt->type == it->type) {
-			qint64 endTimeDiff = std::abs(prevIt->endTime.toMSecsSinceEpoch() - it->endTime.toMSecsSinceEpoch());
-			qint64 durDiff = std::abs(prevIt->duration - it->duration);
-			qint64 startEndDiff = std::abs(prevIt->endTime.toMSecsSinceEpoch() - (it->endTime.toMSecsSinceEpoch() - it->duration));
+			const qint64 prev_start = prevIt->endTime.toMSecsSinceEpoch() - prevIt->duration;
+			const qint64 it_start = it->endTime.toMSecsSinceEpoch() - it->duration;
+			const qint64 prev_end = prevIt->endTime.toMSecsSinceEpoch();
+			const qint64 it_end = it->endTime.toMSecsSinceEpoch();
+
+			const qint64 diff_end = prev_end - it_end;
+			const qint64 diff_dur = prevIt->duration - it->duration;
+			const qint64 gap = it_start - prev_end;
 
 			// Remove near-duplicate entries (within 50ms difference)
-			if (endTimeDiff < 50 && durDiff < 50) {
+			if (std::abs(diff_end) < 50 && std::abs(diff_dur) < 50) {
 				it = durations.erase(it);
 				continue;
 			}
-			// Merge adjacent entries of same type with small gaps (gap less than 500ms)
-			else if (startEndDiff < 500) {
-				prevIt->duration += it->duration;
+			
+			// Current entry starts before previous (shorter) entry -> delete
+			if (it_start < prev_start && prev_end <= it_end) {
+				prevIt->endTime = it->endTime;
+				prevIt->duration = it->duration;
+				it = durations.erase(it);
+				continue;
+			}
+
+			// Current entry starts before previous (longer) entry -> join
+			if (it_start < prev_start && it_end < prev_end && it_start < prev_end) {
+				prevIt->duration = prev_end - it_start;
+				it = durations.erase(it);
+				continue;
+			}
+
+			// Current entry start overlaps into previous entry -> join
+			if (prev_start <= it_start && it_start <= prev_end && prev_end <= it_end) {
+				prevIt->endTime = it->endTime;
+				prevIt->duration += it_end - prev_start;
+				it = durations.erase(it);
+				continue;
+			}
+
+			// Current entry start is subset of previous entry -> delete
+			if (prev_start <= it_start && it_start <= prev_end && it_end <= prev_end) {
+				it = durations.erase(it);
+				continue;
+			}
+
+			// Merge adjacent (but disjoint) entries of same type with small gaps (less than 500ms)
+			if (gap > 0 && gap < 500) {
+				prevIt->duration += it->duration + gap;
 				prevIt->endTime = it->endTime;
 				it = durations.erase(it);
 				continue;

@@ -161,19 +161,19 @@ void MainWin::shutdown()
 	static int already_called = 0;
 
 	if (settings_.logToFile())
-		Logger::Log("Shutdown requested (" + QString::number(already_called) + ")");
+		Logger::Log("[TIMER] Shutdown requested (" + QString::number(already_called) + ")");
 
 	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
 		content_widget_->pressedStopButton();
 	}
 
 	// Allow some time for the timer to fully stop and database operations to complete
-	auto dieTime = QTime::currentTime().addMSecs(500);
+	auto dieTime = QTime::currentTime().addMSecs(100);
 	while (QTime::currentTime() < dieTime)
-		QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+		QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
 
 	if (settings_.logToFile() && (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()))
-		Logger::Log("Error: Timer did not stop correctly during shutdown");
+		Logger::Log("[TIMER] Error: Timer did not stop correctly during shutdown");
 
 	++already_called;
 }
