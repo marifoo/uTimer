@@ -26,7 +26,7 @@ Info
 
 Icon made by [Icons8](https://www.icons8.com) from [www.icons8.com](https://icons8.com/icon/63253/clock)
 
-Build with [Qt 5.14](https://www.qt.io) and MSVC Compiler
+Build with [Qt 5.14](https://www.qt.io) (see QT-LICENSE.md) and MSVC Compiler
 
 
 License
