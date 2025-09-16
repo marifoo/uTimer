@@ -1,16 +1,16 @@
 µTimer
 ======
-µTimer is a lightweight timer application designed for Windows, specifically to help you track your activity and pause times during remote work at home.
+µTimer is a lightweight timer application for Windows, specifically to help you track your activity and pause times during remote work.
 
 Key Features:
 
- * Lock Detection: Automatically detects when the user locks the computer and transitions into pause mode, ensuring accurate tracking of active work time.
+ * *Lock Detection*: Automatically detects when the user locks the computer and transitions into pause mode, ensuring accurate tracking of active work time.
  
- * Auto-Pause: Only counts locks longer than a configurable duration (default is 15 minutes) as pauses. This feature ensures that brief interruptions do not impact your overall activity tracking.
+ * *Auto-Pause*: Only counts locks longer than a configurable duration (default is 15 minutes) as pauses. This feature ensures that brief interruptions do not impact your overall activity tracking.
 
- * History Tracking: An optional history feature allows you to maintain (and edit!) a record of your past activities, giving you control over your tracking preferences.
+ * *History Tracking*: An optional history feature allows you to maintain (and edit!) a record of your past activities, giving you control over your tracking preferences.
 
-After the first start, make sure to check the '''user-settings.ini''' file to configure these options.
+After the first start, make sure to check the `user-settings.ini` file to configure these options.
 
 
 This app is open-source and available at [Github](https://github.com/marifoo/uTimer). The latest pre-compiled release can be found there under *Releases*.
@@ -31,7 +31,7 @@ Build with [Qt 5.14](https://www.qt.io) and MSVC Compiler
 
 License
 ------
-Copyright (c) 2025 marifoo (github.com/marifoo)
+Copyright (c) 2020-2025 marifoo (github.com/marifoo)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
