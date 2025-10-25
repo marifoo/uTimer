@@ -319,7 +319,7 @@ std::deque<TimeDuration> TimeTracker::getDurationsHistory()
 bool TimeTracker::appendDurationsToDB()
 { 
 	// Save current session durations to database (add to existing data)
-	cleanDurations(&durations_);  // Remove duplicates and merge adjacent entries
+	// cleanDurations(&durations_);  // Remove duplicates and merge adjacent entries
 	return db_.saveDurations(durations_, TransactionMode::Append);
 }
 

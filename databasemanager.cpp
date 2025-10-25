@@ -50,8 +50,8 @@ bool DatabaseManager::lazyOpen()
     }
 
     // Create the durations table if it doesn't exist
-    QSqlQuery query(db);
-    bool tableCreated = query.exec(
+    QSqlQuery query_new(db);
+    bool tableCreated = query_new.exec(
         "CREATE TABLE IF NOT EXISTS durations ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT," 
         "type INTEGER NOT NULL," // 0 = Activity, 1 = Pause (DurationType enum)
@@ -63,9 +63,35 @@ bool DatabaseManager::lazyOpen()
     
     if (!tableCreated) {
         if (settings_.logToFile())
-            Logger::Log("[DB] Error creating table: " + query.lastError().text());
+            Logger::Log("[DB] Error creating table: " + query_new.lastError().text());
         db.close();
         return false;
+    }
+
+    // Cleanup old entries
+    if (db.transaction()) {
+        QSqlQuery query(db);
+        bool querySuccessful = false;
+        
+        query.prepare("DELETE FROM durations WHERE end_date < date('now', '-' || :days || ' days')");
+        query.bindValue(":days", static_cast<int>(history_days_to_keep_));
+        querySuccessful = query.exec();
+
+        if (!querySuccessful) {
+            db.rollback();
+            if (settings_.logToFile())
+                Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
+        }
+        else {
+            if (!db.commit()) {
+                if (settings_.logToFile())
+                    Logger::Log("[DB] Error committing cleanup transaction: " + db.lastError().text());
+            }
+        }
+    }
+    else {
+        if (settings_.logToFile())
+            Logger::Log("[DB] Error starting cleanup transaction: " + db.lastError().text());
     }
     
     return true;
@@ -74,39 +100,6 @@ bool DatabaseManager::lazyOpen()
 void DatabaseManager::lazyClose() 
 {
     if (db.isOpen()) {
-        // Cleanup old entries before closing
-        if (db.transaction()) {
-            QSqlQuery query(db);
-            bool querySuccessful = false;
-            
-            if (history_days_to_keep_ == 0) {
-                // If history_days_to_keep_ is 0, we shouldn't be using the database at all
-                // This case should not normally occur, but clean up if it does
-                querySuccessful = query.exec("DELETE FROM durations");
-            }
-            else {
-                // Delete entries older than the specified number of days
-                query.prepare("DELETE FROM durations WHERE end_date < date('now', '-' || :days || ' days')");
-                query.bindValue(":days", static_cast<int>(history_days_to_keep_));
-                querySuccessful = query.exec();
-            }
-
-            if (!querySuccessful) {
-                db.rollback();
-                if (settings_.logToFile())
-                    Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
-            }
-            else {
-                if (!db.commit()) {
-                    if (settings_.logToFile())
-                        Logger::Log("[DB] Error committing cleanup transaction: " + db.lastError().text());
-                }
-            }
-        }
-        else {
-            if (settings_.logToFile())
-                Logger::Log("[DB] Error starting cleanup transaction: " + db.lastError().text());
-        }
         db.close();
     }
 }

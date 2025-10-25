@@ -164,11 +164,12 @@ void MainWin::shutdown()
 		Logger::Log("[TIMER] Shutdown requested (" + QString::number(already_called) + ")");
 
 	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
-		content_widget_->pressedStopButton();
+		timetracker_.useTimerViaButton(Button::Stop);
+		content_widget_->setGUItoStop();
 	}
 
 	// Allow some time for the timer to fully stop and database operations to complete
-	auto dieTime = QTime::currentTime().addMSecs(100);
+	auto dieTime = QTime::currentTime().addMSecs(200);
 	while (QTime::currentTime() < dieTime)
 		QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
 
