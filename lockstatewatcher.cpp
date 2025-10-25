@@ -66,14 +66,6 @@ bool LockStateWatcher::isSessionLocked()
 
 LockEvent LockStateWatcher::determineLockEvent(bool session_locked)
 {
-	/*if (settings_.logToFile()) {
-		QString lock_state_str;
-		for (const auto& state : lock_state_buffer_) {
-			lock_state_str += state ? "1" : "0";
-		}
-		Logger::Log("[LOCK] Session locked = " + QString(session_locked?"1":"0") + QString("; LockStateBuffer = ") + lock_state_str);
-	}*/
-
 	lock_state_buffer_.push_back(session_locked);
 	lock_state_buffer_.pop_front();
 

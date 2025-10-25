@@ -11,7 +11,7 @@
 #include "types.h"
 #include "databasemanager.h"
 
-static void cleanDurations(std::deque<TimeDuration>* pDurations);
+
 
 class TimeTracker : public QObject
 {
