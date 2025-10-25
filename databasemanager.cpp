@@ -4,6 +4,8 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QVariant>
+#include <QFile>
+#include <QTextStream>
 #include "logger.h"
 #include "settings.h"
 
@@ -104,8 +106,77 @@ void DatabaseManager::lazyClose()
     }
 }
 
+bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
+{
+    // Don't create backup if database doesn't exist
+    if (!QFile::exists(db.databaseName())) {
+        return true; // No file to backup, not an error
+    }
+
+    // Close database before copying
+    bool wasOpen = db.isOpen();
+    if (wasOpen) {
+        db.close();
+    }
+
+    // Generate backup filename with ISO timestamp
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH-mm-ss");
+    QString backupName = QString("%1.%2.backup").arg(db.databaseName()).arg(timestamp);
+    QString durationsFileName = QString("%1.%2.durations.txt").arg(db.databaseName()).arg(timestamp);
+
+    // Copy the database file
+    bool success = QFile::copy(db.databaseName(), backupName);
+    
+    if (!success) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error: Failed to create backup of database");
+        }
+    } else if (settings_.logToFile()) {
+        Logger::Log("[DB] Created database backup: " + backupName);
+    }
+
+    // Write durations to text file
+    QFile durationsFile(durationsFileName);
+    if (durationsFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QTextStream out(&durationsFile);
+        out << "Transaction Mode: " << (mode == TransactionMode::Replace ? "Replace" : "Append") << "\n";
+        out << "Total Durations: " << durations.size() << "\n";
+        out << "Timestamp: " << QDateTime::currentDateTime().toString(Qt::ISODate) << "\n";
+        out << "----------------------------------------\n";
+        
+        for (const auto& d : durations) {
+            out << "Type: " << (d.type == DurationType::Activity ? "Activity" : "Pause") << " | ";
+            out << "Duration: " << d.duration << "ms | ";
+            out << "End Date: " << d.endTime.date().toString(Qt::ISODate) << " | ";
+            out << "End Time: " << d.endTime.time().toString("HH:mm:ss.zzz") << "\n";
+        }
+        
+        durationsFile.close();
+        
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Created durations log: " + durationsFileName);
+        }
+    } else if (settings_.logToFile()) {
+        Logger::Log("[DB] Warning: Could not create durations log file");
+    }
+
+    // Reopen database if it was open before
+    if (wasOpen) {
+        db.open();
+    }
+
+    return success;
+}
+
 bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
+    // Create backup before any write operation
+    if (!createBackup(durations, mode)) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Warning: Proceeding with save despite backup failure");
+        }
+    }
+
     if (!lazyOpen()) {
         if (settings_.logToFile()) {
             Logger::Log("[DB] Could not lazy open DB to save Durations");

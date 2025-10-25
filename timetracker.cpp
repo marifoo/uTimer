@@ -319,14 +319,24 @@ std::deque<TimeDuration> TimeTracker::getDurationsHistory()
 bool TimeTracker::appendDurationsToDB()
 { 
 	// Save current session durations to database (add to existing data)
-	// cleanDurations(&durations_);  // Remove duplicates and merge adjacent entries
+	size_t original_size = durations_.size();
+	cleanDurations(&durations_);  // Remove duplicates and merge adjacent entries
+	if (settings_.logToFile() && (original_size != durations_.size())) {
+		Logger::Log(QString("[DB] Cleaned durations in DB: original size %1, cleaned size %2 (A)")
+			.arg(original_size).arg(durations_.size()));
+	}
 	return db_.saveDurations(durations_, TransactionMode::Append);
 }
 
 bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> durations)
 {
 	// Replace all database durations with provided data (used by history editor)
+	size_t original_size = durations.size();
 	cleanDurations(&durations);  // Remove duplicates and merge adjacent entries
+	if (settings_.logToFile() && (original_size != durations.size())) {
+		Logger::Log(QString("[DB] Cleaned durations in DB: original size %1, cleaned size %2 (R)")
+			.arg(original_size).arg(durations.size()));
+	}
 	return db_.saveDurations(durations, TransactionMode::Replace);
 }
 

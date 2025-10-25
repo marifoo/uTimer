@@ -25,6 +25,7 @@ private:
     const Settings& settings_;
     bool lazyOpen();
     void lazyClose();
+    bool createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
 };
 
 #endif // DATABASEMANAGER_H
