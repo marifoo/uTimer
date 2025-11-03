@@ -164,14 +164,23 @@ void MainWin::shutdown()
 		Logger::Log("[TIMER] Shutdown requested (" + QString::number(already_called) + ")");
 
 	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
-		timetracker_.useTimerViaButton(Button::Stop);
-		content_widget_->setGUItoStop();
+		content_widget_->pressedStopButton();
 	}
 
 	// Allow some time for the timer to fully stop and database operations to complete
-	auto dieTime = QTime::currentTime().addMSecs(200);
+	auto dieTime = QTime::currentTime().addMSecs(150);
 	while (QTime::currentTime() < dieTime)
 		QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
+
+	// try again if nice shutdown via signals did not work
+	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
+		timetracker_.useTimerViaButton(Button::Stop);
+		content_widget_->setGUItoStop();
+
+		dieTime = QTime::currentTime().addMSecs(70);
+		while (QTime::currentTime() < dieTime)
+			QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
+	}
 
 	if (settings_.logToFile() && (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()))
 		Logger::Log("[TIMER] Error: Timer did not stop correctly during shutdown");
@@ -181,11 +190,17 @@ void MainWin::shutdown()
 
 void MainWin::onAboutToQuit()
 {
+	if (settings_.logToFile())
+		Logger::Log("[TIMER] AboutToQuit received");
+
 	shutdown();
 }
 
 void MainWin::closeEvent(QCloseEvent *event)
 {
+	if (settings_.logToFile())
+		Logger::Log("[TIMER] CloseEvent received");
+
 	// Handle manual window closing (Alt+F4, X button, etc.)
 	shutdown();
 	event->accept();
@@ -197,12 +212,18 @@ bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* mes
 	MSG* msg = static_cast<MSG*>(message);
 	if (msg->message == WM_QUERYENDSESSION)
 	{
+		if (settings_.logToFile())
+			Logger::Log("[TIMER] WM_QUERYENDSESSION requested");
+
 		// Windows is asking if we can shutdown - allow it
 		*result = TRUE;
 		return true;
 	}
 	else if (msg->message == WM_ENDSESSION && msg->wParam)
 	{
+		if (settings_.logToFile())
+			Logger::Log("[TIMER] WM_ENDSESSION requested");
+
 		// Windows is shutting down - stop the timer if it's running
 		shutdown();
 
