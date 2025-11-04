@@ -182,24 +182,32 @@ void MainWin::shutdown()
 			QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
 	}
 
-	if (settings_.logToFile() && (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()))
-		Logger::Log("[TIMER] Error: Timer did not stop correctly during shutdown");
+	// Verify timer stopped correctly
+	if (settings_.logToFile()) {
+		if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
+			Logger::Log("[TIMER] Error: Timer did not stop correctly during shutdown");
+		} else {
+			Logger::Log("[TIMER] Shutdown completed successfully");
+		}
+	}
 
 	++already_called;
 }
 
 void MainWin::onAboutToQuit()
 {
-	if (settings_.logToFile())
+	if (settings_.logToFile()) {
 		Logger::Log("[TIMER] AboutToQuit received");
+	}
 
 	shutdown();
 }
 
 void MainWin::closeEvent(QCloseEvent *event)
 {
-	if (settings_.logToFile())
+	if (settings_.logToFile()) {
 		Logger::Log("[TIMER] CloseEvent received");
+	}
 
 	// Handle manual window closing (Alt+F4, X button, etc.)
 	shutdown();
@@ -219,10 +227,11 @@ bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* mes
 		*result = TRUE;
 		return true;
 	}
-	else if (msg->message == WM_ENDSESSION && msg->wParam)
+	else if (msg->message == WM_ENDSESSION)
 	{
-		if (settings_.logToFile())
-			Logger::Log("[TIMER] WM_ENDSESSION requested");
+		if (settings_.logToFile()) {
+			Logger::Log("[TIMER] WM_ENDSESSION received");
+		}
 
 		// Windows is shutting down - stop the timer if it's running
 		shutdown();

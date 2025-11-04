@@ -25,6 +25,11 @@ void Logger::log(const QString &text)
     if (logfile_ != nullptr)
         out << msg;
     out.flush();
+    
+    // Also flush to disk for maximum safety during shutdown
+    // Note: This makes every log call slower (~10-100x) due to disk I/O,
+    // but ensures logs are never lost even during hard shutdowns
+    logfile_->flush();
 }
 
 Logger::~Logger()
@@ -50,6 +55,7 @@ Logger::~Logger()
                 out2 << l << "\n";
             }
             out2.flush();
+            logfile_->flush();  // Ensure rotated log is written to disk
         }
         logfile_->close();
     }
