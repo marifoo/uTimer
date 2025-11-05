@@ -26,10 +26,12 @@ void TimeTracker::startTimer()
 		if (t_pause > 0) {
 			// If no previous pause entry or last entry is not a pause, create new pause entry
 			if (durations_.empty() || durations_.back().type != DurationType::Pause) {
-				durations_.emplace_back(TimeDuration(DurationType::Pause, t_pause, now));
+				addDurationWithMidnightSplit(DurationType::Pause, t_pause, now);
 			}
 			else {
 				// Extend existing pause entry if it's already the last entry
+				// Note: This path doesn't check for midnight crossing in the extension,
+				// which is acceptable since the original entry was already split if needed
 				durations_.back().endTime = now;
 				durations_.back().duration += t_pause;
 			}
@@ -76,7 +78,8 @@ void TimeTracker::pauseTimer()
 		if (settings_.logToFile())
 			Logger::Log("[DEBUG] Pausing Timer from Activity - D=" + QString::number(durations_.size()));
 		qint64 t_active = timer_.restart();
-		durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, QDateTime::currentDateTime()));
+		QDateTime now = QDateTime::currentDateTime();
+		addDurationWithMidnightSplit(DurationType::Activity, t_active, now);
 		mode_ = Mode::Pause;
 		if (settings_.logToFile())
 			Logger::Log("[TIMER] Timer paused <");
@@ -120,7 +123,7 @@ void TimeTracker::backpauseTimer()
 				}
 
 				if (durations_.empty() || durations_.back().type != DurationType::Activity) {
-					durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, activity_end));
+					addDurationWithMidnightSplit(DurationType::Activity, t_active, activity_end);
 				}
 				else {
 					// Extend existing activity entry if it's already the last entry
@@ -130,7 +133,7 @@ void TimeTracker::backpauseTimer()
 			}
 
 			// Add the retroactive pause period
-			durations_.emplace_back(TimeDuration(DurationType::Pause, backpause_msec, now));
+			addDurationWithMidnightSplit(DurationType::Pause, backpause_msec, now);
 
 			mode_ = Mode::Pause;
 			if (settings_.logToFile())
@@ -165,7 +168,8 @@ void TimeTracker::stopTimer()
 			Logger::Log("[DEBUG] Stopping Timer from Paused - D=" + QString::number(durations_.size()));
 		}
 		qint64 t_pause = timer_.elapsed();
-		durations_.emplace_back(TimeDuration(DurationType::Pause, t_pause, QDateTime::currentDateTime()));
+		QDateTime now = QDateTime::currentDateTime();
+		addDurationWithMidnightSplit(DurationType::Pause, t_pause, now);
 		mode_ = Mode::None;
 		if (settings_.logToFile()) {
 			Logger::Log("[TIMER] Timer unpaused < and stopped <<");
@@ -178,7 +182,8 @@ void TimeTracker::stopTimer()
 			Logger::Log("[DEBUG] Stopping Timer from Activity - D=" + QString::number(durations_.size()));
 		}
 		qint64 t_active = timer_.elapsed();
-		durations_.emplace_back(TimeDuration(DurationType::Activity, t_active, QDateTime::currentDateTime()));
+		QDateTime now = QDateTime::currentDateTime();
+		addDurationWithMidnightSplit(DurationType::Activity, t_active, now);
 		mode_ = Mode::None;
 		if (settings_.logToFile()) {
 			Logger::Log("[TIMER] Timer stopped <<");
@@ -344,5 +349,87 @@ bool TimeTracker::hasEntriesForToday()
 {
 	// Check if there are already time entries for today's date
 	return db_.hasEntriesForDate(QDate::currentDate());
+}
+
+void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duration, const QDateTime& endTime)
+{
+	// Calculate start time of this duration
+	QDateTime startTime = endTime.addMSecs(-duration);
+	
+	// Check if we crossed midnight
+	if (startTime.date() == endTime.date()) {
+		// No midnight crossing - add duration normally
+		durations_.emplace_back(TimeDuration(type, duration, endTime));
+		
+		if (settings_.logToFile()) {
+			Logger::Log(QString("{DEBUG] No crossing detected - single duration added (type: %1, duration: %2ms)")
+				.arg(type == DurationType::Activity ? "Activity" : "Pause")
+				.arg(duration));
+		}
+	}
+	else {
+		// Midnight was crossed - need to split the duration
+		if (settings_.logToFile()) {
+			Logger::Log(QString("{DEBUG] Crossing detected! Start: %1, End: %2")
+				.arg(startTime.toString("yyyy-MM-dd HH:mm:ss"))
+				.arg(endTime.toString("yyyy-MM-dd HH:mm:ss")));
+		}
+		
+		// Calculate end of the start date (23:59:59.999)
+		QDateTime endOfStartDay(startTime.date(), QTime(23, 59, 59, 999));
+		
+		// Calculate duration until midnight
+		qint64 durationBeforeMidnight = startTime.msecsTo(endOfStartDay) + 1; // +1 to include the last millisecond
+		
+		// Calculate duration after midnight
+		qint64 durationAfterMidnight = duration - durationBeforeMidnight;
+		
+		// Validate split durations
+		if (durationBeforeMidnight < 0 || durationAfterMidnight < 0) {
+			if (settings_.logToFile()) {
+				Logger::Log(QString("{DEBUG] Error: Invalid split calculation - before: %1ms, after: %2ms")
+					.arg(durationBeforeMidnight).arg(durationAfterMidnight));
+			}
+			// Fallback: add as single entry
+			durations_.emplace_back(TimeDuration(type, duration, endTime));
+			return;
+		}
+		
+		// Add entry ending at 23:59:59.999 of the previous day
+		durations_.emplace_back(TimeDuration(type, durationBeforeMidnight, endOfStartDay));
+		
+		if (settings_.logToFile()) {
+			Logger::Log(QString("{DEBUG] Created Day 1 entry: %1ms ending at %2")
+				.arg(durationBeforeMidnight)
+				.arg(endOfStartDay.toString("yyyy-MM-dd HH:mm:ss.zzz")));
+		}
+		
+		// Save the previous day's data to database immediately
+		if (appendDurationsToDB()) {
+			durations_.clear();
+			if (settings_.logToFile()) {
+				Logger::Log("{DEBUG] Day 1 data saved to DB and cleared from memory");
+			}
+		}
+		else {
+			if (settings_.logToFile()) {
+				Logger::Log("{DEBUG] Error: Failed to save Day 1 data to DB");
+			}
+		}
+		
+		// Calculate start of the new day (00:00:00.000)
+		QDateTime startOfNewDay(endTime.date(), QTime(0, 0, 0, 0));
+		
+		// Add entry for the new day starting at 00:00:00.000
+		durations_.emplace_back(TimeDuration(type, durationAfterMidnight, endTime));
+		
+		if (settings_.logToFile()) {
+			Logger::Log(QString("{DEBUG] Created Day 2 entry: %1ms starting at %2, ending at %3")
+				.arg(durationAfterMidnight)
+				.arg(startOfNewDay.toString("yyyy-MM-dd HH:mm:ss.zzz"))
+				.arg(endTime.toString("yyyy-MM-dd HH:mm:ss.zzz")));
+			Logger::Log("{DEBUG] Split completed successfully");
+		}
+	}
 }
 

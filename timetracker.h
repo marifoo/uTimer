@@ -30,6 +30,7 @@ private:
 	void stopTimer();
 	void pauseTimer();
 	void backpauseTimer();
+	void addDurationWithMidnightSplit(DurationType type, qint64 duration, const QDateTime& endTime);
 	
 public:
 	explicit TimeTracker(const Settings & settings, QObject *parent = nullptr);
