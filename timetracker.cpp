@@ -44,20 +44,47 @@ void TimeTracker::startTimer()
 	else if (mode_ == Mode::None) {
 		if (settings_.logToFile())
 			Logger::Log("[DEBUG] Starting Timer from Stopped - D=" + QString::number(durations_.size()));
-		durations_.clear();
 		
 		// Add boot time as Activity duration if configured and no entries exist for today
 		// This helps track computer usage time before the application was started
 		unsigned int boot_time_sec = settings_.getBootTimeSec();
-		if (boot_time_sec > 0 && !hasEntriesForToday()) {
+		bool shouldAddBootTime = false;
+		
+		if (boot_time_sec > 0) {
+			QDate today = QDate::currentDate();
+			bool hasEntriesInMemory = false;
+			
+			// Check if current in-memory durations contain entries for today
+			// This must be done BEFORE clearing durations_
+			for (const auto& d : durations_) {
+				if (d.endTime.date() == today) {
+					hasEntriesInMemory = true;
+					break;
+				}
+			}
+			
+			// Only add boot time if neither memory nor database has entries for today
+			bool hasEntriesInDB = hasEntriesForToday();
+			shouldAddBootTime = !hasEntriesInMemory && !hasEntriesInDB;
+			
+			if (settings_.logToFile()) {
+				if (shouldAddBootTime) {
+					Logger::Log("[TIMER] Will add boot time: " + QString::number(boot_time_sec) + " seconds (first session today)");
+				} else {
+					Logger::Log("[TIMER] Boot time not added - entries already exist for today (in memory: " + 
+						QString(hasEntriesInMemory ? "yes" : "no") + ", in DB: " + 
+						QString(hasEntriesInDB ? "yes" : "no") + ")");
+				}
+			}
+		}
+		
+		durations_.clear();
+		
+		// Add boot time if determined necessary
+		if (shouldAddBootTime) {
 			QDateTime now = QDateTime::currentDateTime();
 			qint64 boot_time_msec = static_cast<qint64>(boot_time_sec) * 1000;
 			durations_.emplace_back(TimeDuration(DurationType::Activity, boot_time_msec, now));
-			if (settings_.logToFile())
-				Logger::Log("[TIMER] Added boot time: " + QString::number(boot_time_sec) + " seconds (first session today)");
-		}
-		else if (boot_time_sec > 0 && settings_.logToFile()) {
-			Logger::Log("[TIMER] Boot time not added - entries already exist for today");
 		}
 		
 		timer_.start();
@@ -353,6 +380,14 @@ bool TimeTracker::hasEntriesForToday()
 
 void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duration, const QDateTime& endTime)
 {
+	// Ignore non-positive durations to avoid zero-length entries
+	if (duration <= 0) {
+		if (settings_.logToFile()) {
+			Logger::Log("[DEBUG] Ignoring non-positive duration in addDurationWithMidnightSplit");
+		}
+		return;
+	}
+
 	// Calculate start time of this duration
 	QDateTime startTime = endTime.addMSecs(-duration);
 	
@@ -395,40 +430,50 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
 			return;
 		}
 		
-		// Add entry ending at 23:59:59.999 of the previous day
-		durations_.emplace_back(TimeDuration(type, durationBeforeMidnight, endOfStartDay));
-		
-		if (settings_.logToFile()) {
-			Logger::Log(QString("{DEBUG] Created Day 1 entry: %1ms ending at %2")
-				.arg(durationBeforeMidnight)
-				.arg(endOfStartDay.toString("yyyy-MM-dd HH:mm:ss.zzz")));
-		}
-		
-		// Save the previous day's data to database immediately
-		if (appendDurationsToDB()) {
-			durations_.clear();
+		bool addedDay1 = false;
+		// Add entry ending at 23:59:59.999 of the previous day if positive
+		if (durationBeforeMidnight > 0) {
+			durations_.emplace_back(TimeDuration(type, durationBeforeMidnight, endOfStartDay));
+			addedDay1 = true;
 			if (settings_.logToFile()) {
-				Logger::Log("{DEBUG] Day 1 data saved to DB and cleared from memory");
+				Logger::Log(QString("{DEBUG] Created Day 1 entry: %1ms ending at %2")
+					.arg(durationBeforeMidnight)
+					.arg(endOfStartDay.toString("yyyy-MM-dd HH:mm:ss.zzz")));
 			}
 		}
-		else {
-			if (settings_.logToFile()) {
-				Logger::Log("{DEBUG] Error: Failed to save Day 1 data to DB");
+		
+		// Save the previous day's data to database immediately only if Day 1 was added
+		if (addedDay1) {
+			if (appendDurationsToDB()) {
+				durations_.clear();
+				if (settings_.logToFile()) {
+					Logger::Log("{DEBUG] Day 1 data saved to DB and cleared from memory");
+				}
+			}
+			else {
+				if (settings_.logToFile()) {
+					Logger::Log("{DEBUG] Error: Failed to save Day 1 data to DB");
+				}
 			}
 		}
 		
 		// Calculate start of the new day (00:00:00.000)
 		QDateTime startOfNewDay(endTime.date(), QTime(0, 0, 0, 0));
 		
-		// Add entry for the new day starting at 00:00:00.000
-		durations_.emplace_back(TimeDuration(type, durationAfterMidnight, endTime));
-		
-		if (settings_.logToFile()) {
-			Logger::Log(QString("{DEBUG] Created Day 2 entry: %1ms starting at %2, ending at %3")
-				.arg(durationAfterMidnight)
-				.arg(startOfNewDay.toString("yyyy-MM-dd HH:mm:ss.zzz"))
-				.arg(endTime.toString("yyyy-MM-dd HH:mm:ss.zzz")));
-			Logger::Log("{DEBUG] Split completed successfully");
+		// Add entry for the new day starting at 00:00:00.000 if positive
+		if (durationAfterMidnight > 0) {
+			durations_.emplace_back(TimeDuration(type, durationAfterMidnight, endTime));
+			if (settings_.logToFile()) {
+				Logger::Log(QString("{DEBUG] Created Day 2 entry: %1ms starting at %2, ending at %3")
+					.arg(durationAfterMidnight)
+					.arg(startOfNewDay.toString("yyyy-MM-dd HH:mm:ss.zzz"))
+					.arg(endTime.toString("yyyy-MM-dd HH:mm:ss.zzz")));
+				Logger::Log("{DEBUG] Split completed successfully");
+			}
+		} else {
+			if (settings_.logToFile()) {
+				Logger::Log("{DEBUG] Day 2 entry has non-positive duration, not adding");
+			}
 		}
 	}
 }
