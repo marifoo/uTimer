@@ -1,6 +1,7 @@
 #include "mainwin.h"
 #include <QtDebug>
 #include <QTime>
+#include <QTimer>
 #include <QSystemTrayIcon>
 #include <QMessageBox>
 #include <QCloseEvent>
@@ -13,7 +14,8 @@
 #endif
 
 MainWin::MainWin(Settings& settings, TimeTracker& timetracker, QWidget *parent)	
-	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), warning_pause_shown_(false), was_active_before_autopause_(false)
+	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), 
+	  warning_pause_shown_(false), was_active_before_autopause_(false)
 {
 	setupCentralWidget(settings, timetracker);
 
@@ -21,6 +23,11 @@ MainWin::MainWin(Settings& settings, TimeTracker& timetracker, QWidget *parent)
 
 	setWindowTitle("µTimer");
 	setWindowFlags(windowFlags() &(~Qt::WindowMaximizeButtonHint));
+	
+	// Create midnight timer (single-shot, reused for both stop and restart)
+	midnight_timer_ = new QTimer(this);
+	midnight_timer_->setSingleShot(true);
+	// Note: connection is made dynamically in scheduleMidnightStop/Restart
 }
 
 void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
@@ -28,10 +35,24 @@ void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
 	content_widget_ = new ContentWidget(settings, timetracker, this);
 
 	setCentralWidget(content_widget_);
-
 	QObject::connect(content_widget_, SIGNAL(pressedButton(Button)), this, SIGNAL(sendButtons(Button)));
 	QObject::connect(content_widget_, SIGNAL(minToTray()), this, SLOT(minToTray()));
 	QObject::connect(content_widget_, SIGNAL(toggleAlwaysOnTop()), this, SLOT(toggleAlwaysOnTop()));
+	
+	// Schedule midnight timer when user starts timer
+	QObject::connect(content_widget_, &ContentWidget::pressedButton, this, [this](Button button) {
+		if (button == Button::Start) {
+			// User started timer - schedule midnight stop
+			scheduleMidnightStop();
+		} else if (button == Button::Stop) {
+			// User stopped timer - cancel midnight timer
+			midnight_timer_->stop();
+			
+			if (settings_.logToFile()) {
+				Logger::Log("[MIDNIGHT] Timer stopped manually - cancelled midnight timer");
+			}
+		}
+	});
 }
 
 void MainWin::setupIcon()
@@ -149,8 +170,10 @@ void MainWin::start()
 	else
 		showMainWin();
 
-	if (settings_.isAutostartTimingEnabled())
+	if (settings_.isAutostartTimingEnabled()) {
 		content_widget_->pressedStartPauseButton();
+		// The pressedButton signal will trigger midnight scheduling
+	}
 
 	warning_activity_shown_ = !settings_.showTooMuchActivityWarning();
 	warning_pause_shown_ = !settings_.showNoPauseWarning();
@@ -241,4 +264,85 @@ bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* mes
 	}
 #endif
 	return QMainWindow::nativeEvent(eventType, message, result);
+}
+
+void MainWin::scheduleMidnightStop()
+{
+	// Calculate milliseconds until 23:59:59.500
+	QTime current_time = QTime::currentTime();
+	QTime midnight_stop_time(23, 59, 59, 500);
+	
+	qint64 msecs_until_stop;
+	if (current_time < midnight_stop_time) {
+		// Same day - calculate time until 23:59:59.500
+		msecs_until_stop = current_time.msecsTo(midnight_stop_time);
+	} else {
+		// Already past the stop time today - stop immediately
+		msecs_until_stop = 1;
+	}
+	
+	if (settings_.logToFile()) {
+		Logger::Log(QString("[MIDNIGHT] Scheduled auto-stop in %1 seconds")
+			.arg(msecs_until_stop / 1000.0, 0, 'f', 1));
+	}
+	
+	// Disconnect any previous connection and connect to stop handler
+	midnight_timer_->disconnect();
+	connect(midnight_timer_, &QTimer::timeout, this, &MainWin::onMidnightStop);
+	midnight_timer_->start(static_cast<int>(msecs_until_stop));
+}
+
+void MainWin::scheduleMidnightRestart()
+{
+	// Calculate milliseconds until 00:00:00.500
+	QTime current_time = QTime::currentTime();
+	QTime midnight_restart_time(0, 0, 0, 500);
+	
+	qint64 msecs_until_restart;
+	if (current_time < midnight_restart_time) {
+		// We're between 00:00:00.000 and 00:00:00.500 - calculate time until 00:00:00.500
+		msecs_until_restart = current_time.msecsTo(midnight_restart_time);
+	} else {
+		// We're after 00:00:00.500 - restart immediately
+		msecs_until_restart = 1;
+	}
+	
+	if (settings_.logToFile()) {
+		Logger::Log(QString("[MIDNIGHT] Scheduled auto-restart in %1 seconds")
+			.arg(msecs_until_restart / 1000.0, 0, 'f', 1));
+	}
+	
+	// Disconnect any previous connection and connect to restart handler
+	midnight_timer_->disconnect();
+	connect(midnight_timer_, &QTimer::timeout, this, &MainWin::onMidnightRestart);
+	midnight_timer_->start(static_cast<int>(msecs_until_restart));
+}
+
+void MainWin::onMidnightStop()
+{
+	bool timer_is_running = content_widget_->isGUIinActivity() || content_widget_->isGUIinPause();
+	
+	if (timer_is_running) {
+		if (settings_.logToFile()) {
+			Logger::Log("[MIDNIGHT] Auto-stopping timer at end of day");
+		}
+		
+		content_widget_->pressedStopButton();
+		
+		// Schedule restart for 00:00:00.500 (half a second after midnight)
+		scheduleMidnightRestart();
+	}
+}
+
+void MainWin::onMidnightRestart()
+{
+	if (settings_.logToFile()) {
+		Logger::Log("[MIDNIGHT] Auto-restarting timer for new day");
+	}
+	
+	// Press the start button to begin new day
+	content_widget_->pressedStartPauseButton();
+	
+	// Schedule stop for tonight at 23:59:59.500
+	scheduleMidnightStop();
 }

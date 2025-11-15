@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <QSystemTrayIcon>
 #include <QString>
+#include <QTimer>
 #include "contentwidget.h"
 #include "settings.h"
 #include "types.h"
@@ -20,6 +21,14 @@ private:
 	bool warning_activity_shown_;
 	bool warning_pause_shown_;
 	bool was_active_before_autopause_;
+	
+	// Midnight auto-stop/restart handling
+	QTimer* midnight_timer_;
+	
+	void scheduleMidnightStop();
+	void scheduleMidnightRestart();
+	void onMidnightStop();
+	void onMidnightRestart();
 
 	void showMsgBox(const QString &text);
 	void showMainWin();

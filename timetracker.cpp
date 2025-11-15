@@ -282,26 +282,58 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
         }
         return;
     }
+    
     QDateTime startTime = endTime.addMSecs(-duration);
-    if (startTime.date() == endTime.date()) {
-        durations_.emplace_back(TimeDuration(type, duration, endTime));
+    
+    // Check if midnight was crossed (this should rarely happen due to auto-stop/restart)
+    if (startTime.date() != endTime.date()) {
         if (settings_.logToFile()) {
-            Logger::Log(QString("[DEBUG] Added duration (%1, %2ms)").arg(type == DurationType::Activity ? "Activity" : "Pause").arg(duration));
+            Logger::Log(QString("[WARNING] Unexpected midnight crossing detected - duration spans %1 to %2")
+                .arg(startTime.toString(Qt::ISODate))
+                .arg(endTime.toString(Qt::ISODate)));
+        }
+        
+        // Fallback: Split at midnight boundary
+        QDateTime endOfStartDay(startTime.date(), QTime(23, 59, 59, 999));
+        QDateTime startOfNewDay(endTime.date(), QTime(0, 0, 0, 0));
+        
+        qint64 beforeMidnight = startTime.msecsTo(endOfStartDay) + 1;
+        qint64 afterMidnight = startOfNewDay.msecsTo(endTime);
+        
+        if (beforeMidnight > 0) {
+            durations_.emplace_back(TimeDuration(type, beforeMidnight, endOfStartDay));
+            if (settings_.logToFile()) {
+                Logger::Log(QString("[DEBUG] Added duration before midnight (%1, %2ms)")
+                    .arg(type == DurationType::Activity ? "Activity" : "Pause")
+                    .arg(beforeMidnight));
+            }
+        }
+        
+        // Save the previous day's data
+        if (appendDurationsToDB()) {
+            durations_.clear();
+            if (settings_.logToFile()) {
+                Logger::Log("[DB] Previous day saved to DB (fallback midnight handling)");
+            }
+        }
+        
+        if (afterMidnight > 0) {
+            durations_.emplace_back(TimeDuration(type, afterMidnight, endTime));
+            if (settings_.logToFile()) {
+                Logger::Log(QString("[DEBUG] Added duration after midnight (%1, %2ms)")
+                    .arg(type == DurationType::Activity ? "Activity" : "Pause")
+                    .arg(afterMidnight));
+            }
         }
         return;
     }
-    // Crossed midnight: split
-    QDateTime endOfStartDay(startTime.date(), QTime(23,59,59,999));
-    qint64 beforeMidnight = startTime.msecsTo(endOfStartDay) + 1;
-    qint64 afterMidnight = duration - beforeMidnight;
-    if (beforeMidnight <= 0 || afterMidnight <= 0) {
-        durations_.emplace_back(TimeDuration(type, duration, endTime));
-        return;
+    
+    // Normal case: duration does not cross midnight
+    durations_.emplace_back(TimeDuration(type, duration, endTime));
+    if (settings_.logToFile()) {
+        Logger::Log(QString("[DEBUG] Added duration (%1, %2ms)")
+            .arg(type == DurationType::Activity ? "Activity" : "Pause")
+            .arg(duration));
     }
-    durations_.emplace_back(TimeDuration(type, beforeMidnight, endOfStartDay));
-    if (appendDurationsToDB()) {
-        durations_.clear();
-    }
-    durations_.emplace_back(TimeDuration(type, afterMidnight, endTime));
 }
 
