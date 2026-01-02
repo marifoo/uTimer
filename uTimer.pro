@@ -22,8 +22,7 @@ SOURCES = \
    $$PWD/historydialog.cpp \
    $$PWD/settings.cpp \
    $$PWD/helpers.cpp \
-   $$PWD/logger.cpp \
-   $$PWD/historydialog.cpp
+   $$PWD/logger.cpp
 
 INCLUDEPATH = \
     $$PWD/.
@@ -34,7 +33,17 @@ CONFIG += qt c++17
 
 QT += widgets sql
 
-LIBS += -lUser32
+# Platform-specific configuration
+win32 {
+    LIBS += -lUser32
+}
+
+linux {
+    QT += dbus
+    OBJECTS_DIR = build
+    MOC_DIR = build
+    RCC_DIR = build
+}
 
 RESOURCES += \
     icon.qrc
