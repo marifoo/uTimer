@@ -4,6 +4,9 @@
 #include <QEvent>
 #include <QTimer>
 #include <QSettings>
+#ifdef Q_OS_LINUX
+#include <QLoggingCategory>
+#endif
 
 #include "settings.h"
 #include "mainwin.h"
@@ -13,6 +16,11 @@
 
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_LINUX
+	// Suppress KDE Framework warnings about missing platform plugin
+	QLoggingCategory::setFilterRules("kf.windowsystem=false");
+#endif
+
 	QCoreApplication::setApplicationName("µTimer");
 
 	QApplication application(argc, argv);
