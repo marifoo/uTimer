@@ -22,8 +22,9 @@ void TimeTracker::startTimer()
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Starting Timer from Pause - D=" + QString::number(durations_.size()));
         }
-        qint64 t_pause = timer_.restart();
+        // Capture timestamp before restart to minimize precision loss
         QDateTime now = QDateTime::currentDateTime();
+        qint64 t_pause = timer_.restart();
         if (t_pause > 0) {
             if (durations_.empty() || durations_.back().type != DurationType::Pause) {
                 addDurationWithMidnightSplit(DurationType::Pause, t_pause, now);
@@ -115,8 +116,9 @@ void TimeTracker::pauseTimer()
     if (settings_.logToFile()) {
         Logger::Log("[DEBUG] Pausing Timer from Activity - D=" + QString::number(durations_.size()));
     }
-    qint64 t_active = timer_.restart();
+    // Capture timestamp before restart to minimize precision loss
     QDateTime now = QDateTime::currentDateTime();
+    qint64 t_active = timer_.restart();
     addDurationWithMidnightSplit(DurationType::Activity, t_active, now);
     mode_ = Mode::Pause;
     if (settings_.logToFile()) {
@@ -142,6 +144,25 @@ void TimeTracker::backpauseTimer()
         Logger::Log("[DEBUG] Backpausing Timer from Activity - D=" + QString::number(durations_.size()));
     }
     qint64 backpause_msec = settings_.getBackpauseMsec();
+
+    // Bounds check: backpause should be between 1 second and 1 hour
+    constexpr qint64 MIN_BACKPAUSE_MS = 1000;      // 1 second minimum
+    constexpr qint64 MAX_BACKPAUSE_MS = 3600000;   // 1 hour maximum
+    if (backpause_msec < MIN_BACKPAUSE_MS) {
+        if (settings_.logToFile()) {
+            Logger::Log(QString("[WARNING] Backpause value %1ms below minimum, using %2ms")
+                .arg(backpause_msec).arg(MIN_BACKPAUSE_MS));
+        }
+        backpause_msec = MIN_BACKPAUSE_MS;
+    } else if (backpause_msec > MAX_BACKPAUSE_MS) {
+        if (settings_.logToFile()) {
+            Logger::Log(QString("[WARNING] Backpause value %1ms exceeds maximum, using %2ms")
+                .arg(backpause_msec).arg(MAX_BACKPAUSE_MS));
+        }
+        backpause_msec = MAX_BACKPAUSE_MS;
+    }
+
+    // Capture timestamp before restart to minimize precision loss
     QDateTime now = QDateTime::currentDateTime();
     qint64 elapsed = timer_.restart();
     qint64 t_active = elapsed - backpause_msec;
