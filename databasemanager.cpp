@@ -70,6 +70,15 @@ bool DatabaseManager::lazyOpen()
         return false;
     }
 
+    // Create index for date-based queries (cleanup and hasEntriesForDate)
+    QSqlQuery indexQuery(db);
+    if (!indexQuery.exec("CREATE INDEX IF NOT EXISTS idx_end_date ON durations(end_date)")) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Warning: Failed to create index: " + indexQuery.lastError().text());
+        }
+        // Non-fatal: continue even if index creation fails
+    }
+
     // Cleanup old entries
     if (db.transaction()) {
         QSqlQuery query(db);
@@ -83,6 +92,8 @@ bool DatabaseManager::lazyOpen()
             db.rollback();
             if (settings_.logToFile())
                 Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
+            db.close();
+            return false;
         }
         else {
             if (!db.commit()) {
@@ -162,7 +173,12 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
 
     // Reopen database if it was open before
     if (wasOpen) {
-        db.open();
+        if (!db.open()) {
+            if (settings_.logToFile()) {
+                Logger::Log("[DB] CRITICAL: Failed to reopen database after backup: " + db.lastError().text());
+            }
+            return false;  // Signal backup failure since DB is now unusable
+        }
     }
 
     return success;
@@ -173,7 +189,8 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
     // Create backup before any write operation
     if (!createBackup(durations, mode)) {
         if (settings_.logToFile()) {
-            Logger::Log("[DB] Warning: Proceeding with save despite backup failure");
+            QString modeStr = (mode == TransactionMode::Replace) ? "REPLACE" : "APPEND";
+            Logger::Log("[DB] Warning: Backup failed before " + modeStr + " operation - proceeding without backup");
         }
     }
 
@@ -254,12 +271,23 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
     
     // Parse each row and reconstruct TimeDuration objects
     while (query.next()) {
-        DurationType type = static_cast<DurationType>(query.value(0).toInt());
+        int typeInt = query.value(0).toInt();
         qint64 duration = query.value(1).toLongLong();
         QDate endDate = QDate::fromString(query.value(2).toString(), Qt::ISODate);
         QTime endTime = QTime::fromString(query.value(3).toString(), "HH:mm:ss.zzz");
         QDateTime endDateTime(endDate, endTime);
-        
+
+        // Validate type enum range
+        if (typeInt != static_cast<int>(DurationType::Activity) &&
+            typeInt != static_cast<int>(DurationType::Pause)) {
+            if (settings_.logToFile()) {
+                Logger::Log(QString("[DB] Warning: Invalid type value %1, skipping entry").arg(typeInt));
+            }
+            continue;
+        }
+
+        DurationType type = static_cast<DurationType>(typeInt);
+
         // Validate parsed data before adding
         if (endDate.isValid() && endTime.isValid() && duration >= 0) {
             durations.emplace_back(TimeDuration(type, duration, endDateTime));
