@@ -341,3 +341,226 @@ bool DatabaseManager::hasEntriesForDate(const QDate& date)
     lazyClose();
     return hasEntries;
 }
+
+bool DatabaseManager::updateOrAppendCheckpoint(DurationType type, qint64 duration, const QDateTime& endTime)
+{
+    // Don't save checkpoint if history storage is disabled
+    if (history_days_to_keep_ == 0) {
+        return false;
+    }
+
+    if (!lazyOpen()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Could not lazy open DB to save checkpoint");
+        }
+        return false;
+    }
+
+    QDateTime startTime = endTime.addMSecs(-duration);
+    QDate endDate = endTime.date();
+    int typeInt = static_cast<int>(type);
+    QString endDateStr = endDate.toString(Qt::ISODate);
+    QString endTimeStr = endTime.time().toString("HH:mm:ss.zzz");
+
+    // Use the separate update interface to find existing entry
+    int existingId = -1;
+    bool found = updateDurationByStartTime(type, duration, endTime, existingId);
+
+    if (!db.transaction()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error starting transaction for checkpoint: " + db.lastError().text());
+        }
+        lazyClose();
+        return false;
+    }
+
+    bool success = false;
+    if (found && existingId >= 0) {
+        // Update existing entry with same start time
+        QSqlQuery updateQuery(db);
+        updateQuery.prepare(
+            "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time "
+            "WHERE id = :id"
+        );
+        updateQuery.bindValue(":duration", duration);
+        updateQuery.bindValue(":end_date", endDateStr);
+        updateQuery.bindValue(":end_time", endTimeStr);
+        updateQuery.bindValue(":id", existingId);
+
+        if (updateQuery.exec()) {
+            success = db.commit();
+            if (success && settings_.logToFile()) {
+                Logger::Log(QString("[DB] Updated checkpoint entry (id: %1, type: %2, start: %3, duration: %4ms)")
+                    .arg(existingId)
+                    .arg(type == DurationType::Activity ? "Activity" : "Pause")
+                    .arg(startTime.toString("hh:mm:ss"))
+                    .arg(duration));
+            }
+        } else {
+            db.rollback();
+            if (settings_.logToFile()) {
+                Logger::Log("[DB] Error updating checkpoint: " + updateQuery.lastError().text());
+            }
+        }
+    } else {
+        // Append new checkpoint entry - no existing entry with this start time
+        QSqlQuery insertQuery(db);
+        insertQuery.prepare(
+            "INSERT INTO durations (type, duration, end_date, end_time) "
+            "VALUES (:type, :duration, :end_date, :end_time)"
+        );
+        insertQuery.bindValue(":type", typeInt);
+        insertQuery.bindValue(":duration", duration);
+        insertQuery.bindValue(":end_date", endDateStr);
+        insertQuery.bindValue(":end_time", endTimeStr);
+
+        if (insertQuery.exec()) {
+            success = db.commit();
+            if (success && settings_.logToFile()) {
+                Logger::Log(QString("[DB] Appended checkpoint entry (type: %1, start: %2, duration: %3ms)")
+                    .arg(type == DurationType::Activity ? "Activity" : "Pause")
+                    .arg(startTime.toString("hh:mm:ss"))
+                    .arg(duration));
+            }
+        } else {
+            db.rollback();
+            if (settings_.logToFile()) {
+                Logger::Log("[DB] Error inserting checkpoint: " + insertQuery.lastError().text());
+            }
+        }
+    }
+
+    lazyClose();
+    return success;
+}
+
+bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>& durations)
+{
+    if (durations.empty()) {
+        return true;
+    }
+
+    // Don't update if history storage is disabled
+    if (history_days_to_keep_ == 0) {
+        return false;
+    }
+
+    if (!lazyOpen()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Could not lazy open DB to update durations");
+        }
+        return false;
+    }
+
+    if (!db.transaction()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error starting transaction for updating durations: " + db.lastError().text());
+        }
+        lazyClose();
+        return false;
+    }
+
+    QSqlQuery updateQuery(db);
+    updateQuery.prepare(
+        "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time "
+        "WHERE id = :id"
+    );
+
+    QSqlQuery insertQuery(db);
+    insertQuery.prepare(
+        "INSERT INTO durations (type, duration, end_date, end_time) "
+        "VALUES (:type, :duration, :end_date, :end_time)"
+    );
+
+    int updatedCount = 0;
+    int insertedCount = 0;
+
+    for (const auto& d : durations) {
+        int existingId = -1;
+        bool found = updateDurationByStartTime(d.type, d.duration, d.endTime, existingId);
+
+        if (found && existingId >= 0) {
+            // Update existing entry
+            updateQuery.bindValue(":duration", d.duration);
+            updateQuery.bindValue(":end_date", d.endTime.date().toString(Qt::ISODate));
+            updateQuery.bindValue(":end_time", d.endTime.time().toString("HH:mm:ss.zzz"));
+            updateQuery.bindValue(":id", existingId);
+
+            if (!updateQuery.exec()) {
+                db.rollback();
+                if (settings_.logToFile()) {
+                    Logger::Log("[DB] Error updating duration: " + updateQuery.lastError().text());
+                }
+                lazyClose();
+                return false;
+            }
+            updatedCount++;
+        } else {
+            // Insert new entry
+            insertQuery.bindValue(":type", static_cast<int>(d.type));
+            insertQuery.bindValue(":duration", d.duration);
+            insertQuery.bindValue(":end_date", d.endTime.date().toString(Qt::ISODate));
+            insertQuery.bindValue(":end_time", d.endTime.time().toString("HH:mm:ss.zzz"));
+
+            if (!insertQuery.exec()) {
+                db.rollback();
+                if (settings_.logToFile()) {
+                    Logger::Log("[DB] Error inserting duration: " + insertQuery.lastError().text());
+                }
+                lazyClose();
+                return false;
+            }
+            insertedCount++;
+        }
+    }
+
+    bool success = db.commit();
+    if (success && settings_.logToFile()) {
+        Logger::Log(QString("[DB] Updated durations: %1 updated, %2 inserted").arg(updatedCount).arg(insertedCount));
+    } else if (!success && settings_.logToFile()) {
+        Logger::Log("[DB] Error committing update transaction: " + db.lastError().text());
+    }
+
+    lazyClose();
+    return success;
+}
+
+bool DatabaseManager::updateDurationByStartTime(DurationType type, qint64 duration, const QDateTime& endTime, int& existingId)
+{
+    // Calculate the start time for this duration
+    QDateTime startTime = endTime.addMSecs(-duration);
+    int typeInt = static_cast<int>(type);
+    const qint64 toleranceMs = 2000; // 2 seconds tolerance for start time matching
+    
+    existingId = -1;
+    
+    // Find entries with the same start time (within tolerance) and same type
+    QSqlQuery checkQuery(db);
+    checkQuery.prepare(
+        "SELECT id, duration, end_date, end_time FROM durations "
+        "WHERE type = :type "
+        "ORDER BY end_date DESC, end_time DESC"
+    );
+    checkQuery.bindValue(":type", typeInt);
+
+    if (checkQuery.exec()) {
+        while (checkQuery.next()) {
+            qint64 existingDuration = checkQuery.value(1).toLongLong();
+            QDate existingEndDate = QDate::fromString(checkQuery.value(2).toString(), Qt::ISODate);
+            QTime existingEndTime = QTime::fromString(checkQuery.value(3).toString(), "HH:mm:ss.zzz");
+            QDateTime existingEndDateTime(existingEndDate, existingEndTime);
+            
+            // Calculate start time of existing entry
+            QDateTime existingStartTime = existingEndDateTime.addMSecs(-existingDuration);
+            
+            // Check if start times match (within tolerance)
+            qint64 startTimeDiff = qAbs(existingStartTime.msecsTo(startTime));
+            if (startTimeDiff <= toleranceMs) {
+                existingId = checkQuery.value(0).toInt();
+                return true; // Found matching start time
+            }
+        }
+    }
+    
+    return false; // No matching entry found
+}
