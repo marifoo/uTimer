@@ -6,6 +6,16 @@
 
 #ifdef Q_OS_WIN
 #include <WtsApi32.h>
+
+// RAII wrapper for Windows library handle to prevent leaks
+struct ScopedLibrary {
+    HMODULE handle;
+    explicit ScopedLibrary(LPCWSTR name) : handle(LoadLibraryW(name)) {}
+    ~ScopedLibrary() { if (handle) FreeLibrary(handle); }
+    explicit operator bool() const { return handle != nullptr; }
+    ScopedLibrary(const ScopedLibrary&) = delete;
+    ScopedLibrary& operator=(const ScopedLibrary&) = delete;
+};
 #endif
 
 #ifdef Q_OS_LINUX
@@ -36,48 +46,44 @@ LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent)
 bool LockStateWatcher::isSessionLocked()
 {
 #ifdef Q_OS_WIN
-	// taken from https://stackoverflow.com/questions/29326685/c-check-if-computer-is-locked/43055326#43055326
-	typedef BOOL( PASCAL * WTSQuerySessionInformation )( HANDLE hServer, DWORD SessionId, WTS_INFO_CLASS WTSInfoClass, LPTSTR* ppBuffer, DWORD* pBytesReturned );
-	typedef void ( PASCAL * WTSFreeMemory )( PVOID pMemory );
+	// Using RAII wrapper for automatic library cleanup
+	typedef BOOL(PASCAL *WTSQuerySessionInformation)(HANDLE hServer, DWORD SessionId, WTS_INFO_CLASS WTSInfoClass, LPTSTR* ppBuffer, DWORD* pBytesReturned);
+	typedef void(PASCAL *WTSFreeMemory)(PVOID pMemory);
 
-	WTSINFOEXW * pInfo = nullptr;
-	WTS_INFO_CLASS wtsic = WTSSessionInfoEx;
-	bool bRet = false;
-	LPTSTR ppBuffer = nullptr;
-	DWORD dwBytesReturned = 0;
-	LONG dwFlags = 0;
-	WTSQuerySessionInformation pWTSQuerySessionInformation = nullptr;
-	WTSFreeMemory pWTSFreeMemory = nullptr;
-
-	HMODULE hLib = LoadLibraryW(L"wtsapi32.dll");
+	ScopedLibrary hLib(L"wtsapi32.dll");
 	if (!hLib) {
 		return false;
 	}
 
-	pWTSQuerySessionInformation = reinterpret_cast<WTSQuerySessionInformation>(GetProcAddress(hLib, "WTSQuerySessionInformationW"));
-	if (pWTSQuerySessionInformation) {
-		pWTSFreeMemory = reinterpret_cast<WTSFreeMemory>(GetProcAddress(hLib, "WTSFreeMemory"));
-		if (pWTSFreeMemory != nullptr) {
-			DWORD dwSessionID = WTSGetActiveConsoleSessionId();
-			if (pWTSQuerySessionInformation( WTS_CURRENT_SERVER_HANDLE, dwSessionID, wtsic, &ppBuffer, &dwBytesReturned)) {
-				if (dwBytesReturned > 0) {
-					pInfo = reinterpret_cast<WTSINFOEXW*>(ppBuffer);
-					if (pInfo->Level == 1) {
-						dwFlags = pInfo->Data.WTSInfoExLevel1.SessionFlags;
-					}
-					if (dwFlags == WTS_SESSIONSTATE_LOCK) {
-						bRet = true;
-					}
-				}
-				pWTSFreeMemory(ppBuffer);
-				ppBuffer = nullptr;
+	auto pWTSQuerySessionInformation = reinterpret_cast<WTSQuerySessionInformation>(
+		GetProcAddress(hLib.handle, "WTSQuerySessionInformationW"));
+	if (!pWTSQuerySessionInformation) {
+		return false;
+	}
+
+	auto pWTSFreeMemory = reinterpret_cast<WTSFreeMemory>(
+		GetProcAddress(hLib.handle, "WTSFreeMemory"));
+	if (!pWTSFreeMemory) {
+		return false;  // Don't proceed without cleanup capability
+	}
+
+	LPTSTR ppBuffer = nullptr;
+	DWORD dwBytesReturned = 0;
+	DWORD dwSessionID = WTSGetActiveConsoleSessionId();
+	bool isLocked = false;
+
+	if (pWTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE, dwSessionID,
+	                                WTSSessionInfoEx, &ppBuffer, &dwBytesReturned)) {
+		if (dwBytesReturned > 0 && ppBuffer) {
+			auto pInfo = reinterpret_cast<WTSINFOEXW*>(ppBuffer);
+			if (pInfo->Level == 1) {
+				isLocked = (pInfo->Data.WTSInfoExLevel1.SessionFlags == WTS_SESSIONSTATE_LOCK);
 			}
 		}
+		pWTSFreeMemory(ppBuffer);
 	}
-	if (hLib != nullptr) {
-		FreeLibrary(hLib);
-	}
-	return bRet;
+
+	return isLocked;
 #elif defined(Q_OS_LINUX)
 	switch (linux_lock_method_) {
 		case LinuxLockMethod::SystemdLogind:
