@@ -10,7 +10,7 @@
 #include "settings.h"
 
 DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
-    : history_days_to_keep_(std::max(settings.getHistoryDays(), 0)), QObject(parent), settings_(settings)
+    : QObject(parent), history_days_to_keep_(std::max(settings.getHistoryDays(), 0)), settings_(settings)
 {
     // Use unique connection name to avoid conflicts with multiple instances
     QString connectionName = QString("uTimer_connection_%1").arg(reinterpret_cast<quintptr>(this));

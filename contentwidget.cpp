@@ -14,8 +14,8 @@
 #include "helpers.h"
 #include "historydialog.h"
 
-ContentWidget::ContentWidget(Settings & settings, TimeTracker &timetracker, QWidget *parent) 
-	: QWidget(parent), settings_(settings), button_hold_color_(QColor(180,216,228,255)), timetracker_(timetracker)
+ContentWidget::ContentWidget(Settings & settings, TimeTracker &timetracker, QWidget *parent)
+	: QWidget(parent), settings_(settings), timetracker_(timetracker), button_hold_color_(QColor(180,216,228,255))
 {
 	setupGUI();
 
