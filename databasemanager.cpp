@@ -259,9 +259,20 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
         return durations;
     }
 
+    // Start read transaction for consistent snapshot
+    if (!db.transaction()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error starting read transaction: " + db.lastError().text());
+        }
+        lazyClose();
+        return durations;
+    }
+
     // Load all durations ordered by end date and time
-    QSqlQuery query("SELECT type, duration, end_date, end_time FROM durations ORDER BY end_date, end_time", db);
+    QSqlQuery query(db);
+    query.prepare("SELECT type, duration, end_date, end_time FROM durations ORDER BY end_date, end_time");
     if (!query.exec()) {
+        db.rollback();
         if (settings_.logToFile()) {
             Logger::Log("[DB] Error executing load query: " + query.lastError().text());
         }
@@ -297,8 +308,9 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
         }
     }
 
+    db.commit();  // Commit read transaction
     lazyClose();
-    
+
     return durations;
 }
 
