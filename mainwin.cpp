@@ -195,30 +195,47 @@ void MainWin::start()
 	warning_pause_shown_ = !settings_.showNoPauseWarning();
 }
 
-void MainWin::shutdown()
+void MainWin::shutdown(bool force_direct)
 {
-	static int already_called = 0;
-
-	if (settings_.logToFile())
-		Logger::Log("[TIMER] Shutdown requested (" + QString::number(already_called) + ")");
-
-	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
-		content_widget_->pressedStopButton();
+	// Guard against multiple shutdown calls
+	static bool shutdown_completed = false;
+	if (shutdown_completed) {
+		if (settings_.logToFile()) {
+			Logger::Log("[TIMER] Shutdown already completed, skipping");
+		}
+		return;
 	}
 
-	// Allow some time for the timer to fully stop and database operations to complete
-	auto dieTime = QTime::currentTime().addMSecs(150);
-	while (QTime::currentTime() < dieTime)
-		QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
+	if (settings_.logToFile()) {
+		Logger::Log(QString("[TIMER] Shutdown requested (force_direct=%1)").arg(force_direct));
+	}
 
-	// try again if nice shutdown via signals did not work
-	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
-		timetracker_.useTimerViaButton(Button::Stop);
-		content_widget_->setGUItoStop();
+	bool timer_was_running = content_widget_->isGUIinActivity() || content_widget_->isGUIinPause();
 
-		dieTime = QTime::currentTime().addMSecs(70);
-		while (QTime::currentTime() < dieTime)
-			QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
+	if (timer_was_running) {
+		if (force_direct) {
+			// During Windows shutdown, use direct call - event loop may not work
+			timetracker_.useTimerViaButton(Button::Stop);
+			content_widget_->setGUItoStop();
+		} else {
+			// Normal shutdown - try via GUI button first (triggers signals)
+			content_widget_->pressedStopButton();
+
+			// Allow some time for the timer to fully stop and database operations to complete
+			auto dieTime = QTime::currentTime().addMSecs(150);
+			while (QTime::currentTime() < dieTime)
+				QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
+
+			// Fallback: try direct call if signals didn't work
+			if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
+				timetracker_.useTimerViaButton(Button::Stop);
+				content_widget_->setGUItoStop();
+
+				dieTime = QTime::currentTime().addMSecs(70);
+				while (QTime::currentTime() < dieTime)
+					QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
+			}
+		}
 	}
 
 	// Verify timer stopped correctly
@@ -230,7 +247,7 @@ void MainWin::shutdown()
 		}
 	}
 
-	++already_called;
+	shutdown_completed = true;
 }
 
 void MainWin::onAboutToQuit()
@@ -239,7 +256,7 @@ void MainWin::onAboutToQuit()
 		Logger::Log("[TIMER] AboutToQuit received");
 	}
 
-	shutdown();
+	shutdown(false);  // Normal shutdown, use event loop
 }
 
 void MainWin::closeEvent(QCloseEvent *event)
@@ -249,7 +266,7 @@ void MainWin::closeEvent(QCloseEvent *event)
 	}
 
 	// Handle manual window closing (Alt+F4, X button, etc.)
-	shutdown();
+	shutdown(false);  // Normal shutdown, use event loop
 	event->accept();
 }
 
@@ -259,21 +276,35 @@ bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* mes
 	MSG* msg = static_cast<MSG*>(message);
 	if (msg->message == WM_QUERYENDSESSION)
 	{
-		if (settings_.logToFile())
-			Logger::Log("[TIMER] WM_QUERYENDSESSION requested");
+		if (settings_.logToFile()) {
+			Logger::Log("[TIMER] WM_QUERYENDSESSION received - starting early save");
+		}
 
-		// Windows is asking if we can shutdown - allow it
+		// Windows is asking if we can shutdown
+		// Best practice: start saving NOW to have more time before WM_ENDSESSION
+		// Use force_direct=true since event loop may be restricted during shutdown
+		shutdown(true);
+
+		// Return TRUE to allow shutdown
 		*result = TRUE;
 		return true;
 	}
 	else if (msg->message == WM_ENDSESSION)
 	{
+		// wParam indicates if session is actually ending (TRUE) or shutdown was cancelled (FALSE)
+		bool session_ending = (msg->wParam != 0);
+
 		if (settings_.logToFile()) {
-			Logger::Log("[TIMER] WM_ENDSESSION received");
+			Logger::Log(QString("[TIMER] WM_ENDSESSION received (session_ending=%1)").arg(session_ending));
 		}
 
-		// Windows is shutting down - stop the timer if it's running
-		shutdown();
+		if (session_ending) {
+			// Windows is actually shutting down - ensure timer is stopped
+			// shutdown() guard will skip if already done in WM_QUERYENDSESSION
+			shutdown(true);
+		}
+		// If session_ending is false, shutdown was cancelled - nothing to do
+		// (data was already saved in WM_QUERYENDSESSION, which is fine)
 
 		*result = 0;
 		return true;

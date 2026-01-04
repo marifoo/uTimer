@@ -36,7 +36,7 @@ private:
 	void showActivityWarnings();
 	void setupIcon();
 	void setupCentralWidget(Settings &settings, TimeTracker &timetracker);
-	void shutdown();
+	void shutdown(bool force_direct = false);
 
 protected:
 	bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
