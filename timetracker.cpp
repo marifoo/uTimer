@@ -1,12 +1,14 @@
 #include "timetracker.h"
 #include <QtDebug>
 #include <QDateTime>
+#include <QMutexLocker>
+#include <new>  // for std::bad_alloc
 #include "logger.h"
 #include "helpers.h"
 
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), mode_(Mode::None),
-      was_active_before_autopause_(false), db_(settings, parent)
+      was_active_before_autopause_(false), has_unsaved_data_(false), db_(settings, parent)
 { }
 
 TimeTracker::~TimeTracker()
@@ -40,6 +42,24 @@ void TimeTracker::startTimer()
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Starting Timer from Stopped - D=" + QString::number(durations_.size()));
         }
+
+        // Try to save any unsaved data from previous failed save attempt
+        if (has_unsaved_data_ && !durations_.empty()) {
+            if (settings_.logToFile()) {
+                Logger::Log("[DB] Retrying save of previously unsaved durations");
+            }
+            if (appendDurationsToDB()) {
+                durations_.clear();
+                has_unsaved_data_ = false;
+                if (settings_.logToFile()) {
+                    Logger::Log("[DB] Previously unsaved durations saved successfully");
+                }
+            } else if (settings_.logToFile()) {
+                Logger::Log("[DB] CRITICAL: Retry save failed - data will be lost");
+                // Continue anyway to avoid blocking the user indefinitely
+            }
+        }
+
         unsigned int boot_time_sec = settings_.getBootTimeSec();
         bool shouldAddBootTime = false;
         if (boot_time_sec > 0) {
@@ -60,9 +80,17 @@ void TimeTracker::startTimer()
             }
         }
         durations_.clear();
+        has_unsaved_data_ = false;
         if (shouldAddBootTime) {
             QDateTime now = QDateTime::currentDateTime();
-            durations_.emplace_back(TimeDuration(DurationType::Activity, static_cast<qint64>(boot_time_sec) * 1000, now));
+            try {
+                durations_.emplace_back(TimeDuration(DurationType::Activity, static_cast<qint64>(boot_time_sec) * 1000, now));
+            } catch (const std::bad_alloc&) {
+                if (settings_.logToFile()) {
+                    Logger::Log("[CRITICAL] Memory allocation failed adding boot time - continuing without boot time");
+                }
+                // Continue without boot time rather than failing to start
+            }
         }
         timer_.start();
         mode_ = Mode::Activity;
@@ -162,16 +190,21 @@ void TimeTracker::stopTimer()
     // Persist current session durations only (not entire history). History dialog does replace explicitly.
     if (appendDurationsToDB()) {
         durations_.clear();
+        has_unsaved_data_ = false;
         if (settings_.logToFile()) {
             Logger::Log("[DB] Session durations appended");
         }
-    } else if (settings_.logToFile()) {
-        Logger::Log("[DB] Error appending session durations");
+    } else {
+        has_unsaved_data_ = true;  // Mark for retry on next start
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error appending session durations - data retained for next save attempt");
+        }
     }
 }
 
 void TimeTracker::useTimerViaButton(Button button)
 {
+    QMutexLocker locker(&mutex_);
     switch (button) {
         case Button::Start: startTimer(); break;
         case Button::Pause: pauseTimer(); break;
@@ -181,6 +214,7 @@ void TimeTracker::useTimerViaButton(Button button)
 
 void TimeTracker::useTimerViaLockEvent(LockEvent event)
 {
+    QMutexLocker locker(&mutex_);
     if (!settings_.isAutopauseEnabled()) {
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Autopause disabled; lock event ignored");
@@ -202,6 +236,7 @@ void TimeTracker::useTimerViaLockEvent(LockEvent event)
 
 qint64 TimeTracker::getActiveTime() const
 {
+    QMutexLocker locker(&mutex_);
     qint64 sum = 0;
     for (const auto &t : durations_)
         if (t.type == DurationType::Activity)
@@ -213,6 +248,7 @@ qint64 TimeTracker::getActiveTime() const
 
 qint64 TimeTracker::getPauseTime() const
 {
+    QMutexLocker locker(&mutex_);
     qint64 sum = 0;
     for (const auto &t : durations_)
         if (t.type == DurationType::Pause)
@@ -222,10 +258,15 @@ qint64 TimeTracker::getPauseTime() const
     return sum;
 }
 
-const std::deque<TimeDuration>& TimeTracker::getCurrentDurations() const { return durations_; }
+const std::deque<TimeDuration>& TimeTracker::getCurrentDurations() const
+{
+    QMutexLocker locker(&mutex_);
+    return durations_;
+}
 
 void TimeTracker::setDurationType(size_t idx, DurationType type)
 {
+    QMutexLocker locker(&mutex_);
     if (idx < durations_.size()) {
         durations_[idx].type = type;
         if (settings_.logToFile()) {
@@ -238,11 +279,13 @@ void TimeTracker::setDurationType(size_t idx, DurationType type)
 
 void TimeTracker::setCurrentDurations(const std::deque<TimeDuration>& newDurations)
 {
+    QMutexLocker locker(&mutex_);
     durations_ = newDurations;
 }
 
 std::deque<TimeDuration> TimeTracker::getDurationsHistory()
 {
+    QMutexLocker locker(&mutex_);
     return db_.loadDurations();
 }
 
@@ -282,9 +325,9 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
         }
         return;
     }
-    
+
     QDateTime startTime = endTime.addMSecs(-duration);
-    
+
     // Check if midnight was crossed (this should rarely happen due to auto-stop/restart)
     if (startTime.date() != endTime.date()) {
         if (settings_.logToFile()) {
@@ -292,33 +335,57 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
                 .arg(startTime.toString(Qt::ISODate))
                 .arg(endTime.toString(Qt::ISODate)));
         }
-        
+
         // Fallback: Split at midnight boundary
         QDateTime endOfStartDay(startTime.date(), QTime(23, 59, 59, 999));
         QDateTime startOfNewDay(endTime.date(), QTime(0, 0, 0, 0));
-        
+
         qint64 beforeMidnight = startTime.msecsTo(endOfStartDay) + 1;
         qint64 afterMidnight = startOfNewDay.msecsTo(endTime);
-        
+
         if (beforeMidnight > 0) {
-            durations_.emplace_back(TimeDuration(type, beforeMidnight, endOfStartDay));
+            try {
+                durations_.emplace_back(TimeDuration(type, beforeMidnight, endOfStartDay));
+            } catch (const std::bad_alloc&) {
+                if (settings_.logToFile()) {
+                    Logger::Log("[CRITICAL] Memory allocation failed in addDurationWithMidnightSplit (before midnight) - attempting emergency save");
+                }
+                appendDurationsToDB();  // Emergency save attempt
+                has_unsaved_data_ = true;
+                return;
+            }
             if (settings_.logToFile()) {
                 Logger::Log(QString("[DEBUG] Added duration before midnight (%1, %2ms)")
                     .arg(type == DurationType::Activity ? "Activity" : "Pause")
                     .arg(beforeMidnight));
             }
         }
-        
+
         // Save the previous day's data
         if (appendDurationsToDB()) {
             durations_.clear();
+            has_unsaved_data_ = false;
             if (settings_.logToFile()) {
                 Logger::Log("[DB] Previous day saved to DB (fallback midnight handling)");
             }
+        } else {
+            has_unsaved_data_ = true;
+            if (settings_.logToFile()) {
+                Logger::Log("[DB] CRITICAL: Failed to save previous day during midnight crossing - data retained in memory for next save attempt");
+            }
+            // Data remains in durations_ and will be saved on next stopTimer() call
         }
-        
+
         if (afterMidnight > 0) {
-            durations_.emplace_back(TimeDuration(type, afterMidnight, endTime));
+            try {
+                durations_.emplace_back(TimeDuration(type, afterMidnight, endTime));
+            } catch (const std::bad_alloc&) {
+                if (settings_.logToFile()) {
+                    Logger::Log("[CRITICAL] Memory allocation failed in addDurationWithMidnightSplit (after midnight) - data may be incomplete");
+                }
+                has_unsaved_data_ = true;
+                return;
+            }
             if (settings_.logToFile()) {
                 Logger::Log(QString("[DEBUG] Added duration after midnight (%1, %2ms)")
                     .arg(type == DurationType::Activity ? "Activity" : "Pause")
@@ -327,9 +394,18 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
         }
         return;
     }
-    
+
     // Normal case: duration does not cross midnight
-    durations_.emplace_back(TimeDuration(type, duration, endTime));
+    try {
+        durations_.emplace_back(TimeDuration(type, duration, endTime));
+    } catch (const std::bad_alloc&) {
+        if (settings_.logToFile()) {
+            Logger::Log("[CRITICAL] Memory allocation failed in addDurationWithMidnightSplit - attempting emergency save");
+        }
+        appendDurationsToDB();  // Emergency save attempt
+        has_unsaved_data_ = true;
+        return;
+    }
     if (settings_.logToFile()) {
         Logger::Log(QString("[DEBUG] Added duration (%1, %2ms)")
             .arg(type == DurationType::Activity ? "Activity" : "Pause")

@@ -5,6 +5,7 @@
 #include <QtGlobal>
 #include <QElapsedTimer>
 #include <QDateTime>
+#include <QMutex>
 #include <deque>
 #include <memory>
 #include "settings.h"
@@ -22,7 +23,9 @@ private:
     std::deque<TimeDuration> durations_;
     Mode mode_;
     bool was_active_before_autopause_;
+    bool has_unsaved_data_;  // Track if previous DB save failed
     DatabaseManager db_;
+    mutable QRecursiveMutex mutex_;  // Protects state transitions from concurrent access
 
     void startTimer();
     void stopTimer();
