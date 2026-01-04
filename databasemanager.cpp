@@ -342,7 +342,7 @@ bool DatabaseManager::hasEntriesForDate(const QDate& date)
     return hasEntries;
 }
 
-bool DatabaseManager::updateOrAppendCheckpoint(DurationType type, qint64 duration, const QDateTime& endTime)
+bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& endTime, long long& checkpointId)
 {
     // Don't save checkpoint if history storage is disabled
     if (history_days_to_keep_ == 0) {
@@ -357,14 +357,8 @@ bool DatabaseManager::updateOrAppendCheckpoint(DurationType type, qint64 duratio
     }
 
     QDateTime startTime = endTime.addMSecs(-duration);
-    QDate endDate = endTime.date();
-    int typeInt = static_cast<int>(type);
-    QString endDateStr = endDate.toString(Qt::ISODate);
+    QString endDateStr = endTime.date().toString(Qt::ISODate);
     QString endTimeStr = endTime.time().toString("HH:mm:ss.zzz");
-
-    // Use the separate update interface to find existing entry
-    int existingId = -1;
-    bool found = updateDurationByStartTime(type, duration, endTime, existingId);
 
     if (!db.transaction()) {
         if (settings_.logToFile()) {
@@ -375,57 +369,58 @@ bool DatabaseManager::updateOrAppendCheckpoint(DurationType type, qint64 duratio
     }
 
     bool success = false;
-    if (found && existingId >= 0) {
-        // Update existing entry with same start time
-        QSqlQuery updateQuery(db);
-        updateQuery.prepare(
+    QSqlQuery query(db);
+
+    if (checkpointId != -1) {
+        // Update existing entry using known ID
+        query.prepare(
             "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time "
             "WHERE id = :id"
         );
-        updateQuery.bindValue(":duration", duration);
-        updateQuery.bindValue(":end_date", endDateStr);
-        updateQuery.bindValue(":end_time", endTimeStr);
-        updateQuery.bindValue(":id", existingId);
+        query.bindValue(":duration", duration);
+        query.bindValue(":end_date", endDateStr);
+        query.bindValue(":end_time", endTimeStr);
+        query.bindValue(":id", checkpointId);
 
-        if (updateQuery.exec()) {
+        if (query.exec()) {
             success = db.commit();
             if (success && settings_.logToFile()) {
-                Logger::Log(QString("[DB] Updated checkpoint entry (id: %1, type: %2, start: %3, duration: %4ms)")
-                    .arg(existingId)
-                    .arg(type == DurationType::Activity ? "Activity" : "Pause")
-                    .arg(startTime.toString("hh:mm:ss"))
+                 // Optional: Reduce log spam by only logging occasionally or on error? 
+                 // Keeping it for now as requested by user context.
+                Logger::Log(QString("[DB] Updated checkpoint entry (id: %1, duration: %2ms)")
+                    .arg(checkpointId)
                     .arg(duration));
             }
         } else {
             db.rollback();
             if (settings_.logToFile()) {
-                Logger::Log("[DB] Error updating checkpoint: " + updateQuery.lastError().text());
+                Logger::Log("[DB] Error updating checkpoint: " + query.lastError().text());
             }
         }
     } else {
-        // Append new checkpoint entry - no existing entry with this start time
-        QSqlQuery insertQuery(db);
-        insertQuery.prepare(
+        // Append new checkpoint entry
+        query.prepare(
             "INSERT INTO durations (type, duration, end_date, end_time) "
             "VALUES (:type, :duration, :end_date, :end_time)"
         );
-        insertQuery.bindValue(":type", typeInt);
-        insertQuery.bindValue(":duration", duration);
-        insertQuery.bindValue(":end_date", endDateStr);
-        insertQuery.bindValue(":end_time", endTimeStr);
+        query.bindValue(":type", static_cast<int>(type));
+        query.bindValue(":duration", duration);
+        query.bindValue(":end_date", endDateStr);
+        query.bindValue(":end_time", endTimeStr);
 
-        if (insertQuery.exec()) {
+        if (query.exec()) {
+            checkpointId = query.lastInsertId().toLongLong(); // Capture the new ID
             success = db.commit();
             if (success && settings_.logToFile()) {
-                Logger::Log(QString("[DB] Appended checkpoint entry (type: %1, start: %2, duration: %3ms)")
-                    .arg(type == DurationType::Activity ? "Activity" : "Pause")
+                Logger::Log(QString("[DB] Appended checkpoint entry (new id: %1, start: %2, duration: %3ms)")
+                    .arg(checkpointId)
                     .arg(startTime.toString("hh:mm:ss"))
                     .arg(duration));
             }
         } else {
             db.rollback();
             if (settings_.logToFile()) {
-                Logger::Log("[DB] Error inserting checkpoint: " + insertQuery.lastError().text());
+                Logger::Log("[DB] Error inserting checkpoint: " + query.lastError().text());
             }
         }
     }

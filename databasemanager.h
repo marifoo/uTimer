@@ -18,7 +18,7 @@ public:
     bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode);
     std::deque<TimeDuration> loadDurations();
     bool hasEntriesForDate(const QDate& date);
-    bool updateOrAppendCheckpoint(DurationType type, qint64 duration, const QDateTime& endTime);
+    bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& endTime, long long& checkpointId);
     bool updateDurationsByStartTime(const std::deque<TimeDuration>& durations);
 
 private:

@@ -8,7 +8,8 @@
 
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), mode_(Mode::None),
-      was_active_before_autopause_(false), has_unsaved_data_(false), db_(settings, parent)
+      was_active_before_autopause_(false), has_unsaved_data_(false), db_(settings, parent),
+      current_checkpoint_id_(-1)
 {
     // Setup checkpoint timer to fire every 5 minutes
     checkpointTimer_.setInterval(5 * 60 * 1000); // 5 minutes in milliseconds
@@ -39,6 +40,7 @@ void TimeTracker::startTimer()
             }
         }
         mode_ = Mode::Activity;
+        current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment
         checkpointTimer_.start(); // Resume periodic checkpoint saving
         if (settings_.logToFile()) {
             Logger::Log("[TIMER] > Timer unpaused");
@@ -101,6 +103,7 @@ void TimeTracker::startTimer()
         }
         timer_.start();
         mode_ = Mode::Activity;
+        current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment
         checkpointTimer_.start(); // Start periodic checkpoint saving
         if (settings_.logToFile()) {
             Logger::Log("[TIMER] >> Timer started");
@@ -128,6 +131,7 @@ void TimeTracker::pauseTimer()
     qint64 t_active = timer_.restart();
     addDurationWithMidnightSplit(DurationType::Activity, t_active, now);
     mode_ = Mode::Pause;
+    current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment (pause)
     checkpointTimer_.start(); // Continue checkpoint saving during pause
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer paused <");
@@ -184,6 +188,11 @@ void TimeTracker::backpauseTimer()
     }
     addDurationWithMidnightSplit(DurationType::Pause, backpause_msec, now);
     mode_ = Mode::Pause;
+    current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment (pause)
+    
+    // Immediately sync to DB to correct the Activity checkpoint we just truncated
+    updateDurationsInDB(); 
+    
     checkpointTimer_.start(); // Continue checkpoint saving during pause
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer retroactively paused <");
@@ -213,6 +222,7 @@ void TimeTracker::stopTimer()
         addDurationWithMidnightSplit(DurationType::Activity, t_active, now);
     }
     mode_ = Mode::None;
+    current_checkpoint_id_ = -1; // Reset ID
     checkpointTimer_.stop(); // Stop periodic checkpoint saving when timer is stopped
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer stopped <<");
@@ -482,16 +492,16 @@ void TimeTracker::saveCheckpoint()
     // Get current end time
     QDateTime now = QDateTime::currentDateTime();
     
-    // Save checkpoint to database - this represents the ongoing segment that hasn't been finalized yet
-    // When the timer ends, the final duration will be saved, and if it's within 10 minutes,
-    // the checkpoint update logic will update this entry instead of creating a duplicate
-    bool success = db_.updateOrAppendCheckpoint(type, elapsed, now);
+    // Save checkpoint to database
+    // Pass current_checkpoint_id_ to allow updating the specific row for this segment
+    bool success = db_.saveCheckpoint(type, elapsed, now, current_checkpoint_id_);
     
     if (settings_.logToFile()) {
         if (success) {
-            Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms")
+            Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms, ID: %3")
                 .arg(type == DurationType::Activity ? "Activity" : "Pause")
-                .arg(elapsed));
+                .arg(elapsed)
+                .arg(current_checkpoint_id_));
         } else {
             Logger::Log("[CHECKPOINT] Failed to save checkpoint to database");
         }
