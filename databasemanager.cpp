@@ -384,12 +384,8 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
 
         if (query.exec()) {
             success = db.commit();
-            if (success && settings_.logToFile()) {
-                 // Optional: Reduce log spam by only logging occasionally or on error? 
-                 // Keeping it for now as requested by user context.
-                Logger::Log(QString("[DB] Updated checkpoint entry (id: %1, duration: %2ms)")
-                    .arg(checkpointId)
-                    .arg(duration));
+            if (!success && settings_.logToFile()) {
+                Logger::Log("[DB] Error committing checkpoint update: " + db.lastError().text());
             }
         } else {
             db.rollback();
@@ -411,11 +407,8 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
         if (query.exec()) {
             checkpointId = query.lastInsertId().toLongLong(); // Capture the new ID
             success = db.commit();
-            if (success && settings_.logToFile()) {
-                Logger::Log(QString("[DB] Appended checkpoint entry (new id: %1, start: %2, duration: %3ms)")
-                    .arg(checkpointId)
-                    .arg(startTime.toString("hh:mm:ss"))
-                    .arg(duration));
+            if (!success && settings_.logToFile()) {
+                Logger::Log("[DB] Error committing checkpoint insert: " + db.lastError().text());
             }
         } else {
             db.rollback();
@@ -530,13 +523,17 @@ bool DatabaseManager::updateDurationByStartTime(DurationType type, qint64 durati
     existingId = -1;
     
     // Find entries with the same start time (within tolerance) and same type
+    // Only check recent entries (yesterday and today) for performance
+    QDate minDate = QDate::currentDate().addDays(-1);
+
     QSqlQuery checkQuery(db);
     checkQuery.prepare(
         "SELECT id, duration, end_date, end_time FROM durations "
-        "WHERE type = :type "
+        "WHERE type = :type AND end_date >= :min_date "
         "ORDER BY end_date DESC, end_time DESC"
     );
     checkQuery.bindValue(":type", typeInt);
+    checkQuery.bindValue(":min_date", minDate.toString(Qt::ISODate));
 
     if (checkQuery.exec()) {
         while (checkQuery.next()) {

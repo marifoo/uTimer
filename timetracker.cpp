@@ -131,6 +131,10 @@ void TimeTracker::pauseTimer()
     qint64 t_active = timer_.restart();
     addDurationWithMidnightSplit(DurationType::Activity, t_active, now);
     mode_ = Mode::Pause;
+
+    // Sync checkpoint to DB before resetting ID (ensures Activity duration is finalized)
+    updateDurationsInDB();
+
     current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment (pause)
     checkpointTimer_.start(); // Continue checkpoint saving during pause
     if (settings_.logToFile()) {
