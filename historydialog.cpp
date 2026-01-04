@@ -343,17 +343,23 @@ void HistoryDialog::showContextMenu(const QPoint& pos)
 void HistoryDialog::onSplitRow()
 {
     if (contextMenuRow_ < 0) return;
+
+    // Capture and reset row immediately to prevent stale state (Issue #5)
+    int row = contextMenuRow_;
+    contextMenuRow_ = -1;
+
     uint idx = pageIndex_;
 
-    if (idx >= pendingChanges_.size() || contextMenuRow_ >= static_cast<int>(pendingChanges_[idx].size())) {
+    if (idx >= pendingChanges_.size() || row >= static_cast<int>(pendingChanges_[idx].size())) {
         if (settings_.logToFile()) {
-            Logger::Log(QString("[HISTORY] Error: onSplitRow: Invalid indices - page: %1, row: %2").arg(idx).arg(contextMenuRow_));
+            Logger::Log(QString("[HISTORY] Error: onSplitRow: Invalid indices - page: %1, row: %2").arg(idx).arg(row));
         }
         return;
     }
 
-    TimeDuration& duration = pendingChanges_[idx][contextMenuRow_];
-    QDateTime start = duration.endTime.addMSecs(-duration.duration);
+    TimeDuration& duration = pendingChanges_[idx][row];
+    qint64 originalDuration = duration.duration;
+    QDateTime start = duration.endTime.addMSecs(-originalDuration);
     QDateTime end = duration.endTime;
 
     // Check if duration is long enough to split meaningfully (at least 2 seconds)
@@ -362,7 +368,7 @@ void HistoryDialog::onSplitRow()
             Logger::Log(QString("[HISTORY] Error: onSplitRow: Duration too short to split - only %1 seconds")
                 .arg(start.secsTo(end)));
         }
-        QMessageBox::information(this, "Split Duration", 
+        QMessageBox::information(this, "Split Duration",
             "This duration is too short to split meaningfully (minimum 3 seconds required).");
         return;
     }
@@ -373,14 +379,24 @@ void HistoryDialog::onSplitRow()
         QDateTime splitTime = dlg.getSplitTime();
         qint64 firstDuration = start.msecsTo(splitTime);
         qint64 secondDuration = splitTime.msecsTo(end);
-        
+
+        // Validate split preserves total duration (Issue #4)
+        if (firstDuration + secondDuration != originalDuration) {
+            if (settings_.logToFile()) {
+                Logger::Log(QString("[HISTORY] Warning: Split duration mismatch - original: %1ms, split sum: %2ms, adjusting")
+                    .arg(originalDuration).arg(firstDuration + secondDuration));
+            }
+            // Adjust second segment to preserve total duration
+            secondDuration = originalDuration - firstDuration;
+        }
+
         // Validate split results - ensure both segments have at least 1 second
         if (firstDuration < 1000 || secondDuration < 1000) {
             if (settings_.logToFile()) {
                 Logger::Log(QString("[HISTORY] Error: onSplitRow: Split results too small - first: %1ms, second: %2ms")
                     .arg(firstDuration).arg(secondDuration));
             }
-            QMessageBox::warning(this, "Split Duration", 
+            QMessageBox::warning(this, "Split Duration",
                 "Invalid split: both segments must be at least 1 second long.");
             return;
         }
@@ -391,11 +407,11 @@ void HistoryDialog::onSplitRow()
         TimeDuration first(firstType, firstDuration, splitTime);
         TimeDuration second(secondType, secondDuration, end);
 
-        // Replace original duration with two new segments - insert in chronological order
+        // Replace original duration with two new segments using safe iterator handling (Issue #6)
         auto& durationsDeque = pendingChanges_[idx];
-        durationsDeque.erase(durationsDeque.begin() + contextMenuRow_);
-        durationsDeque.insert(durationsDeque.begin() + contextMenuRow_, first);   // Insert first segment first
-        durationsDeque.insert(durationsDeque.begin() + contextMenuRow_ + 1, second); // Then insert second segment
+        auto it = durationsDeque.erase(durationsDeque.begin() + row);
+        it = durationsDeque.insert(it, first);
+        durationsDeque.insert(it + 1, second);
        
         updateTable(idx);
     }
