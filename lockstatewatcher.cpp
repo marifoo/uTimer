@@ -225,7 +225,8 @@ bool LockStateWatcher::querySystemdLogind()
 	);
 	msg << "org.freedesktop.login1.Session" << "LockedHint";
 
-	QDBusMessage reply = QDBusConnection::systemBus().call(msg, QDBus::Block, 1000);
+	// Use short timeout (100ms) to avoid blocking GUI - local DBus calls should be fast
+	QDBusMessage reply = QDBusConnection::systemBus().call(msg, QDBus::Block, 100);
 
 	if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
 		QVariant v = reply.arguments().first();
@@ -245,7 +246,8 @@ bool LockStateWatcher::queryFreedesktopScreenSaver()
 		"GetActive"
 	);
 
-	QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 1000);
+	// Use short timeout (100ms) to avoid blocking GUI
+	QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 100);
 
 	if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
 		return reply.arguments().first().toBool();
@@ -262,7 +264,8 @@ bool LockStateWatcher::queryGnomeScreenSaver()
 		"GetActive"
 	);
 
-	QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 1000);
+	// Use short timeout (100ms) to avoid blocking GUI
+	QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 100);
 
 	if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
 		return reply.arguments().first().toBool();
@@ -279,7 +282,8 @@ bool LockStateWatcher::queryKdeScreenSaver()
 		"GetActive"
 	);
 
-	QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 1000);
+	// Use short timeout (100ms) to avoid blocking GUI
+	QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 100);
 
 	if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
 		return reply.arguments().first().toBool();
