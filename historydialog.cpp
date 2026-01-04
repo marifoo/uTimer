@@ -212,28 +212,32 @@ void HistoryDialog::updateTable(uint idx)
         table_->setCellWidget(row, 3, box);
 
         // Handle checkbox state changes with proper validation
-        connect(box, &QCheckBox::stateChanged, this, [this, currentIdx = idx, currentRow = row](int state) {
-            if (currentIdx >= pendingChanges_.size() || currentRow >= static_cast<int>(pendingChanges_[currentIdx].size())) {
+        connect(box, &QCheckBox::stateChanged, this, [this, capturedPageIdx = idx, capturedRow = row](int state) {
+            // Reject stale events from checkboxes on other pages
+            if (capturedPageIdx != pageIndex_) {
+                return;
+            }
+
+            if (capturedRow >= static_cast<int>(pendingChanges_[capturedPageIdx].size())) {
                 if (settings_.logToFile()) {
-                    Logger::Log(QString("[WARNING] Checkbox callback: Invalid indices - page: %1, row: %2")
-                        .arg(currentIdx).arg(currentRow));
+                    Logger::Log(QString("[WARNING] Checkbox callback: Invalid row %1").arg(capturedRow));
                 }
                 return;
             }
-            
+
             // Update the duration type in pending changes
-            pendingChanges_[currentIdx][currentRow].type = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
-            QString typeStr = pendingChanges_[currentIdx][currentRow].type == DurationType::Activity ? "Activity  " : "Pause  ";
-            
-            // Update UI if still on the same page
-            if (currentIdx == pageIndex_ && table_->item(currentRow, 0)) {
-                table_->item(currentRow, 0)->setText(typeStr);
-                updateTotalsLabel(currentIdx);
-                
+            pendingChanges_[capturedPageIdx][capturedRow].type = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
+            QString typeStr = pendingChanges_[capturedPageIdx][capturedRow].type == DurationType::Activity ? "Activity  " : "Pause  ";
+
+            // Update UI
+            if (table_->item(capturedRow, 0)) {
+                table_->item(capturedRow, 0)->setText(typeStr);
+                updateTotalsLabel(capturedPageIdx);
+
                 // Highlight the modified row
                 for (int col = 0; col < table_->columnCount(); ++col) {
-                    if (table_->item(currentRow, col)) {
-                        table_->item(currentRow, col)->setBackground(QColor(180, 216, 228, 255));
+                    if (table_->item(capturedRow, col)) {
+                        table_->item(capturedRow, col)->setBackground(QColor(180, 216, 228, 255));
                     }
                 }
             }
@@ -272,45 +276,55 @@ void HistoryDialog::onNextClicked()
 
 void HistoryDialog::saveChanges()
 {
-    if (result() == QDialog::Accepted) {
-        // Apply all pending changes to the original pages
-        for (size_t i = 0; i < pages_.size(); ++i) {
-            std::swap(pages_[i].durations, pendingChanges_[i]);
-        }
-
-        // Update TimeTracker's current session if modified
-        for (size_t i = 0; i < pages_.size(); ++i) {
-            if (pages_[i].isCurrent) {
-                timetracker_.setCurrentDurations(pages_[i].durations);
-                if (settings_.logToFile()) {
-                    Logger::Log("[HISTORY] Updated TimeTracker current session");
-                }
-                break;
-            }
-        }
-
-        // Save all durations to database
-        std::deque<TimeDuration> allDurations;
-        for (const auto& page : pages_) {
-            allDurations.insert(allDurations.end(), page.durations.begin(), page.durations.end());
-        }
-
-        if (!allDurations.empty()) {
-            if (settings_.logToFile())
-                Logger::Log(QString("[HISTORY] Saving %1 total durations to DB").arg(allDurations.size()));
-            bool result = timetracker_.replaceDurationsInDB(allDurations);
-            if (!result) {
-                if (settings_.logToFile())
-                    Logger::Log("[HISTORY] Failed to save durations to DB");
-            } else {
-                if (settings_.logToFile())
-                    Logger::Log("[HISTORY] Successfully saved durations to DB");
-            }
-        }
-    } else {
+    if (result() != QDialog::Accepted) {
         if (settings_.logToFile()) {
             Logger::Log("[HISTORY] Dialog cancelled, discarding changes");
         }
+        return;
+    }
+
+    // Apply all pending changes to the original pages
+    for (size_t i = 0; i < pages_.size(); ++i) {
+        std::swap(pages_[i].durations, pendingChanges_[i]);
+    }
+
+    // Update TimeTracker's current session (in-memory only)
+    // Collect ONLY historical durations for DB
+    std::deque<TimeDuration> historyDurations;
+
+    for (size_t i = 0; i < pages_.size(); ++i) {
+        if (pages_[i].isCurrent) {
+            // Update in-memory current session - NOT saved to DB yet
+            timetracker_.setCurrentDurations(pages_[i].durations);
+            if (settings_.logToFile()) {
+                Logger::Log("[HISTORY] Updated TimeTracker current session (in-memory)");
+            }
+        } else {
+            // Collect historical durations for DB save
+            historyDurations.insert(historyDurations.end(),
+                                   pages_[i].durations.begin(),
+                                   pages_[i].durations.end());
+        }
+    }
+
+    // Save ONLY historical durations to DB
+    if (!historyDurations.empty()) {
+        if (settings_.logToFile()) {
+            Logger::Log(QString("[HISTORY] Saving %1 historical durations to DB").arg(historyDurations.size()));
+        }
+
+        bool success = timetracker_.replaceDurationsInDB(historyDurations);
+        if (!success) {
+            if (settings_.logToFile()) {
+                Logger::Log("[HISTORY] CRITICAL: Failed to save durations to DB");
+            }
+            QMessageBox::critical(this, "Database Error",
+                "Failed to save changes to the database. Your changes to historical entries may be lost.");
+        } else if (settings_.logToFile()) {
+            Logger::Log("[HISTORY] Successfully saved historical durations to DB");
+        }
+    } else if (settings_.logToFile()) {
+        Logger::Log("[HISTORY] No historical durations to save");
     }
 }
 
