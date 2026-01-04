@@ -13,6 +13,7 @@
 #include <windows.h>
 #endif
 
+
 MainWin::MainWin(Settings& settings, TimeTracker& timetracker, QWidget *parent)	
 	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), 
 	  warning_pause_shown_(false), was_active_before_autopause_(false)
@@ -129,8 +130,14 @@ void MainWin::reactOnLockState(LockEvent event)
 
 void MainWin::iconActivated(QSystemTrayIcon::ActivationReason reason)
 {
+#ifdef Q_OS_LINUX
+	// On Linux (especially KDE/Wayland), DoubleClick doesn't work - use single-click
+	if (reason != QSystemTrayIcon::Trigger)
+		return;
+#else
 	if (reason != QSystemTrayIcon::DoubleClick)
 		return;
+#endif
 
 	if (isVisible())
 		minToTray();
@@ -140,13 +147,22 @@ void MainWin::iconActivated(QSystemTrayIcon::ActivationReason reason)
 
 void MainWin::showMainWin()
 {
+#ifdef Q_OS_LINUX
+	setVisible(true);
+	setWindowState(windowState() & ~Qt::WindowMinimized);
+#else
 	activateWindow();
 	show();
+#endif
 }
 
 void MainWin::minToTray()
 {
+#ifdef Q_OS_LINUX
+	setVisible(false);
+#else
 	hide();
+#endif
 }
 
 void MainWin::toggleAlwaysOnTop()
