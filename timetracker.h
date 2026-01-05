@@ -25,6 +25,7 @@ private:
     Mode mode_;
     bool was_active_before_autopause_;
     bool has_unsaved_data_;  // Track if previous DB save failed
+    bool is_locked_;  // Track if desktop is currently locked (to prevent checkpoints while locked)
     DatabaseManager db_;
     mutable QRecursiveMutex mutex_;  // Protects state transitions from concurrent access
     QTimer checkpointTimer_;  // Timer for periodic checkpoint saving
@@ -35,6 +36,7 @@ private:
     void pauseTimer();
     void backpauseTimer();
     void addDurationWithMidnightSplit(DurationType type, qint64 duration, const QDateTime& endTime);
+    void saveCheckpointInternal();  // Internal checkpoint save (called when mutex already held)
 
 public:
     explicit TimeTracker(const Settings & settings, QObject *parent = nullptr);

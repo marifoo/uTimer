@@ -8,8 +8,8 @@
 
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), mode_(Mode::None),
-      was_active_before_autopause_(false), has_unsaved_data_(false), db_(settings, parent),
-      current_checkpoint_id_(-1)
+      was_active_before_autopause_(false), has_unsaved_data_(false), is_locked_(false),
+      db_(settings, parent), current_checkpoint_id_(-1)
 {
     // Setup checkpoint timer to fire every 5 minutes
     checkpointTimer_.setInterval(5 * 60 * 1000); // 5 minutes in milliseconds
@@ -261,6 +261,25 @@ void TimeTracker::useTimerViaButton(Button button)
 void TimeTracker::useTimerViaLockEvent(LockEvent event)
 {
     QMutexLocker locker(&mutex_);
+    if (event == LockEvent::Lock) {
+        is_locked_ = true;
+        // Save a checkpoint when lock is detected (only if actively tracking time)
+        if (mode_ == Mode::Activity) {
+            saveCheckpointInternal();
+            if (settings_.logToFile()) {
+                Logger::Log("[LOCK] Desktop locked - checkpoint saved, further checkpoints suspended");
+            }
+        } else if (settings_.logToFile()) {
+            Logger::Log("[LOCK] Desktop locked - no checkpoint (timer not in Activity mode)");
+        }
+        return;
+    }
+    if (event == LockEvent::Unlock) {
+        is_locked_ = false;
+        if (settings_.logToFile()) {
+            Logger::Log("[LOCK] Desktop unlocked - checkpoint saving resumed");
+        }
+    }
     if (!settings_.isAutopauseEnabled()) {
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Autopause disabled; lock event ignored");
@@ -478,37 +497,50 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
 void TimeTracker::saveCheckpoint()
 {
     QMutexLocker locker(&mutex_);
-    
-    // Only save checkpoint if timer is active (Activity or Pause mode)
-    if (mode_ == Mode::None) {
+
+    // Don't save checkpoints while desktop is locked
+    if (is_locked_) {
+        if (settings_.logToFile()) {
+            Logger::Log("[CHECKPOINT] Skipped - desktop is locked");
+        }
         return;
     }
-    
+
+    saveCheckpointInternal();
+}
+
+void TimeTracker::saveCheckpointInternal()
+{
+    // NOTE: This function assumes the mutex is already held by the caller
+
+    // Only save checkpoint if timer is in Activity mode (not during Pause or Stopped)
+    if (mode_ != Mode::Activity) {
+        return;
+    }
+
     // Calculate current elapsed time for the ongoing segment
     qint64 elapsed = timer_.elapsed();
     if (elapsed <= 0) {
         return; // No time elapsed yet
     }
-    
+
     // Determine duration type based on current mode
     DurationType type = (mode_ == Mode::Activity) ? DurationType::Activity : DurationType::Pause;
-    
+
     // Get current end time
     QDateTime now = QDateTime::currentDateTime();
-    
+
     // Save checkpoint to database
     // Pass current_checkpoint_id_ to allow updating the specific row for this segment
     bool success = db_.saveCheckpoint(type, elapsed, now, current_checkpoint_id_);
-    
-    if (settings_.logToFile()) {
-        if (success) {
-            Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms, ID: %3")
-                .arg(type == DurationType::Activity ? "Activity" : "Pause")
-                .arg(elapsed)
-                .arg(current_checkpoint_id_));
-        } else {
-            Logger::Log("[CHECKPOINT] Failed to save checkpoint to database");
-        }
+
+    if (success) {
+        Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms, ID: %3")
+            .arg(type == DurationType::Activity ? "Activity" : "Pause")
+            .arg(elapsed)
+            .arg(current_checkpoint_id_));
+    } else if (settings_.logToFile()) {
+        Logger::Log("[CHECKPOINT] Failed to save checkpoint to database");
     }
 }
 

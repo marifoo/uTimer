@@ -125,6 +125,7 @@ void LockStateWatcher::update()
 		if (settings_.logToFile())
 			Logger::Log("[LOCK] >> Lock determined");
 		lock_timer_.start();
+		emit desktopLockEvent(LockEvent::Lock);
 	}
 	else if (lock_event == LockEvent::Unlock) {
 		if (settings_.logToFile() && lock_timer_.isValid())
