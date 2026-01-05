@@ -66,6 +66,20 @@ static bool setupUnixSignalHandlers()
 }
 #endif
 
+/**
+ * Application Entry Point.
+ *
+ * Startup Sequence:
+ * 1. Initialize Signal Handlers (Linux-specific for graceful shutdown).
+ * 2. Setup Qt Application and Style.
+ * 3. Instantiate Core Components:
+ *    - Settings (Configuration)
+ *    - LockStateWatcher (Hardware abstraction)
+ *    - TimeTracker (Business Logic)
+ *    - MainWin (Presentation)
+ * 4. Wire up Signals/Slots to connect the components.
+ * 5. Start the main event loop.
+ */
 int main(int argc, char *argv[])
 {
 #ifdef Q_OS_LINUX

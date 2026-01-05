@@ -18,6 +18,8 @@ public:
     bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode);
     std::deque<TimeDuration> loadDurations();
     bool hasEntriesForDate(const QDate& date);
+    bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& endTime, long long& checkpointId);
+    bool updateDurationsByStartTime(const std::deque<TimeDuration>& durations);
 
 private:
     QSqlDatabase db;
@@ -26,6 +28,7 @@ private:
     bool lazyOpen();
     void lazyClose();
     bool createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
+    bool updateDurationByStartTime(DurationType type, qint64 duration, const QDateTime& endTime, int& existingId);
 };
 
 #endif // DATABASEMANAGER_H

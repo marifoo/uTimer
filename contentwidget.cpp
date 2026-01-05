@@ -1,3 +1,19 @@
+/**
+ * ContentWidget - The main GUI presentation layer.
+ *
+ * Design Pattern: Passive View / Dumb Widget
+ * - This widget owns the UI elements (Buttons, Labels) but holds very little logic.
+ * - State is primarily managed by TimeTracker and reflected here via polling.
+ * - updateTimes() is called by the main loop (MainWin::update) to refresh the display.
+ *
+ * Interaction:
+ * - Button presses emit signals (pressedButton) to MainWin, which forwards them to TimeTracker.
+ * - TimeTracker state changes are NOT automatically pushed here; the main loop polls
+ *   TimeTracker and calls updateTimes().
+ * - setGUItoActivity/Pause/Stop helper methods are used to force the visual state
+ *   to match the logical state (e.g., when resuming from tray or changing modes).
+ */
+
 #include "contentwidget.h"
 #include <QDateTime>
 #include <QtDebug>

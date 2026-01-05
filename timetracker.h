@@ -6,6 +6,7 @@
 #include <QElapsedTimer>
 #include <QDateTime>
 #include <QMutex>
+#include <QTimer>
 #include <deque>
 #include <memory>
 #include "settings.h"
@@ -24,14 +25,19 @@ private:
     Mode mode_;
     bool was_active_before_autopause_;
     bool has_unsaved_data_;  // Track if previous DB save failed
+    bool is_locked_;  // Track if desktop is currently locked (to prevent checkpoints while locked)
+    bool checkpoints_paused_;  // Track if checkpoints are paused (e.g., while HistoryDialog is open)
     DatabaseManager db_;
     mutable QRecursiveMutex mutex_;  // Protects state transitions from concurrent access
+    QTimer checkpointTimer_;  // Timer for periodic checkpoint saving
+    long long current_checkpoint_id_; // ID of the current database entry being updated by checkpoints
 
     void startTimer();
     void stopTimer();
     void pauseTimer();
     void backpauseTimer();
     void addDurationWithMidnightSplit(DurationType type, qint64 duration, const QDateTime& endTime);
+    void saveCheckpointInternal();  // Internal checkpoint save (called when mutex already held)
 
 public:
     explicit TimeTracker(const Settings & settings, QObject *parent = nullptr);
@@ -44,12 +50,18 @@ public:
     std::deque<TimeDuration> getDurationsHistory();
     void setDurationType(size_t idx, DurationType type);
     bool appendDurationsToDB();
+    bool updateDurationsInDB();
     bool replaceDurationsInDB(std::deque<TimeDuration> durations);
     bool hasEntriesForToday();
+    void pauseCheckpoints();
+    void resumeCheckpoints();
 
 public slots:
     void useTimerViaButton(Button button);
     void useTimerViaLockEvent(LockEvent event);
+
+private slots:
+    void saveCheckpoint();  // Periodic checkpoint saving every 5 minutes
 };
 
 #endif // TIMETRACKER_H

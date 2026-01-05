@@ -1,3 +1,24 @@
+/**
+ * DatabaseManager - SQLite persistence for time duration data.
+ *
+ * Connection pattern:
+ * - Lazy-open: Database opened on first operation, closed after each operation
+ * - This prevents file locking issues and allows external backup tools to work
+ *
+ * Save methods:
+ * - saveDurations(): Full save with backup creation, used for stopTimer/HistoryDialog
+ * - saveCheckpoint(): Lightweight update without backup, used for periodic checkpoints
+ * - updateDurationsByStartTime(): Smart upsert matching entries by calculated start time
+ *
+ * Backup strategy:
+ * - saveDurations() creates timestamped .backup file + .durations.txt log before writes
+ * - saveCheckpoint() skips backup for performance (called every 5 minutes)
+ *
+ * Configuration:
+ * - history_days_to_keep_ = 0 disables database entirely (all methods return early)
+ * - Old entries automatically purged on lazyOpen() based on retention setting
+ */
+
 #include "databasemanager.h"
 #include <QStandardPaths>
 #include <QDir>
@@ -15,7 +36,11 @@ DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
     // Use unique connection name to avoid conflicts with multiple instances
     QString connectionName = QString("uTimer_connection_%1").arg(reinterpret_cast<quintptr>(this));
     db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
-    db.setDatabaseName("uTimer.sqlite");
+    
+    // Use absolute path in application data directory to avoid issues with working directory changes
+    QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(dbPath);  // Ensure directory exists
+    db.setDatabaseName(QDir(dbPath).filePath("uTimer.sqlite"));
 
     // Log when database is disabled (history_days_to_keep_ = 0 means no history storage)
     if ((history_days_to_keep_ == 0) && settings.logToFile()) {
@@ -33,6 +58,17 @@ DatabaseManager::~DatabaseManager()
     }
 }
 
+/**
+ * Initializes the database connection and ensures schema integrity.
+ *
+ * Tasks:
+ * 1. Opens the SQLite file (creates it if missing).
+ * 2. Creates the 'durations' table if it doesn't exist.
+ * 3. Creates necessary indices for performance.
+ * 4. Performs auto-maintenance: Deletes entries older than history_days_to_keep_.
+ *
+ * Returns true if the database is ready for use.
+ */
 bool DatabaseManager::lazyOpen()
 {
     // Don't open database if history storage is disabled
@@ -117,6 +153,19 @@ void DatabaseManager::lazyClose()
     }
 }
 
+/**
+ * Creates a safety copy of the database before critical write operations.
+ *
+ * Why:
+ * SQLite databases can occasionally become corrupted during write operations,
+ * especially if the system crashes (power loss) during a transaction.
+ * Since this app tracks user history, data loss is unacceptable.
+ *
+ * Strategy:
+ * - Copies the .sqlite file to a timestamped .backup file.
+ * - Writes a human-readable text dump (.durations.txt) for verification.
+ * - This runs before 'saveDurations' (major save) but not 'saveCheckpoint' (frequent).
+ */
 bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
     // Don't create backup if database doesn't exist
@@ -184,6 +233,18 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
     return success;
 }
 
+/**
+ * Persists a batch of duration entries to the database.
+ *
+ * Modes:
+ * - Append: Adds new entries to the end (standard usage).
+ * - Replace: Deletes ALL existing entries and writes the new set (used by HistoryDialog).
+ *
+ * Safety:
+ * - Wraps the operation in a SQL transaction.
+ * - Creates a file-level backup before starting.
+ * - Rolls back the transaction on any error.
+ */
 bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
     // Create backup before any write operation
@@ -248,6 +309,15 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
     return commitSuccessful;
 }
 
+/**
+ * Retrieves the entire history of durations from the database.
+ *
+ * - Returns entries sorted by End Date/Time (chronological).
+ * - Validates each row:
+ *   - Type must be valid enum (Activity/Pause).
+ *   - Duration must be non-negative.
+ *   - Corrupted/Invalid rows are skipped and logged.
+ */
 std::deque<TimeDuration> DatabaseManager::loadDurations()
 {
     std::deque<TimeDuration> durations;
@@ -340,4 +410,251 @@ bool DatabaseManager::hasEntriesForDate(const QDate& date)
 
     lazyClose();
     return hasEntries;
+}
+
+/**
+ * Saves or updates a checkpoint entry for crash recovery.
+ *
+ * Unlike saveDurations(), this method:
+ * - Does NOT create backups (for performance - called every 5 minutes)
+ * - Uses checkpointId to update existing row instead of inserting new one
+ * - Sets checkpointId to the new row ID on first call (when checkpointId == -1)
+ *
+ * The caller (TimeTracker) resets checkpointId to -1 on mode changes,
+ * causing the next checkpoint to create a new row for the new segment.
+ */
+bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& endTime, long long& checkpointId)
+{
+    // Don't save checkpoint if history storage is disabled
+    if (history_days_to_keep_ == 0) {
+        return false;
+    }
+
+    if (!lazyOpen()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Could not lazy open DB to save checkpoint");
+        }
+        return false;
+    }
+
+    QString endDateStr = endTime.date().toString(Qt::ISODate);
+    QString endTimeStr = endTime.time().toString("HH:mm:ss.zzz");
+
+    if (!db.transaction()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error starting transaction for checkpoint: " + db.lastError().text());
+        }
+        lazyClose();
+        return false;
+    }
+
+    bool success = false;
+    QSqlQuery query(db);
+
+    if (checkpointId != -1) {
+        // Update existing entry using known ID
+        query.prepare(
+            "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time "
+            "WHERE id = :id"
+        );
+        query.bindValue(":duration", duration);
+        query.bindValue(":end_date", endDateStr);
+        query.bindValue(":end_time", endTimeStr);
+        query.bindValue(":id", checkpointId);
+
+        if (query.exec()) {
+            success = db.commit();
+            if (!success && settings_.logToFile()) {
+                Logger::Log("[DB] Error committing checkpoint update: " + db.lastError().text());
+            }
+        } else {
+            db.rollback();
+            if (settings_.logToFile()) {
+                Logger::Log("[DB] Error updating checkpoint: " + query.lastError().text());
+            }
+        }
+    } else {
+        // Append new checkpoint entry
+        query.prepare(
+            "INSERT INTO durations (type, duration, end_date, end_time) "
+            "VALUES (:type, :duration, :end_date, :end_time)"
+        );
+        query.bindValue(":type", static_cast<int>(type));
+        query.bindValue(":duration", duration);
+        query.bindValue(":end_date", endDateStr);
+        query.bindValue(":end_time", endTimeStr);
+
+        if (query.exec()) {
+            checkpointId = query.lastInsertId().toLongLong(); // Capture the new ID
+            success = db.commit();
+            if (!success && settings_.logToFile()) {
+                Logger::Log("[DB] Error committing checkpoint insert: " + db.lastError().text());
+            }
+        } else {
+            db.rollback();
+            if (settings_.logToFile()) {
+                Logger::Log("[DB] Error inserting checkpoint: " + query.lastError().text());
+            }
+        }
+    }
+
+    lazyClose();
+    return success;
+}
+
+/**
+ * Smart upsert (update or insert) for a batch of durations.
+ *
+ * Unlike saveDurations(Replace), this method preserves existing IDs where possible.
+ * It matches in-memory objects to database rows using their Calculated Start Time.
+ *
+ * Use Case:
+ * - When the timer stops or pauses, we want to update the "current" session in the DB
+ *   without deleting and re-inserting it (which would change IDs and churn the DB).
+ * - Also handles cases where new entries were added to the list.
+ */
+bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>& durations)
+{
+    if (durations.empty()) {
+        return true;
+    }
+
+    // Don't update if history storage is disabled
+    if (history_days_to_keep_ == 0) {
+        return false;
+    }
+
+    if (!lazyOpen()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Could not lazy open DB to update durations");
+        }
+        return false;
+    }
+
+    if (!db.transaction()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error starting transaction for updating durations: " + db.lastError().text());
+        }
+        lazyClose();
+        return false;
+    }
+
+    QSqlQuery updateQuery(db);
+    updateQuery.prepare(
+        "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time "
+        "WHERE id = :id"
+    );
+
+    QSqlQuery insertQuery(db);
+    insertQuery.prepare(
+        "INSERT INTO durations (type, duration, end_date, end_time) "
+        "VALUES (:type, :duration, :end_date, :end_time)"
+    );
+
+    int updatedCount = 0;
+    int insertedCount = 0;
+
+    for (const auto& d : durations) {
+        int existingId = -1;
+        bool found = updateDurationByStartTime(d.type, d.duration, d.endTime, existingId);
+
+        if (found && existingId >= 0) {
+            // Update existing entry
+            updateQuery.bindValue(":duration", d.duration);
+            updateQuery.bindValue(":end_date", d.endTime.date().toString(Qt::ISODate));
+            updateQuery.bindValue(":end_time", d.endTime.time().toString("HH:mm:ss.zzz"));
+            updateQuery.bindValue(":id", existingId);
+
+            if (!updateQuery.exec()) {
+                db.rollback();
+                if (settings_.logToFile()) {
+                    Logger::Log("[DB] Error updating duration: " + updateQuery.lastError().text());
+                }
+                lazyClose();
+                return false;
+            }
+            updatedCount++;
+        } else {
+            // Insert new entry
+            insertQuery.bindValue(":type", static_cast<int>(d.type));
+            insertQuery.bindValue(":duration", d.duration);
+            insertQuery.bindValue(":end_date", d.endTime.date().toString(Qt::ISODate));
+            insertQuery.bindValue(":end_time", d.endTime.time().toString("HH:mm:ss.zzz"));
+
+            if (!insertQuery.exec()) {
+                db.rollback();
+                if (settings_.logToFile()) {
+                    Logger::Log("[DB] Error inserting duration: " + insertQuery.lastError().text());
+                }
+                lazyClose();
+                return false;
+            }
+            insertedCount++;
+        }
+    }
+
+    bool success = db.commit();
+    if (success && settings_.logToFile()) {
+        Logger::Log(QString("[DB] Updated durations: %1 updated, %2 inserted").arg(updatedCount).arg(insertedCount));
+    } else if (!success && settings_.logToFile()) {
+        Logger::Log("[DB] Error committing update transaction: " + db.lastError().text());
+    }
+
+    lazyClose();
+    return success;
+}
+
+/**
+ * Helper to find a database entry that matches the given duration's start time.
+ *
+ * Logic:
+ * - Start Time = End Time - Duration
+ * - Because of slight timing variations (milliseconds) between DB saves and memory,
+ *   we use a tolerance window (2 seconds) for matching.
+ * - Searches only recent history (yesterday + today) for performance.
+ *
+ * Returns true and sets existingId if a match is found.
+ */
+bool DatabaseManager::updateDurationByStartTime(DurationType type, qint64 duration, const QDateTime& endTime, int& existingId)
+{
+    // Calculate the start time for this duration
+    QDateTime startTime = endTime.addMSecs(-duration);
+    int typeInt = static_cast<int>(type);
+    const qint64 toleranceMs = 2000; // 2 seconds tolerance for start time matching
+    
+    existingId = -1;
+    
+    // Find entries with the same start time (within tolerance) and same type
+    // Only check recent entries (yesterday and today) for performance
+    QDate minDate = QDate::currentDate().addDays(-1);
+
+    QSqlQuery checkQuery(db);
+    checkQuery.prepare(
+        "SELECT id, duration, end_date, end_time FROM durations "
+        "WHERE type = :type AND end_date >= :min_date "
+        "ORDER BY end_date DESC, end_time DESC"
+    );
+    checkQuery.bindValue(":type", typeInt);
+    checkQuery.bindValue(":min_date", minDate.toString(Qt::ISODate));
+
+    if (checkQuery.exec()) {
+        while (checkQuery.next()) {
+            qint64 existingDuration = checkQuery.value(1).toLongLong();
+            QDate existingEndDate = QDate::fromString(checkQuery.value(2).toString(), Qt::ISODate);
+            QTime existingEndTime = QTime::fromString(checkQuery.value(3).toString(), "HH:mm:ss.zzz");
+            QDateTime existingEndDateTime(existingEndDate, existingEndTime);
+            
+            // Calculate start time of existing entry
+            QDateTime existingStartTime = existingEndDateTime.addMSecs(-existingDuration);
+            
+            // Check if start times match (within tolerance)
+            qint64 startTimeDiff = qAbs(existingStartTime.msecsTo(startTime));
+            if (startTimeDiff <= toleranceMs) {
+                existingId = checkQuery.value(0).toInt();
+                return true; // Found matching start time
+            }
+        }
+    }
+    
+    return false; // No matching entry found
 }

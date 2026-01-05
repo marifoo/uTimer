@@ -1,3 +1,22 @@
+/**
+ * TimeTracker - Core timing engine managing Activity/Pause/None states.
+ *
+ * Architecture:
+ * - State machine with three modes: Activity (timing work), Pause (timing break), None (stopped)
+ * - Completed segments stored in durations_ deque; ongoing segment tracked by timer_.elapsed()
+ * - Checkpoints save ongoing Activity segments to DB every 5 minutes for crash recovery
+ * - All public methods are thread-safe via QRecursiveMutex
+ *
+ * Checkpoint behavior:
+ * - Only saved during Activity mode (not Pause or Stopped)
+ * - Suspended while PC is locked (is_locked_) or HistoryDialog is open (checkpoints_paused_)
+ * - Uses current_checkpoint_id_ to update same DB row instead of creating new rows
+ *
+ * Backpause behavior:
+ * - When PC locked for longer than threshold, retroactively converts last N minutes to Pause
+ * - Triggered by LockEvent::LongOngoingLock from LockStateWatcher
+ */
+
 #include "timetracker.h"
 #include <QtDebug>
 #include <QDateTime>
@@ -8,14 +27,26 @@
 
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), mode_(Mode::None),
-      was_active_before_autopause_(false), has_unsaved_data_(false), db_(settings, parent)
-{ }
+      was_active_before_autopause_(false), has_unsaved_data_(false), is_locked_(false),
+      checkpoints_paused_(false), db_(settings, parent), current_checkpoint_id_(-1)
+{
+    // Setup checkpoint timer to fire every 5 minutes
+    checkpointTimer_.setInterval(5 * 60 * 1000); // 5 minutes in milliseconds
+    checkpointTimer_.setSingleShot(false); // Repeat every 5 minutes
+    connect(&checkpointTimer_, &QTimer::timeout, this, &TimeTracker::saveCheckpoint);
+}
 
 TimeTracker::~TimeTracker()
 {
     stopTimer();
 }
 
+/**
+ * Transitions timer to Activity mode. Behavior depends on current state:
+ * - From Pause: Records pause duration, switches to Activity
+ * - From None: Clears state, optionally adds boot time, starts fresh
+ * - From Activity: No-op (logs debug message)
+ */
 void TimeTracker::startTimer()
 {
     if (mode_ == Mode::Pause) {
@@ -34,6 +65,8 @@ void TimeTracker::startTimer()
             }
         }
         mode_ = Mode::Activity;
+        current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment
+        checkpointTimer_.start(); // Resume periodic checkpoint saving
         if (settings_.logToFile()) {
             Logger::Log("[TIMER] > Timer unpaused");
         }
@@ -95,6 +128,8 @@ void TimeTracker::startTimer()
         }
         timer_.start();
         mode_ = Mode::Activity;
+        current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment
+        checkpointTimer_.start(); // Start periodic checkpoint saving
         if (settings_.logToFile()) {
             Logger::Log("[TIMER] >> Timer started");
         }
@@ -121,11 +156,29 @@ void TimeTracker::pauseTimer()
     qint64 t_active = timer_.restart();
     addDurationWithMidnightSplit(DurationType::Activity, t_active, now);
     mode_ = Mode::Pause;
+
+    // Sync checkpoint to DB before resetting ID (ensures Activity duration is finalized)
+    updateDurationsInDB();
+
+    current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment (pause)
+    checkpointTimer_.start(); // Continue checkpoint saving during pause
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer paused <");
     }
 }
 
+/**
+ * Retroactively converts the last N minutes of Activity to Pause.
+ *
+ * Called when PC has been locked longer than the backpause threshold.
+ * Splits current elapsed time into two segments:
+ *   1. Activity segment: (elapsed - threshold) milliseconds, ending at (now - threshold)
+ *   2. Pause segment: threshold milliseconds, ending at now
+ *
+ * This corrects any checkpoint data that was saved during the lock period,
+ * since checkpoints are suspended while locked but the time before lock detection
+ * may have been saved as Activity.
+ */
 void TimeTracker::backpauseTimer()
 {
     if (mode_ != Mode::Activity) {
@@ -176,11 +229,27 @@ void TimeTracker::backpauseTimer()
     }
     addDurationWithMidnightSplit(DurationType::Pause, backpause_msec, now);
     mode_ = Mode::Pause;
+    current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment (pause)
+
+    // Immediately sync to DB to correct the Activity checkpoint we just truncated
+    updateDurationsInDB(); 
+    
+    checkpointTimer_.start(); // Continue checkpoint saving during pause
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer retroactively paused <");
     }
 }
 
+/**
+ * Ends the current timing session.
+ *
+ * Workflow:
+ * 1. Calculates the final segment duration (Activity or Pause).
+ * 2. Adds it to the durations list.
+ * 3. Stops the periodic checkpoint timer.
+ * 4. Persists the Session to the Database using updateDurationsInDB().
+ *    (This updates the existing rows rather than creating new ones, preserving IDs).
+ */
 void TimeTracker::stopTimer()
 {
     if (mode_ == Mode::None) {
@@ -204,21 +273,24 @@ void TimeTracker::stopTimer()
         addDurationWithMidnightSplit(DurationType::Activity, t_active, now);
     }
     mode_ = Mode::None;
+    current_checkpoint_id_ = -1; // Reset ID
+    checkpointTimer_.stop(); // Stop periodic checkpoint saving when timer is stopped
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer stopped <<");
     }
 
     // Persist current session durations only (not entire history). History dialog does replace explicitly.
-    if (appendDurationsToDB()) {
+    // Use update interface to check for existing entries by start time and update them instead of creating duplicates
+    if (updateDurationsInDB()) {
         durations_.clear();
         has_unsaved_data_ = false;
         if (settings_.logToFile()) {
-            Logger::Log("[DB] Session durations appended");
+            Logger::Log("[DB] Session durations updated");
         }
     } else {
         has_unsaved_data_ = true;  // Mark for retry on next start
         if (settings_.logToFile()) {
-            Logger::Log("[DB] Error appending session durations - data retained for next save attempt");
+            Logger::Log("[DB] Error updating session durations - data retained for next save attempt");
         }
     }
 }
@@ -233,9 +305,39 @@ void TimeTracker::useTimerViaButton(Button button)
     }
 }
 
+/**
+ * Handles desktop lock/unlock events from LockStateWatcher.
+ *
+ * Event handling:
+ * - Lock: Saves final checkpoint, suspends further checkpoints via is_locked_
+ * - LongOngoingLock: Triggers backpause if timer was in Activity mode
+ * - Unlock: Resumes checkpoints, restarts timer if it was auto-paused
+ *
+ * Note: Lock/Unlock events for checkpoint control are always processed.
+ * Autopause behavior (LongOngoingLock handling) respects isAutopauseEnabled().
+ */
 void TimeTracker::useTimerViaLockEvent(LockEvent event)
 {
     QMutexLocker locker(&mutex_);
+    if (event == LockEvent::Lock) {
+        is_locked_ = true;
+        // Save a checkpoint when lock is detected (only if actively tracking time)
+        if (mode_ == Mode::Activity) {
+            saveCheckpointInternal();
+            if (settings_.logToFile()) {
+                Logger::Log("[LOCK] Desktop locked - checkpoint saved, further checkpoints suspended");
+            }
+        } else if (settings_.logToFile()) {
+            Logger::Log("[LOCK] Desktop locked - no checkpoint (timer not in Activity mode)");
+        }
+        return;
+    }
+    if (event == LockEvent::Unlock) {
+        is_locked_ = false;
+        if (settings_.logToFile()) {
+            Logger::Log("[LOCK] Desktop unlocked - checkpoint saving resumed");
+        }
+    }
     if (!settings_.isAutopauseEnabled()) {
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Autopause disabled; lock event ignored");
@@ -320,7 +422,23 @@ bool TimeTracker::appendDurationsToDB()
     if (settings_.logToFile() && original != temp.size()) {
         Logger::Log(QString("[DB] Cleaned session durations: %1 -> %2").arg(original).arg(temp.size()));
     }
+    
     return db_.saveDurations(temp, TransactionMode::Append);
+}
+
+bool TimeTracker::updateDurationsInDB()
+{
+    if (durations_.empty())
+        return true;
+    auto temp = durations_;
+    size_t original = temp.size();
+    cleanDurations(&temp);
+    if (settings_.logToFile() && original != temp.size()) {
+        Logger::Log(QString("[DB] Cleaned session durations for update: %1 -> %2").arg(original).arg(temp.size()));
+    }
+    
+    // Use the separate update interface that checks for existing entries by start time
+    return db_.updateDurationsByStartTime(temp);
 }
 
 bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> durations)
@@ -338,6 +456,16 @@ bool TimeTracker::hasEntriesForToday()
     return db_.hasEntriesForDate(QDate::currentDate());
 }
 
+/**
+ * Adds a duration segment to the in-memory deque, handling midnight boundaries.
+ *
+ * If a duration spans midnight, it is split into two segments:
+ * - One ending at 23:59:59.999 (saved to DB immediately as previous day)
+ * - One starting at 00:00:00.000 (kept in memory for current day)
+ *
+ * This ensures each day's data is self-contained and can be saved independently.
+ * Memory allocation failures trigger emergency saves to prevent data loss.
+ */
 void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duration, const QDateTime& endTime)
 {
     if (duration <= 0) {
@@ -434,3 +562,78 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
     }
 }
 
+void TimeTracker::saveCheckpoint()
+{
+    QMutexLocker locker(&mutex_);
+
+    // Don't save checkpoints while desktop is locked
+    if (is_locked_) {
+        if (settings_.logToFile()) {
+            Logger::Log("[CHECKPOINT] Skipped - desktop is locked");
+        }
+        return;
+    }
+
+    // Don't save checkpoints while paused (e.g., HistoryDialog is open)
+    if (checkpoints_paused_) {
+        if (settings_.logToFile()) {
+            Logger::Log("[CHECKPOINT] Skipped - checkpoints paused");
+        }
+        return;
+    }
+
+    saveCheckpointInternal();
+}
+
+void TimeTracker::saveCheckpointInternal()
+{
+    // NOTE: This function assumes the mutex is already held by the caller
+
+    // Only save checkpoint if timer is in Activity mode (not during Pause or Stopped)
+    if (mode_ != Mode::Activity) {
+        return;
+    }
+
+    // Calculate current elapsed time for the ongoing segment
+    qint64 elapsed = timer_.elapsed();
+    if (elapsed <= 0) {
+        return; // No time elapsed yet
+    }
+
+    // Determine duration type based on current mode
+    DurationType type = (mode_ == Mode::Activity) ? DurationType::Activity : DurationType::Pause;
+
+    // Get current end time
+    QDateTime now = QDateTime::currentDateTime();
+
+    // Save checkpoint to database
+    // Pass current_checkpoint_id_ to allow updating the specific row for this segment
+    bool success = db_.saveCheckpoint(type, elapsed, now, current_checkpoint_id_);
+
+    if (success) {
+        Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms, ID: %3")
+            .arg(type == DurationType::Activity ? "Activity" : "Pause")
+            .arg(elapsed)
+            .arg(current_checkpoint_id_));
+    } else if (settings_.logToFile()) {
+        Logger::Log("[CHECKPOINT] Failed to save checkpoint to database");
+    }
+}
+
+void TimeTracker::pauseCheckpoints()
+{
+    QMutexLocker locker(&mutex_);
+    checkpoints_paused_ = true;
+    if (settings_.logToFile()) {
+        Logger::Log("[CHECKPOINT] Checkpoints paused");
+    }
+}
+
+void TimeTracker::resumeCheckpoints()
+{
+    QMutexLocker locker(&mutex_);
+    checkpoints_paused_ = false;
+    if (settings_.logToFile()) {
+        Logger::Log("[CHECKPOINT] Checkpoints resumed");
+    }
+}

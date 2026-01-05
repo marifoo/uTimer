@@ -35,6 +35,24 @@ QString convTimeStrToDurationStr(const QString &time_str)
 	return (hours + "." + hour_frac);
 }
 
+/**
+ * Optimization: Cleans up the duration list before database insertion.
+ *
+ * Why this is needed:
+ * The timer loop or UI interactions can sometimes generate fragmented or
+ * duplicate time entries (e.g., stopping and immediately restarting, or
+ * clock jitter). Storing thousands of tiny fragments bloats the SQLite
+ * database and slows down history loading.
+ *
+ * Algorithm:
+ * 1. Sorts entries chronologically to ensure deterministic processing.
+ * 2. Merges adjacent entries of the same type (Activity/Pause) if the gap is negligible.
+ * 3. Removes near-duplicate entries (overlapping or identical time ranges).
+ *
+ * Result:
+ * A list of contiguous, non-overlapping segments that represent the same
+ * timeline but with significantly fewer discrete objects.
+ */
 void cleanDurations(std::deque<TimeDuration>* pDurations)
 {
 	// Clean up duration entries by removing near-duplicates and merging adjacent entries of the same type
