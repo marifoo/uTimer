@@ -1,3 +1,24 @@
+/**
+ * DatabaseManager - SQLite persistence for time duration data.
+ *
+ * Connection pattern:
+ * - Lazy-open: Database opened on first operation, closed after each operation
+ * - This prevents file locking issues and allows external backup tools to work
+ *
+ * Save methods:
+ * - saveDurations(): Full save with backup creation, used for stopTimer/HistoryDialog
+ * - saveCheckpoint(): Lightweight update without backup, used for periodic checkpoints
+ * - updateDurationsByStartTime(): Smart upsert matching entries by calculated start time
+ *
+ * Backup strategy:
+ * - saveDurations() creates timestamped .backup file + .durations.txt log before writes
+ * - saveCheckpoint() skips backup for performance (called every 5 minutes)
+ *
+ * Configuration:
+ * - history_days_to_keep_ = 0 disables database entirely (all methods return early)
+ * - Old entries automatically purged on lazyOpen() based on retention setting
+ */
+
 #include "databasemanager.h"
 #include <QStandardPaths>
 #include <QDir>
@@ -37,6 +58,17 @@ DatabaseManager::~DatabaseManager()
     }
 }
 
+/**
+ * Initializes the database connection and ensures schema integrity.
+ *
+ * Tasks:
+ * 1. Opens the SQLite file (creates it if missing).
+ * 2. Creates the 'durations' table if it doesn't exist.
+ * 3. Creates necessary indices for performance.
+ * 4. Performs auto-maintenance: Deletes entries older than history_days_to_keep_.
+ *
+ * Returns true if the database is ready for use.
+ */
 bool DatabaseManager::lazyOpen()
 {
     // Don't open database if history storage is disabled
@@ -121,6 +153,19 @@ void DatabaseManager::lazyClose()
     }
 }
 
+/**
+ * Creates a safety copy of the database before critical write operations.
+ *
+ * Why:
+ * SQLite databases can occasionally become corrupted during write operations,
+ * especially if the system crashes (power loss) during a transaction.
+ * Since this app tracks user history, data loss is unacceptable.
+ *
+ * Strategy:
+ * - Copies the .sqlite file to a timestamped .backup file.
+ * - Writes a human-readable text dump (.durations.txt) for verification.
+ * - This runs before 'saveDurations' (major save) but not 'saveCheckpoint' (frequent).
+ */
 bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
     // Don't create backup if database doesn't exist
@@ -188,6 +233,18 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
     return success;
 }
 
+/**
+ * Persists a batch of duration entries to the database.
+ *
+ * Modes:
+ * - Append: Adds new entries to the end (standard usage).
+ * - Replace: Deletes ALL existing entries and writes the new set (used by HistoryDialog).
+ *
+ * Safety:
+ * - Wraps the operation in a SQL transaction.
+ * - Creates a file-level backup before starting.
+ * - Rolls back the transaction on any error.
+ */
 bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
     // Create backup before any write operation
@@ -252,6 +309,15 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
     return commitSuccessful;
 }
 
+/**
+ * Retrieves the entire history of durations from the database.
+ *
+ * - Returns entries sorted by End Date/Time (chronological).
+ * - Validates each row:
+ *   - Type must be valid enum (Activity/Pause).
+ *   - Duration must be non-negative.
+ *   - Corrupted/Invalid rows are skipped and logged.
+ */
 std::deque<TimeDuration> DatabaseManager::loadDurations()
 {
     std::deque<TimeDuration> durations;
@@ -346,6 +412,17 @@ bool DatabaseManager::hasEntriesForDate(const QDate& date)
     return hasEntries;
 }
 
+/**
+ * Saves or updates a checkpoint entry for crash recovery.
+ *
+ * Unlike saveDurations(), this method:
+ * - Does NOT create backups (for performance - called every 5 minutes)
+ * - Uses checkpointId to update existing row instead of inserting new one
+ * - Sets checkpointId to the new row ID on first call (when checkpointId == -1)
+ *
+ * The caller (TimeTracker) resets checkpointId to -1 on mode changes,
+ * causing the next checkpoint to create a new row for the new segment.
+ */
 bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& endTime, long long& checkpointId)
 {
     // Don't save checkpoint if history storage is disabled
@@ -425,6 +502,17 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
     return success;
 }
 
+/**
+ * Smart upsert (update or insert) for a batch of durations.
+ *
+ * Unlike saveDurations(Replace), this method preserves existing IDs where possible.
+ * It matches in-memory objects to database rows using their Calculated Start Time.
+ *
+ * Use Case:
+ * - When the timer stops or pauses, we want to update the "current" session in the DB
+ *   without deleting and re-inserting it (which would change IDs and churn the DB).
+ * - Also handles cases where new entries were added to the list.
+ */
 bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>& durations)
 {
     if (durations.empty()) {
@@ -516,6 +604,17 @@ bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>&
     return success;
 }
 
+/**
+ * Helper to find a database entry that matches the given duration's start time.
+ *
+ * Logic:
+ * - Start Time = End Time - Duration
+ * - Because of slight timing variations (milliseconds) between DB saves and memory,
+ *   we use a tolerance window (2 seconds) for matching.
+ * - Searches only recent history (yesterday + today) for performance.
+ *
+ * Returns true and sets existingId if a match is found.
+ */
 bool DatabaseManager::updateDurationByStartTime(DurationType type, qint64 duration, const QDateTime& endTime, int& existingId)
 {
     // Calculate the start time for this duration

@@ -1,3 +1,17 @@
+/**
+ * Settings - Persistent configuration manager.
+ *
+ * Acts as the Source of Truth for user preferences.
+ * Uses Qt's QSettings (IniFormat) for cross-platform file storage.
+ *
+ * Implementation Detail:
+ * - readSettingsFile() and writeSettingsFile() are used for bulk I/O.
+ * - The constructor triggers a read-clear-write-sync cycle to ensure the
+ *   configuration file is normalized and contains all expected keys (even defaults)
+ *   on the first run. This "self-repairing" behavior ensures user-settings.ini
+ *   is always complete.
+ */
+
 #include "settings.h"
 #include "helpers.h"
 #include "logger.h"

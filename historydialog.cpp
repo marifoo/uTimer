@@ -1,3 +1,16 @@
+/**
+ * HistoryDialog - Interface for viewing and editing past time logs.
+ *
+ * Architecture:
+ * - Transactional Editing: All changes (type toggling, splitting) are performed
+ *   on a local copy (`pendingChanges_`). The actual database and TimeTracker
+ *   are only updated when the user clicks "OK".
+ * - Paging Model: Data is grouped by Date (Pages). Page 0 is always the
+ *   "Current Session" (in-memory), while subsequent pages are historical (DB).
+ * - Safety: Checkpoints are paused while this dialog is open to prevent
+ *   database race conditions or state inconsistencies during editing.
+ */
+
 #include "historydialog.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -48,6 +61,16 @@ HistoryDialog::HistoryDialog(TimeTracker& timetracker, const Settings& settings,
     }
 }
 
+/**
+ * Organizes raw time entries into a paged structure for display.
+ *
+ * Structure:
+ * - Page 0: The "Active" session (currently in memory).
+ * - Page 1..N: Historical sessions loaded from the database, grouped by Date.
+ *
+ * This separation allows the user to see what they are doing 'today' vs
+ * what has been permanently archived.
+ */
 void HistoryDialog::createPages()
 {
     auto currentDurations = timetracker_.getCurrentDurations();
@@ -159,6 +182,16 @@ void HistoryDialog::updateTotalsLabel(uint idx)
     pageLabel_->setText(pages_[idx].title + totalsStr);
 }
 
+/**
+ * Refreshes the UI table with data from the current page.
+ *
+ * Responsibilities:
+ * 1. Clears old data and widgets.
+ * 2. Compares pendingChanges against original data to detect modifications.
+ * 3. Re-populates the table.
+ * 4. Binds Checkboxes for Type Toggling (Activity <-> Pause).
+ * 5. Applies visual highlighting if the page has unsaved changes.
+ */
 void HistoryDialog::updateTable(uint idx)
 {
     if (idx >= pendingChanges_.size() || idx >= pages_.size()) {
@@ -277,6 +310,17 @@ void HistoryDialog::onNextClicked()
     }
 }
 
+/**
+ * Commits pending edits to the Application State and Database.
+ *
+ * Strategy:
+ * 1. Applies in-memory changes to the page models.
+ * 2. Updates TimeTracker's current session (if Page 0 was edited).
+ * 3. Aggregates all historical pages and performs a bulk REPLACE in the DB.
+ *
+ * Note: Uses replaceDurationsInDB() which wipes and rewrites the history
+ * table. This is safe because we loaded the entire history on startup.
+ */
 void HistoryDialog::saveChanges()
 {
     if (result() != QDialog::Accepted) {
@@ -343,6 +387,18 @@ void HistoryDialog::showContextMenu(const QPoint& pos)
     menu.exec(table_->viewport()->mapToGlobal(pos));
 }
 
+/**
+ * Handles the "Split" context menu action.
+ *
+ * Algorithm:
+ * 1. Validates that the selected duration is long enough to be split (min 2s).
+ * 2. Launches SplitDialog to get user input (split point and types).
+ * 3. Validates the result to ensure no duration is lost or created (sum check).
+ * 4. Atomically replaces the original entry with the two new entries in the deque.
+ *
+ * Note: Index-based modification is used to avoid iterator invalidation, as
+ * the deque may be reallocated during insertion.
+ */
 void HistoryDialog::onSplitRow()
 {
     if (contextMenuRow_ < 0) return;
@@ -420,6 +476,17 @@ void HistoryDialog::onSplitRow()
         updateTable(idx);
     }
 }
+
+/**
+ * SplitDialog - Helper dialog for splitting a time duration.
+ *
+ * UX Design:
+ * - Provides a slider to intuitively select the split point within the time range.
+ * - Simplified Type Selection: Instead of allowing any combination of Activity/Pause,
+ *   it restricts choice to "Activity->Pause" or "Pause->Activity".
+ *   Why? Splitting "Activity->Activity" or "Pause->Pause" is semantically
+ *   redundant and would just be merged back by cleanDurations().
+ */
 
 // === SplitDialog Implementation ===
 

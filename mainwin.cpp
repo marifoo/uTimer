@@ -1,3 +1,16 @@
+/**
+ * MainWin - Application entry point and orchestrator.
+ *
+ * Responsibilities:
+ * - Window management (System Tray, Always-on-Top, minimize behaviors)
+ * - Coordinating midnight boundary events:
+ *   The app enforces a strict day-boundary split for time tracking.
+ *   Activities cannot span across midnight to ensure "Time per Day" stats are accurate.
+ *   This is handled by scheduling auto-stop/restart events at 23:59:59.
+ * - Global event handling (Shutdown, Sleep/Wake)
+ * - User warning system (Health checks for too much work/too little pause)
+ */
+
 #include "mainwin.h"
 #include <QtDebug>
 #include <QTime>
@@ -26,6 +39,7 @@ MainWin::MainWin(Settings& settings, TimeTracker& timetracker, QWidget *parent)
 	setWindowFlags(windowFlags() &(~Qt::WindowMaximizeButtonHint));
 	
 	// Create midnight timer (single-shot, reused for both stop and restart)
+	// This timer is critical for the "Day Boundary" architecture.
 	midnight_timer_ = new QTimer(this);
 	midnight_timer_->setSingleShot(true);
 	// Note: connection is made dynamically in scheduleMidnightStop/Restart
@@ -43,10 +57,10 @@ void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
 	// Schedule midnight timer when user starts timer
 	QObject::connect(content_widget_, &ContentWidget::pressedButton, this, [this](Button button) {
 		if (button == Button::Start) {
-			// User started timer - schedule midnight stop
+			// User started timer - schedule midnight stop to ensure clean day split
 			scheduleMidnightStop();
 		} else if (button == Button::Stop) {
-			// User stopped timer - cancel midnight timer
+			// User stopped timer - cancel midnight timer as no boundary crossing can occur
 			midnight_timer_->stop();
 			
 			if (settings_.logToFile()) {
@@ -78,6 +92,15 @@ void MainWin::update()
 		showActivityWarnings();
 }
 
+/**
+ * Health Check: Evaluates current user activity against health thresholds.
+ *
+ * Checks two conditions:
+ * 1. Total daily activity exceeds limit (e.g., 9h 45m).
+ * 2. Activity without sufficient pause (e.g., 6h worked with < 30m break).
+ *
+ * Shows a warning dialog if thresholds are crossed for the first time this session.
+ */
 void MainWin::showActivityWarnings()
 {
 	const qint64 t_active = timetracker_.getActiveTime();
@@ -195,6 +218,16 @@ void MainWin::start()
 	warning_pause_shown_ = !settings_.showNoPauseWarning();
 }
 
+/**
+ * Handles application shutdown sequence.
+ *
+ * Critical for data integrity:
+ * 1. Stops the timer (forcing a DB save of the current session)
+ * 2. Waits for events to process (ensures DB writes complete)
+ * 3. Handles both graceful (Quit) and forced (System Shutdown) paths
+ *
+ * @param force_direct If true, bypasses the event loop (needed for Windows WM_ENDSESSION)
+ */
 void MainWin::shutdown(bool force_direct)
 {
 	// Guard against multiple shutdown calls
@@ -313,6 +346,13 @@ bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* mes
 	return QMainWindow::nativeEvent(eventType, message, result);
 }
 
+/**
+ * Schedules the timer to stop just before midnight (23:59:59.500).
+ *
+ * This forces the current session to close before the date changes,
+ * ensuring that time is logged to the correct "calendar day".
+ * Triggers onMidnightStop() when the timer fires.
+ */
 void MainWin::scheduleMidnightStop()
 {
 	// Calculate milliseconds until 23:59:59.500
@@ -339,6 +379,12 @@ void MainWin::scheduleMidnightStop()
 	midnight_timer_->start(static_cast<int>(msecs_until_stop));
 }
 
+/**
+ * Schedules the timer to restart just after midnight (00:00:00.500).
+ *
+ * Called immediately after the midnight stop.
+ * Triggers onMidnightRestart() which starts a new session for the new day.
+ */
 void MainWin::scheduleMidnightRestart()
 {
 	// Calculate milliseconds until 00:00:00.500

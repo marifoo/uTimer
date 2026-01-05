@@ -1,3 +1,22 @@
+/**
+ * TimeTracker - Core timing engine managing Activity/Pause/None states.
+ *
+ * Architecture:
+ * - State machine with three modes: Activity (timing work), Pause (timing break), None (stopped)
+ * - Completed segments stored in durations_ deque; ongoing segment tracked by timer_.elapsed()
+ * - Checkpoints save ongoing Activity segments to DB every 5 minutes for crash recovery
+ * - All public methods are thread-safe via QRecursiveMutex
+ *
+ * Checkpoint behavior:
+ * - Only saved during Activity mode (not Pause or Stopped)
+ * - Suspended while PC is locked (is_locked_) or HistoryDialog is open (checkpoints_paused_)
+ * - Uses current_checkpoint_id_ to update same DB row instead of creating new rows
+ *
+ * Backpause behavior:
+ * - When PC locked for longer than threshold, retroactively converts last N minutes to Pause
+ * - Triggered by LockEvent::LongOngoingLock from LockStateWatcher
+ */
+
 #include "timetracker.h"
 #include <QtDebug>
 #include <QDateTime>
@@ -22,6 +41,12 @@ TimeTracker::~TimeTracker()
     stopTimer();
 }
 
+/**
+ * Transitions timer to Activity mode. Behavior depends on current state:
+ * - From Pause: Records pause duration, switches to Activity
+ * - From None: Clears state, optionally adds boot time, starts fresh
+ * - From Activity: No-op (logs debug message)
+ */
 void TimeTracker::startTimer()
 {
     if (mode_ == Mode::Pause) {
@@ -142,6 +167,18 @@ void TimeTracker::pauseTimer()
     }
 }
 
+/**
+ * Retroactively converts the last N minutes of Activity to Pause.
+ *
+ * Called when PC has been locked longer than the backpause threshold.
+ * Splits current elapsed time into two segments:
+ *   1. Activity segment: (elapsed - threshold) milliseconds, ending at (now - threshold)
+ *   2. Pause segment: threshold milliseconds, ending at now
+ *
+ * This corrects any checkpoint data that was saved during the lock period,
+ * since checkpoints are suspended while locked but the time before lock detection
+ * may have been saved as Activity.
+ */
 void TimeTracker::backpauseTimer()
 {
     if (mode_ != Mode::Activity) {
@@ -203,6 +240,16 @@ void TimeTracker::backpauseTimer()
     }
 }
 
+/**
+ * Ends the current timing session.
+ *
+ * Workflow:
+ * 1. Calculates the final segment duration (Activity or Pause).
+ * 2. Adds it to the durations list.
+ * 3. Stops the periodic checkpoint timer.
+ * 4. Persists the Session to the Database using updateDurationsInDB().
+ *    (This updates the existing rows rather than creating new ones, preserving IDs).
+ */
 void TimeTracker::stopTimer()
 {
     if (mode_ == Mode::None) {
@@ -258,6 +305,17 @@ void TimeTracker::useTimerViaButton(Button button)
     }
 }
 
+/**
+ * Handles desktop lock/unlock events from LockStateWatcher.
+ *
+ * Event handling:
+ * - Lock: Saves final checkpoint, suspends further checkpoints via is_locked_
+ * - LongOngoingLock: Triggers backpause if timer was in Activity mode
+ * - Unlock: Resumes checkpoints, restarts timer if it was auto-paused
+ *
+ * Note: Lock/Unlock events for checkpoint control are always processed.
+ * Autopause behavior (LongOngoingLock handling) respects isAutopauseEnabled().
+ */
 void TimeTracker::useTimerViaLockEvent(LockEvent event)
 {
     QMutexLocker locker(&mutex_);
@@ -398,6 +456,16 @@ bool TimeTracker::hasEntriesForToday()
     return db_.hasEntriesForDate(QDate::currentDate());
 }
 
+/**
+ * Adds a duration segment to the in-memory deque, handling midnight boundaries.
+ *
+ * If a duration spans midnight, it is split into two segments:
+ * - One ending at 23:59:59.999 (saved to DB immediately as previous day)
+ * - One starting at 00:00:00.000 (kept in memory for current day)
+ *
+ * This ensures each day's data is self-contained and can be saved independently.
+ * Memory allocation failures trigger emergency saves to prevent data loss.
+ */
 void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duration, const QDateTime& endTime)
 {
     if (duration <= 0) {
