@@ -193,7 +193,7 @@ void TimeTracker::backpauseTimer()
     addDurationWithMidnightSplit(DurationType::Pause, backpause_msec, now);
     mode_ = Mode::Pause;
     current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment (pause)
-    
+
     // Immediately sync to DB to correct the Activity checkpoint we just truncated
     updateDurationsInDB(); 
     

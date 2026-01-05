@@ -15,7 +15,11 @@ DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
     // Use unique connection name to avoid conflicts with multiple instances
     QString connectionName = QString("uTimer_connection_%1").arg(reinterpret_cast<quintptr>(this));
     db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
-    db.setDatabaseName("uTimer.sqlite");
+    
+    // Use absolute path in application data directory to avoid issues with working directory changes
+    QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(dbPath);  // Ensure directory exists
+    db.setDatabaseName(QDir(dbPath).filePath("uTimer.sqlite"));
 
     // Log when database is disabled (history_days_to_keep_ = 0 means no history storage)
     if ((history_days_to_keep_ == 0) && settings.logToFile()) {
@@ -356,7 +360,6 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
         return false;
     }
 
-    QDateTime startTime = endTime.addMSecs(-duration);
     QString endDateStr = endTime.date().toString(Qt::ISODate);
     QString endTimeStr = endTime.time().toString("HH:mm:ss.zzz");
 

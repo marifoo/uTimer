@@ -407,11 +407,12 @@ void HistoryDialog::onSplitRow()
         TimeDuration first(firstType, firstDuration, splitTime);
         TimeDuration second(secondType, secondDuration, end);
 
-        // Replace original duration with two new segments using safe iterator handling (Issue #6)
+        // Replace original duration with two new segments using index-based operations
+        // (Avoid iterator invalidation issues with deque erase/insert)
         auto& durationsDeque = pendingChanges_[idx];
-        auto it = durationsDeque.erase(durationsDeque.begin() + row);
-        it = durationsDeque.insert(it, first);
-        durationsDeque.insert(it + 1, second);
+        durationsDeque.erase(durationsDeque.begin() + row);
+        durationsDeque.insert(durationsDeque.begin() + row, first);
+        durationsDeque.insert(durationsDeque.begin() + row + 1, second);
        
         updateTable(idx);
     }
