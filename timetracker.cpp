@@ -9,7 +9,7 @@
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), mode_(Mode::None),
       was_active_before_autopause_(false), has_unsaved_data_(false), is_locked_(false),
-      db_(settings, parent), current_checkpoint_id_(-1)
+      checkpoints_paused_(false), db_(settings, parent), current_checkpoint_id_(-1)
 {
     // Setup checkpoint timer to fire every 5 minutes
     checkpointTimer_.setInterval(5 * 60 * 1000); // 5 minutes in milliseconds
@@ -506,6 +506,14 @@ void TimeTracker::saveCheckpoint()
         return;
     }
 
+    // Don't save checkpoints while paused (e.g., HistoryDialog is open)
+    if (checkpoints_paused_) {
+        if (settings_.logToFile()) {
+            Logger::Log("[CHECKPOINT] Skipped - checkpoints paused");
+        }
+        return;
+    }
+
     saveCheckpointInternal();
 }
 
@@ -544,3 +552,20 @@ void TimeTracker::saveCheckpointInternal()
     }
 }
 
+void TimeTracker::pauseCheckpoints()
+{
+    QMutexLocker locker(&mutex_);
+    checkpoints_paused_ = true;
+    if (settings_.logToFile()) {
+        Logger::Log("[CHECKPOINT] Checkpoints paused");
+    }
+}
+
+void TimeTracker::resumeCheckpoints()
+{
+    QMutexLocker locker(&mutex_);
+    checkpoints_paused_ = false;
+    if (settings_.logToFile()) {
+        Logger::Log("[CHECKPOINT] Checkpoints resumed");
+    }
+}

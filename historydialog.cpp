@@ -20,6 +20,9 @@
 HistoryDialog::HistoryDialog(TimeTracker& timetracker, const Settings& settings, QWidget* parent)
     : QDialog(parent), timetracker_(timetracker), settings_(settings), pageIndex_(0)
 {
+    // Pause checkpoints while dialog is open to prevent race conditions
+    timetracker_.pauseCheckpoints();
+
     createPages();
     setupUI();
     updateTable(pageIndex_);
@@ -531,7 +534,7 @@ HistoryDialog::~HistoryDialog() {
     if (settings_.logToFile()) {
         Logger::Log("[HISTORY] Dialog closing");
     }
-    
+
     // Clean up cell widgets to prevent memory leaks
     if (table_) {
         for (int row = 0; row < table_->rowCount(); ++row) {
@@ -542,6 +545,9 @@ HistoryDialog::~HistoryDialog() {
             }
         }
     }
-    
+
     pendingChanges_.clear();
+
+    // Resume checkpoints now that dialog is closed
+    timetracker_.resumeCheckpoints();
 }

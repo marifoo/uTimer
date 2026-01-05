@@ -26,6 +26,7 @@ private:
     bool was_active_before_autopause_;
     bool has_unsaved_data_;  // Track if previous DB save failed
     bool is_locked_;  // Track if desktop is currently locked (to prevent checkpoints while locked)
+    bool checkpoints_paused_;  // Track if checkpoints are paused (e.g., while HistoryDialog is open)
     DatabaseManager db_;
     mutable QRecursiveMutex mutex_;  // Protects state transitions from concurrent access
     QTimer checkpointTimer_;  // Timer for periodic checkpoint saving
@@ -52,6 +53,8 @@ public:
     bool updateDurationsInDB();
     bool replaceDurationsInDB(std::deque<TimeDuration> durations);
     bool hasEntriesForToday();
+    void pauseCheckpoints();
+    void resumeCheckpoints();
 
 public slots:
     void useTimerViaButton(Button button);
