@@ -28,12 +28,20 @@
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), mode_(Mode::None),
       was_active_before_autopause_(false), has_unsaved_data_(false), is_locked_(false),
-      checkpoints_paused_(false), db_(settings, parent), current_checkpoint_id_(-1)
+      checkpoints_paused_(false), db_(settings, parent), current_checkpoint_id_(-1),
+      checkpoint_interval_msec_(settings.getCheckpointIntervalMsec())
 {
-    // Setup checkpoint timer to fire periodically (default: 5 minutes)
-    checkpointTimer_.setInterval(settings_.getCheckpointIntervalMsec());
-    checkpointTimer_.setSingleShot(false); // Repeat at configured interval
+    // Setup checkpoint timer (disabled if interval is 0)
+    if (checkpoint_interval_msec_ > 0) {
+        checkpointTimer_.setInterval(checkpoint_interval_msec_);
+    }
+    checkpointTimer_.setSingleShot(false);
     connect(&checkpointTimer_, &QTimer::timeout, this, &TimeTracker::saveCheckpoint);
+
+    // Log when checkpoints are disabled
+    if (checkpoint_interval_msec_ == 0 && settings_.logToFile()) {
+        Logger::Log("[CHECKPOINT] Checkpoints disabled (interval = 0)");
+    }
 }
 
 TimeTracker::~TimeTracker()
@@ -66,7 +74,9 @@ void TimeTracker::startTimer()
         }
         mode_ = Mode::Activity;
         current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment
-        checkpointTimer_.start(); // Resume periodic checkpoint saving
+        if (checkpoint_interval_msec_ > 0) {
+            checkpointTimer_.start(); // Resume periodic checkpoint saving
+        }
         if (settings_.logToFile()) {
             Logger::Log("[TIMER] > Timer unpaused");
         }
@@ -129,7 +139,9 @@ void TimeTracker::startTimer()
         timer_.start();
         mode_ = Mode::Activity;
         current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment
-        checkpointTimer_.start(); // Start periodic checkpoint saving
+        if (checkpoint_interval_msec_ > 0) {
+            checkpointTimer_.start(); // Start periodic checkpoint saving
+        }
         if (settings_.logToFile()) {
             Logger::Log("[TIMER] >> Timer started");
         }
@@ -161,7 +173,9 @@ void TimeTracker::pauseTimer()
     updateDurationsInDB();
 
     current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment (pause)
-    checkpointTimer_.start(); // Continue checkpoint saving during pause
+    if (checkpoint_interval_msec_ > 0) {
+        checkpointTimer_.start(); // Continue checkpoint saving during pause
+    }
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer paused <");
     }
@@ -232,9 +246,11 @@ void TimeTracker::backpauseTimer()
     current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment (pause)
 
     // Immediately sync to DB to correct the Activity checkpoint we just truncated
-    updateDurationsInDB(); 
-    
-    checkpointTimer_.start(); // Continue checkpoint saving during pause
+    updateDurationsInDB();
+
+    if (checkpoint_interval_msec_ > 0) {
+        checkpointTimer_.start(); // Continue checkpoint saving during pause
+    }
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer retroactively paused <");
     }
@@ -588,6 +604,11 @@ void TimeTracker::saveCheckpoint()
 void TimeTracker::saveCheckpointInternal()
 {
     // NOTE: This function assumes the mutex is already held by the caller
+
+    // Don't save checkpoints if feature is disabled
+    if (checkpoint_interval_msec_ == 0) {
+        return;
+    }
 
     // Only save checkpoint if timer is in Activity mode (not during Pause or Stopped)
     if (mode_ != Mode::Activity) {

@@ -40,7 +40,7 @@ void Settings::readSettingsFile()
 	history_days_to_keep_ = sfile_.value("uTimer/history_days_to_keep", 99).toInt();
 	log_to_file_ = sfile_.value("uTimer/debug_log_to_file", false).toBool();
 	boot_time_sec_ = sfile_.value("uTimer/boot_time_seconds", 0).toUInt();
-	checkpoint_interval_min_ = qBound(1, sfile_.value("uTimer/checkpoint_interval_minutes", 5).toInt(), 60);
+	checkpoint_interval_min_ = qBound(0, sfile_.value("uTimer/checkpoint_interval_minutes", 5).toInt(), 60);
 }
 
 void Settings::writeSettingsFile()

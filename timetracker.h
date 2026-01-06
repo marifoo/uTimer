@@ -31,6 +31,7 @@ private:
     mutable QRecursiveMutex mutex_;  // Protects state transitions from concurrent access
     QTimer checkpointTimer_;  // Timer for periodic checkpoint saving
     long long current_checkpoint_id_; // ID of the current database entry being updated by checkpoints
+    qint64 checkpoint_interval_msec_; // Checkpoint interval (0 = disabled)
 
     void startTimer();
     void stopTimer();
