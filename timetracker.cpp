@@ -173,9 +173,7 @@ void TimeTracker::pauseTimer()
     updateDurationsInDB();
 
     current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment (pause)
-    if (checkpoint_interval_msec_ > 0) {
-        checkpointTimer_.start(); // Continue checkpoint saving during pause
-    }
+    checkpointTimer_.stop(); // No checkpoints needed during pause
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer paused <");
     }
@@ -248,9 +246,7 @@ void TimeTracker::backpauseTimer()
     // Immediately sync to DB to correct the Activity checkpoint we just truncated
     updateDurationsInDB();
 
-    if (checkpoint_interval_msec_ > 0) {
-        checkpointTimer_.start(); // Continue checkpoint saving during pause
-    }
+    checkpointTimer_.stop(); // No checkpoints needed during pause
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer retroactively paused <");
     }
@@ -621,8 +617,8 @@ void TimeTracker::saveCheckpointInternal()
         return; // No time elapsed yet
     }
 
-    // Determine duration type based on current mode
-    DurationType type = (mode_ == Mode::Activity) ? DurationType::Activity : DurationType::Pause;
+    // Always Activity - we return early above if mode_ != Mode::Activity
+    DurationType type = DurationType::Activity;
 
     // Get current end time
     QDateTime now = QDateTime::currentDateTime();
@@ -632,10 +628,12 @@ void TimeTracker::saveCheckpointInternal()
     bool success = db_.saveCheckpoint(type, elapsed, now, current_checkpoint_id_);
 
     if (success) {
-        Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms, ID: %3")
-            .arg(type == DurationType::Activity ? "Activity" : "Pause")
-            .arg(elapsed)
-            .arg(current_checkpoint_id_));
+        if (settings_.logToFile()) {
+            Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms, ID: %3")
+                .arg(type == DurationType::Activity ? "Activity" : "Pause")
+                .arg(elapsed)
+                .arg(current_checkpoint_id_));
+        }
     } else if (settings_.logToFile()) {
         Logger::Log("[CHECKPOINT] Failed to save checkpoint to database");
     }
