@@ -1,12 +1,14 @@
 #include "logger.h"
+#include <QCoreApplication>
 #include <QDateTime>
-#include <QTextStream>
+#include <QDir>
 #include <QFile>
+#include <QTextStream>
 
 Logger::Logger()
 {
     logfile_ = new QFile();
-    logfile_->setFileName("uTimer.log");
+    logfile_->setFileName(QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.log"));
     logfile_->open(QIODevice::ReadWrite | QIODevice::Append | QIODevice::Text);
     log("uTimer Startup >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
 }

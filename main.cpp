@@ -1,9 +1,10 @@
 #include <QApplication>
-#include <QStyleFactory>
 #include <QDebug>
+#include <QDir>
 #include <QEvent>
-#include <QTimer>
 #include <QSettings>
+#include <QStyleFactory>
+#include <QTimer>
 #ifdef Q_OS_LINUX
 #include <QLoggingCategory>
 #include <QSocketNotifier>
@@ -97,7 +98,7 @@ int main(int argc, char *argv[])
 
 	QTimer timer;
 
-	Settings settings("user-settings.ini");
+	Settings settings(QDir(QCoreApplication::applicationDirPath()).filePath("user-settings.ini"));
 	LockStateWatcher lockstate_watcher(settings);
 	TimeTracker time_tracker(settings);
 	MainWin main_win(settings, time_tracker);

@@ -20,7 +20,7 @@
  */
 
 #include "databasemanager.h"
-#include <QStandardPaths>
+#include <QCoreApplication>
 #include <QDir>
 #include <QSqlQuery>
 #include <QSqlError>
@@ -37,10 +37,8 @@ DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
     QString connectionName = QString("uTimer_connection_%1").arg(reinterpret_cast<quintptr>(this));
     db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     
-    // Use absolute path in application data directory to avoid issues with working directory changes
-    QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir().mkpath(dbPath);  // Ensure directory exists
-    db.setDatabaseName(QDir(dbPath).filePath("uTimer.sqlite"));
+    // Use executable directory for portability
+    db.setDatabaseName(QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.sqlite"));
 
     // Log when database is disabled (history_days_to_keep_ = 0 means no history storage)
     if ((history_days_to_keep_ == 0) && settings.logToFile()) {
