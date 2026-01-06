@@ -40,7 +40,7 @@ void Settings::readSettingsFile()
 	history_days_to_keep_ = sfile_.value("uTimer/history_days_to_keep", 99).toInt();
 	log_to_file_ = sfile_.value("uTimer/debug_log_to_file", false).toBool();
 	boot_time_sec_ = sfile_.value("uTimer/boot_time_seconds", 0).toUInt();
-	
+	checkpoint_interval_min_ = qBound(1, sfile_.value("uTimer/checkpoint_interval_minutes", 5).toInt(), 60);
 }
 
 void Settings::writeSettingsFile()
@@ -55,6 +55,7 @@ void Settings::writeSettingsFile()
 	sfile_.setValue("uTimer/debug_log_to_file", log_to_file_);
 	sfile_.setValue("uTimer/history_days_to_keep", history_days_to_keep_);
 	sfile_.setValue("uTimer/boot_time_seconds", boot_time_sec_);
+	sfile_.setValue("uTimer/checkpoint_interval_minutes", checkpoint_interval_min_);
 
 	if (log_to_file_) {
 		if (autopause_enabled_)
@@ -147,4 +148,9 @@ void Settings::setPinToTopState(const bool pin2top_enabled)
 unsigned int Settings::getBootTimeSec() const
 {
 	return boot_time_sec_;
+}
+
+qint64 Settings::getCheckpointIntervalMsec() const
+{
+	return convMinToMsec(checkpoint_interval_min_);
 }

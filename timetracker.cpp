@@ -30,9 +30,9 @@ TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
       was_active_before_autopause_(false), has_unsaved_data_(false), is_locked_(false),
       checkpoints_paused_(false), db_(settings, parent), current_checkpoint_id_(-1)
 {
-    // Setup checkpoint timer to fire every 5 minutes
-    checkpointTimer_.setInterval(5 * 60 * 1000); // 5 minutes in milliseconds
-    checkpointTimer_.setSingleShot(false); // Repeat every 5 minutes
+    // Setup checkpoint timer to fire periodically (default: 5 minutes)
+    checkpointTimer_.setInterval(settings_.getCheckpointIntervalMsec());
+    checkpointTimer_.setSingleShot(false); // Repeat at configured interval
     connect(&checkpointTimer_, &QTimer::timeout, this, &TimeTracker::saveCheckpoint);
 }
 
