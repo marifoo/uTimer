@@ -126,14 +126,7 @@ qmake-qt5 && make -j4
 ./qtest
 ```
 
-**Test coverage includes:**
-- `cleanDurations()` helper function (deduplication, merging, overlap handling)
-- TimeTracker state machine (start, pause, resume, stop)
-- Checkpoint save/restore and crash recovery
-- Backpause logic and midnight boundary splits
-- Lock state detection debouncing
-- Database operations (CRUD, schema validation, retention)
-- Explicit start time preservation across operations
+All tests shall use the "Arrange, Act, Assert" pattern.
 
-**Expected output:** All tests should pass with zero `QWARN` messages (46 tests currently).
+**Expected output:** All tests should pass with zero `QWARN` messages.
 
