@@ -31,7 +31,7 @@ Build with [Qt 5.14](https://www.qt.io) (see QT-LICENSE.md) and MSVC Compiler
 
 License
 ------
-Copyright (c) 2020-2025 marifoo (github.com/marifoo)
+Copyright (c) 2020-2026 marifoo (github.com/marifoo)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
