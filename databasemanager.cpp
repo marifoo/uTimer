@@ -268,6 +268,7 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
     if (!db.transaction()) {
         if (settings_.logToFile())
             Logger::Log("[DB] Error starting transaction for Saving: " + db.lastError().text());
+        lazyClose();
         return false;
     }
 
@@ -278,6 +279,7 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
             db.rollback();
             if (settings_.logToFile())
                 Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
+            lazyClose();
             return false;
         }
 	}
@@ -298,6 +300,7 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
             db.rollback();
             if (settings_.logToFile())
                 Logger::Log("[DB] Error inserting duration: " + query.lastError().text());
+            lazyClose();
             return false;
         }
     }
@@ -466,15 +469,45 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
         query.bindValue(":id", checkpointId);
 
         if (query.exec()) {
-            success = db.commit();
-            if (!success && settings_.logToFile()) {
-                Logger::Log("[DB] Error committing checkpoint update: " + db.lastError().text());
+            if (query.numRowsAffected() > 0) {
+                success = db.commit();
+                if (!success && settings_.logToFile()) {
+                    Logger::Log("[DB] Error committing checkpoint update: " + db.lastError().text());
+                }
+            } else {
+                // Row was deleted (retention cleanup or manual edit). Insert a new checkpoint.
+                QSqlQuery insertQuery(db);
+                insertQuery.prepare(
+                    "INSERT INTO durations (type, duration, end_date, end_time) "
+                    "VALUES (:type, :duration, :end_date, :end_time)"
+                );
+                insertQuery.bindValue(":type", static_cast<int>(type));
+                insertQuery.bindValue(":duration", duration);
+                insertQuery.bindValue(":end_date", endDateStr);
+                insertQuery.bindValue(":end_time", endTimeStr);
+
+                if (insertQuery.exec()) {
+                    checkpointId = insertQuery.lastInsertId().toLongLong();
+                    success = db.commit();
+                    if (!success && settings_.logToFile()) {
+                        Logger::Log("[DB] Error committing checkpoint insert after missing row: " + db.lastError().text());
+                    }
+                } else {
+                    db.rollback();
+                    if (settings_.logToFile()) {
+                        Logger::Log("[DB] Error inserting checkpoint after missing row: " + insertQuery.lastError().text());
+                    }
+                    lazyClose();
+                    return false;
+                }
             }
         } else {
             db.rollback();
             if (settings_.logToFile()) {
                 Logger::Log("[DB] Error updating checkpoint: " + query.lastError().text());
             }
+            lazyClose();
+            return false;
         }
     } else {
         // Append new checkpoint entry
@@ -498,6 +531,8 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
             if (settings_.logToFile()) {
                 Logger::Log("[DB] Error inserting checkpoint: " + query.lastError().text());
             }
+            lazyClose();
+            return false;
         }
     }
 
