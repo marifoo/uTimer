@@ -40,7 +40,7 @@
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|Win32'" Label="QtSettings">
     <QtInstall>Qt 5.14.2 x86</QtInstall>
-    <QtModules>core;testlib</QtModules>
+    <QtModules>core;sql;testlib</QtModules>
     <QtBuildConfig>debug</QtBuildConfig>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|Win32'" Label="QtSettings">
@@ -113,6 +113,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\helpers.cpp" />
+    <ClCompile Include="..\databasemanager.cpp" />
+    <ClCompile Include="..\settings.cpp" />
+    <ClCompile Include="..\logger.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

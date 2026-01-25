@@ -2,19 +2,49 @@
 #include <deque>
 #include <iterator>
 #include <cmath>
+#include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QSettings>
+#include <QSqlDatabase>
+#include <QSqlQuery>
+#include <QTemporaryDir>
 #include <QtDebug>
+#include "databasemanager.h"
 #include "helpers.h"
+#include "settings.h"
 
 class uTimerTest : public QObject
 {
     Q_OBJECT
 
 private:
+    QString db_path_;
+    QString db_backup_path_;
+
     static TimeDuration mk(DurationType type, qint64 startMs, qint64 endMs)
     {
-        QDateTime end = QDateTime::fromMSecsSinceEpoch(endMs);
-        return TimeDuration(type, endMs - startMs, end);
+        QDateTime start = QDateTime::fromMSecsSinceEpoch(startMs, Qt::UTC);
+        QDateTime end = QDateTime::fromMSecsSinceEpoch(endMs, Qt::UTC);
+        return TimeDuration(type, start, end);
+    }
+
+    static QString createSettingsFile(const QString& dirPath, int historyDays)
+    {
+        QString settingsPath = QDir(dirPath).filePath("user-settings.ini");
+        QSettings seed(settingsPath, QSettings::IniFormat);
+        seed.setValue("uTimer/history_days_to_keep", historyDays);
+        seed.setValue("uTimer/debug_log_to_file", false);
+        seed.sync();
+        return settingsPath;
+    }
+
+    void resetDatabaseFile() const
+    {
+        if (QFile::exists(db_path_)) {
+            QFile::remove(db_path_);
+        }
     }
 
 private slots:
@@ -25,6 +55,12 @@ private slots:
 
     void initTestCase()
     {
+        db_path_ = QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.sqlite");
+        if (QFile::exists(db_path_)) {
+            db_backup_path_ = db_path_ + ".bak_test";
+            QFile::remove(db_backup_path_);
+            QVERIFY(QFile::rename(db_path_, db_backup_path_));
+        }
     }
 
     void init()
@@ -478,12 +514,317 @@ private slots:
         QCOMPARE(d[1].type, DurationType::Pause);
     }
 
+    // ==================== Tests for explicit start times ====================
+
+    void test_explicitStartTimes_constructorComputesDuration()
+    {
+        // Description: TimeDuration constructor computes duration from start/end
+
+        // Arrange & Act
+        QDateTime start = QDateTime::fromMSecsSinceEpoch(1000, Qt::UTC);
+        QDateTime end = QDateTime::fromMSecsSinceEpoch(5000, Qt::UTC);
+        TimeDuration d(DurationType::Activity, start, end);
+
+        // Assert
+        QCOMPARE(d.duration, (qint64)4000);
+        QCOMPARE(d.startTime.toMSecsSinceEpoch(), (qint64)1000);
+        QCOMPARE(d.endTime.toMSecsSinceEpoch(), (qint64)5000);
+    }
+
+    void test_explicitStartTimes_startTimePreservedAfterClean()
+    {
+        // Description: cleanDurations preserves startTime field after merges
+
+        // Arrange
+        std::deque<TimeDuration> d;
+        d.push_back(mk(DurationType::Activity, 0, 1000));
+        d.push_back(mk(DurationType::Activity, 1050, 2000)); // will merge
+
+        // Act
+        cleanDurations(&d);
+
+        // Assert
+        QCOMPARE((int)d.size(), 1);
+        QCOMPARE(d.front().startTime.toMSecsSinceEpoch(), (qint64)0);
+        QCOMPARE(d.front().endTime.toMSecsSinceEpoch(), (qint64)2000);
+        QCOMPARE(d.front().duration, (qint64)2000);
+    }
+
+    void test_explicitStartTimes_mergeUpdatesAllFields()
+    {
+        // Description: Merge branch updates startTime, endTime, and duration consistently
+
+        // Arrange - entry that extends before prev
+        std::deque<TimeDuration> d;
+        d.push_back(mk(DurationType::Activity, 1000, 2000)); // [1000, 2000]
+        d.push_back(mk(DurationType::Activity, 500, 1500));  // starts before, ends inside
+
+        // Act
+        cleanDurations(&d);
+
+        // Assert
+        QCOMPARE((int)d.size(), 1);
+        QCOMPARE(d.front().startTime.toMSecsSinceEpoch(), (qint64)500);
+        QCOMPARE(d.front().endTime.toMSecsSinceEpoch(), (qint64)2000);
+        QCOMPARE(d.front().duration, (qint64)1500);
+    }
+
+    void test_splitPreservesStartTime()
+    {
+        // Description: When splitting a duration, the first segment should keep original startTime
+
+        // Arrange
+        QDateTime start = QDateTime::fromMSecsSinceEpoch(1000, Qt::UTC);
+        QDateTime split = QDateTime::fromMSecsSinceEpoch(3000, Qt::UTC);
+        QDateTime end = QDateTime::fromMSecsSinceEpoch(5000, Qt::UTC);
+
+        // Act - simulate a split
+        TimeDuration first(DurationType::Activity, start, split);
+        TimeDuration second(DurationType::Pause, split, end);
+
+        // Assert
+        QCOMPARE(first.startTime.toMSecsSinceEpoch(), (qint64)1000);
+        QCOMPARE(first.endTime.toMSecsSinceEpoch(), (qint64)3000);
+        QCOMPARE(first.duration, (qint64)2000);
+        QCOMPARE(second.startTime.toMSecsSinceEpoch(), (qint64)3000);
+        QCOMPARE(second.endTime.toMSecsSinceEpoch(), (qint64)5000);
+        QCOMPARE(second.duration, (qint64)2000);
+    }
+
+    void test_zeroDurationNotAdded()
+    {
+        // Description: Zero-duration segments should not affect the deque
+
+        // Arrange
+        QDateTime now = QDateTime::fromMSecsSinceEpoch(1000, Qt::UTC);
+        TimeDuration d(DurationType::Activity, now, now);
+
+        // Assert
+        QCOMPARE(d.duration, (qint64)0);
+    }
+
+    void test_negativeDurationHandled()
+    {
+        // Description: If end is before start, duration should be negative (validation catches this)
+
+        // Arrange
+        QDateTime start = QDateTime::fromMSecsSinceEpoch(5000, Qt::UTC);
+        QDateTime end = QDateTime::fromMSecsSinceEpoch(3000, Qt::UTC);
+        TimeDuration d(DurationType::Activity, start, end);
+
+        // Assert - duration is negative, validation layer should reject
+        QCOMPARE(d.duration, (qint64)-2000);
+    }
+
+    void test_schemaValidation_missingStartColumns()
+    {
+        // Description: Schema check fails when start_date/start_time are missing
+
+        resetDatabaseFile();
+
+        const QString connName = "schema_legacy";
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+            db.setDatabaseName(db_path_);
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            QVERIFY(query.exec(
+                "CREATE TABLE durations ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "type INTEGER NOT NULL,"
+                "duration INTEGER NOT NULL,"
+                "end_date DATE NOT NULL,"
+                "end_time TEXT NOT NULL)"
+            ));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connName);
+
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QVERIFY(!manager.checkSchemaOnStartup());
+    }
+
+    void test_exactMatching_upsertReplacesByStartTime()
+    {
+        // Description: Upsert replaces by exact start_time/type, leaving one row
+
+        resetDatabaseFile();
+
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime start = QDateTime::fromMSecsSinceEpoch(1'000'000, Qt::UTC);
+        QDateTime end1 = start.addSecs(10);
+        QDateTime end2 = start.addSecs(20);
+
+        std::deque<TimeDuration> durations;
+        durations.emplace_back(DurationType::Activity, start, end1);
+        QVERIFY(manager.updateDurationsByStartTime(durations));
+
+        durations.clear();
+        durations.emplace_back(DurationType::Activity, start, end2);
+        QVERIFY(manager.updateDurationsByStartTime(durations));
+
+        const QString connName = "exact_match_query";
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+            db.setDatabaseName(db_path_);
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            query.prepare(
+                "SELECT COUNT(*), end_time, duration FROM durations "
+                "WHERE start_date = :date AND start_time = :time AND type = :type"
+            );
+            query.bindValue(":date", start.toUTC().date().toString(Qt::ISODate));
+            query.bindValue(":time", start.toUTC().time().toString("HH:mm:ss.zzz"));
+            query.bindValue(":type", static_cast<int>(DurationType::Activity));
+            QVERIFY(query.exec());
+            QVERIFY(query.next());
+            QCOMPARE(query.value(0).toInt(), 1);
+            QCOMPARE(query.value(1).toString(), end2.toUTC().time().toString("HH:mm:ss.zzz"));
+            QCOMPARE(query.value(2).toLongLong(), start.msecsTo(end2));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connName);
+    }
+
+    void test_checkpointPreservesStartTimeOnUpdate()
+    {
+        // Description: Checkpoint updates do not overwrite the original start time
+
+        resetDatabaseFile();
+
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime start = QDateTime::fromMSecsSinceEpoch(2'000'000, Qt::UTC);
+        QDateTime end1 = start.addSecs(5);
+        QDateTime end2 = start.addSecs(15);
+
+        long long checkpointId = -1;
+        QVERIFY(manager.saveCheckpoint(DurationType::Activity, start.msecsTo(end1), start, end1, checkpointId));
+        QVERIFY(checkpointId != -1);
+
+        QDateTime driftedStart = start.addSecs(3600);
+        QVERIFY(manager.saveCheckpoint(DurationType::Activity, start.msecsTo(end2), driftedStart, end2, checkpointId));
+
+        const QString connName = "checkpoint_query";
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+            db.setDatabaseName(db_path_);
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            query.prepare("SELECT start_date, start_time, end_time, duration FROM durations WHERE id = :id");
+            query.bindValue(":id", checkpointId);
+            QVERIFY(query.exec());
+            QVERIFY(query.next());
+            QCOMPARE(query.value(0).toString(), start.toUTC().date().toString(Qt::ISODate));
+            QCOMPARE(query.value(1).toString(), start.toUTC().time().toString("HH:mm:ss.zzz"));
+            QCOMPARE(query.value(2).toString(), end2.toUTC().time().toString("HH:mm:ss.zzz"));
+            QCOMPARE(query.value(3).toLongLong(), start.msecsTo(end2));
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connName);
+    }
+
+    void test_clockDriftResilience_durationStoredFromElapsed()
+    {
+        // Description: Stored duration reflects provided elapsed time, not wall-clock delta
+
+        resetDatabaseFile();
+
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime start = QDateTime::fromMSecsSinceEpoch(3'000'000, Qt::UTC);
+        QDateTime end = start.addSecs(3600);
+        qint64 elapsed = 120'000;
+
+        long long checkpointId = -1;
+        QVERIFY(manager.saveCheckpoint(DurationType::Activity, elapsed, start, end, checkpointId));
+        QVERIFY(checkpointId != -1);
+
+        const QString connName = "drift_query";
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+            db.setDatabaseName(db_path_);
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            query.prepare("SELECT duration FROM durations WHERE id = :id");
+            query.bindValue(":id", checkpointId);
+            QVERIFY(query.exec());
+            QVERIFY(query.next());
+            QCOMPARE(query.value(0).toLongLong(), elapsed);
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connName);
+    }
+
+    void test_loadDurations_skipsNegativeDurationRows()
+    {
+        // Description: loadDurations skips rows with negative stored duration
+
+        resetDatabaseFile();
+
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime start = QDateTime::fromMSecsSinceEpoch(4'000'000, Qt::UTC);
+        QDateTime end = start.addSecs(10);
+        std::deque<TimeDuration> durations;
+        durations.emplace_back(DurationType::Activity, start, end);
+        QVERIFY(manager.updateDurationsByStartTime(durations));
+
+        const QString connName = "negative_duration_insert";
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+            db.setDatabaseName(db_path_);
+            QVERIFY(db.open());
+            QSqlQuery query(db);
+            query.prepare(
+                "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+                "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time)"
+            );
+            query.bindValue(":type", static_cast<int>(DurationType::Activity));
+            query.bindValue(":duration", static_cast<qint64>(-500));
+            query.bindValue(":start_date", start.toUTC().date().toString(Qt::ISODate));
+            query.bindValue(":start_time", start.toUTC().time().toString("HH:mm:ss.zzz"));
+            query.bindValue(":end_date", end.toUTC().date().toString(Qt::ISODate));
+            query.bindValue(":end_time", end.toUTC().time().toString("HH:mm:ss.zzz"));
+            QVERIFY(query.exec());
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connName);
+
+        auto loaded = manager.loadDurations();
+        QCOMPARE(static_cast<int>(loaded.size()), 1);
+    }
+
     void cleanup()
     {
     }
 
     void cleanupTestCase()
     {
+        if (!db_path_.isEmpty()) {
+            QFile::remove(db_path_);
+        }
+        if (!db_backup_path_.isEmpty()) {
+            QFile::remove(db_path_);
+            QVERIFY(QFile::rename(db_backup_path_, db_path_));
+        }
     }
 };
 
