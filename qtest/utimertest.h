@@ -1154,6 +1154,747 @@ private slots:
         QVERIFY(manager.saveDurations(d, TransactionMode::Append));
     }
 
+    // ==================== Database Transaction & Rollback Tests ====================
+    
+    void test_database_transaction_rollback_on_insert_failure()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        // Create valid database first
+        QDateTime now = QDateTime::currentDateTime();
+        std::deque<TimeDuration> validData;
+        validData.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-90));
+        QVERIFY(manager.saveDurations(validData, TransactionMode::Append));
+        
+        // Verify data was saved
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)1);
+        
+        // Make database read-only to force INSERT failure
+        QFile dbFile(db_path_);
+        QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::ReadUser));
+        
+        // Try to append - should fail and rollback
+        std::deque<TimeDuration> newData;
+        newData.emplace_back(DurationType::Pause, now.addSecs(-50), now.addSecs(-40));
+        QVERIFY(!manager.saveDurations(newData, TransactionMode::Append));
+        
+        // Restore permissions
+        QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser));
+        
+        // Original data should still be intact (rollback worked)
+        loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)1);
+        QCOMPARE(loaded[0].type, DurationType::Activity);
+    }
+
+    void test_database_transaction_rollback_on_replace_failure()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        // Create initial data
+        QDateTime now = QDateTime::currentDateTime();
+        std::deque<TimeDuration> originalData;
+        originalData.emplace_back(DurationType::Activity, now.addSecs(-200), now.addSecs(-190));
+        originalData.emplace_back(DurationType::Pause, now.addSecs(-180), now.addSecs(-170));
+        QVERIFY(manager.saveDurations(originalData, TransactionMode::Append));
+        
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)2);
+        
+        // Make database read-only after DELETE succeeds but before INSERT
+        // This simulates partial transaction failure
+        QFile dbFile(db_path_);
+        QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::ReadUser));
+        
+        // Try Replace mode - should fail and rollback
+        std::deque<TimeDuration> replacementData;
+        replacementData.emplace_back(DurationType::Activity, now.addSecs(-50), now.addSecs(-40));
+        QVERIFY(!manager.saveDurations(replacementData, TransactionMode::Replace));
+        
+        // Restore permissions
+        QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser));
+        
+        // Original data should be preserved (rollback after DELETE)
+        loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)2);
+    }
+
+    // ==================== Checkpoint System Tests ====================
+    
+    void test_database_checkpoint_id_reuse()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime start = QDateTime::currentDateTime();
+        QDateTime end = start.addSecs(10);
+        long long checkpointId = -1;
+        
+        // First checkpoint - creates new row
+        QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, start, end, checkpointId));
+        QVERIFY(checkpointId != -1);
+        long long firstId = checkpointId;
+        
+        // Second checkpoint with same ID - should UPDATE existing row
+        QDateTime newEnd = start.addSecs(20);
+        QVERIFY(manager.saveCheckpoint(DurationType::Activity, 20000, start, newEnd, checkpointId));
+        QCOMPARE(checkpointId, firstId); // ID unchanged
+        
+        // Load and verify only ONE entry exists
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)1);
+        QCOMPARE(loaded[0].duration, (qint64)20000);
+        QCOMPARE(loaded[0].startTime.toString(Qt::ISODate), start.toString(Qt::ISODate));
+    }
+
+    void test_database_checkpoint_deleted_row_creates_new()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime start = QDateTime::currentDateTime();
+        QDateTime end = start.addSecs(10);
+        long long checkpointId = -1;
+        
+        // Create checkpoint
+        QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, start, end, checkpointId));
+        QVERIFY(checkpointId != -1);
+        long long firstId = checkpointId;
+        
+        // Manually delete the checkpoint row (simulating retention cleanup)
+        QVERIFY(manager.lazyOpen());
+        QSqlQuery query(manager.db);
+        query.prepare("DELETE FROM durations WHERE id = :id");
+        query.bindValue(":id", checkpointId);
+        QVERIFY(query.exec());
+        manager.lazyClose();
+        
+        // Try to update checkpoint - should detect missing row and INSERT new one
+        QDateTime newEnd = start.addSecs(20);
+        QVERIFY(manager.saveCheckpoint(DurationType::Activity, 20000, start, newEnd, checkpointId));
+        QVERIFY(checkpointId != -1);
+        QVERIFY(checkpointId != firstId); // New ID assigned
+        
+        // Verify new row exists
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)1);
+        QCOMPARE(loaded[0].duration, (qint64)20000);
+    }
+
+    void test_database_checkpoint_preserves_start_time()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime originalStart = QDateTime::currentDateTime();
+        QDateTime firstEnd = originalStart.addSecs(10);
+        long long checkpointId = -1;
+        
+        // First checkpoint
+        QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, originalStart, firstEnd, checkpointId));
+        
+        // Update checkpoint with new end time (simulate ongoing timer)
+        QDateTime secondEnd = originalStart.addSecs(30);
+        QVERIFY(manager.saveCheckpoint(DurationType::Activity, 30000, originalStart, secondEnd, checkpointId));
+        
+        // Load and verify start time is preserved
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)1);
+        QCOMPARE(loaded[0].startTime.toString(Qt::ISODate), originalStart.toString(Qt::ISODate));
+        QCOMPARE(loaded[0].endTime.toString(Qt::ISODate), secondEnd.toString(Qt::ISODate));
+        QCOMPARE(loaded[0].duration, (qint64)30000);
+    }
+
+    // ==================== UPSERT Tests ====================
+    
+    void test_database_upsert_insert_mode()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime now = QDateTime::currentDateTime();
+        std::deque<TimeDuration> durations;
+        durations.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-90));
+        durations.emplace_back(DurationType::Pause, now.addSecs(-80), now.addSecs(-70));
+        
+        // First upsert - should INSERT both
+        QVERIFY(manager.updateDurationsByStartTime(durations));
+        
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)2);
+    }
+
+    void test_database_upsert_replace_mode()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime now = QDateTime::currentDateTime();
+        QDateTime start1 = now.addSecs(-100);
+        QDateTime end1 = now.addSecs(-90);
+        
+        // Insert initial duration
+        std::deque<TimeDuration> initial;
+        initial.emplace_back(DurationType::Activity, start1, end1);
+        QVERIFY(manager.updateDurationsByStartTime(initial));
+        
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)1);
+        QCOMPARE(loaded[0].duration, (qint64)10000);
+        
+        // Upsert with SAME start time but DIFFERENT end time
+        std::deque<TimeDuration> updated;
+        QDateTime end2 = now.addSecs(-80); // Extended duration
+        updated.emplace_back(DurationType::Activity, start1, end2);
+        QVERIFY(manager.updateDurationsByStartTime(updated));
+        
+        // Should have REPLACED the row (due to UNIQUE constraint)
+        loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)1);
+        QCOMPARE(loaded[0].duration, (qint64)20000); // Duration updated
+    }
+
+    void test_database_upsert_unique_constraint()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime now = QDateTime::currentDateTime();
+        QDateTime start = now.addSecs(-100);
+        
+        // Insert Activity at same start time
+        std::deque<TimeDuration> activity;
+        activity.emplace_back(DurationType::Activity, start, start.addSecs(10));
+        QVERIFY(manager.updateDurationsByStartTime(activity));
+        
+        // Insert Pause at SAME start time (different type)
+        std::deque<TimeDuration> pause;
+        pause.emplace_back(DurationType::Pause, start, start.addSecs(5));
+        QVERIFY(manager.updateDurationsByStartTime(pause));
+        
+        // Both should exist (UNIQUE is on start_date + start_time + TYPE)
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)2);
+    }
+
+    void test_database_upsert_empty_deque()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        std::deque<TimeDuration> empty;
+        QVERIFY(manager.updateDurationsByStartTime(empty)); // Should succeed as no-op
+    }
+
+    // ==================== Data Validation Tests ====================
+    
+    void test_database_load_negative_duration()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        // Manually insert negative duration
+        QVERIFY(manager.lazyOpen());
+        QSqlQuery query(manager.db);
+        QDateTime now = QDateTime::currentDateTimeUtc();
+        query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+                     "VALUES (0, -5000, :start_date, :start_time, :end_date, :end_time)");
+        query.bindValue(":start_date", now.date().toString(Qt::ISODate));
+        query.bindValue(":start_time", now.time().toString("HH:mm:ss.zzz"));
+        QDateTime end = now.addSecs(5);
+        query.bindValue(":end_date", end.date().toString(Qt::ISODate));
+        query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+        QVERIFY(query.exec());
+        manager.lazyClose();
+
+        // Load should compute duration from timestamps and use that
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)1);
+        QVERIFY(loaded[0].duration >= 0); // Computed duration is positive
+    }
+
+    void test_database_load_start_after_end()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        // Manually insert start > end
+        QVERIFY(manager.lazyOpen());
+        QSqlQuery query(manager.db);
+        QDateTime now = QDateTime::currentDateTimeUtc();
+        QDateTime start = now;
+        QDateTime end = now.addSecs(-10); // End BEFORE start
+        
+        query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+                     "VALUES (0, 10000, :start_date, :start_time, :end_date, :end_time)");
+        query.bindValue(":start_date", start.date().toString(Qt::ISODate));
+        query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
+        query.bindValue(":end_date", end.date().toString(Qt::ISODate));
+        query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+        QVERIFY(query.exec());
+        manager.lazyClose();
+
+        // Load should SKIP invalid entry
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)0);
+    }
+
+    void test_database_load_invalid_enum_type()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        // Manually insert invalid type (valid are 0=Activity, 1=Pause)
+        QVERIFY(manager.lazyOpen());
+        QSqlQuery query(manager.db);
+        QDateTime now = QDateTime::currentDateTimeUtc();
+        QDateTime end = now.addSecs(10);
+        
+        query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+                     "VALUES (99, 10000, :start_date, :start_time, :end_date, :end_time)");
+        query.bindValue(":start_date", now.date().toString(Qt::ISODate));
+        query.bindValue(":start_time", now.time().toString("HH:mm:ss.zzz"));
+        query.bindValue(":end_date", end.date().toString(Qt::ISODate));
+        query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+        QVERIFY(query.exec());
+        manager.lazyClose();
+
+        // Load should skip invalid type
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)0);
+    }
+
+    void test_database_load_duration_mismatch_tolerance()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime start = QDateTime::currentDateTimeUtc();
+        QDateTime end = start.addMSecs(1000); // Actual duration: 1000ms
+        
+        // Insert with stored duration = 1003ms (within 5ms tolerance)
+        QVERIFY(manager.lazyOpen());
+        QSqlQuery query(manager.db);
+        query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+                     "VALUES (0, 1003, :start_date, :start_time, :end_date, :end_time)");
+        query.bindValue(":start_date", start.date().toString(Qt::ISODate));
+        query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
+        query.bindValue(":end_date", end.date().toString(Qt::ISODate));
+        query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+        QVERIFY(query.exec());
+        manager.lazyClose();
+
+        // Should load successfully (within tolerance)
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)1);
+        QCOMPARE(loaded[0].duration, (qint64)1000); // Uses computed value
+    }
+
+    // ==================== Timestamp Handling Tests ====================
+    
+    void test_database_timezone_roundtrip()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        // Create duration in local time
+        QDateTime localStart = QDateTime::currentDateTime();
+        QDateTime localEnd = localStart.addSecs(60);
+        
+        std::deque<TimeDuration> durations;
+        durations.emplace_back(DurationType::Activity, localStart, localEnd);
+        
+        // Save and reload
+        QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
+        auto loaded = manager.loadDurations();
+        
+        QCOMPARE(loaded.size(), (size_t)1);
+        // Times should be preserved (stored as UTC, loaded as local)
+        QCOMPARE(loaded[0].startTime.toString(Qt::ISODate), localStart.toString(Qt::ISODate));
+        QCOMPARE(loaded[0].endTime.toString(Qt::ISODate), localEnd.toString(Qt::ISODate));
+    }
+
+    void test_database_millisecond_precision()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        // Create timestamps with millisecond precision
+        QDateTime start = QDateTime::currentDateTime();
+        qint64 startMsec = start.toMSecsSinceEpoch();
+        startMsec = (startMsec / 1000) * 1000 + 123; // Set milliseconds to 123
+        start = QDateTime::fromMSecsSinceEpoch(startMsec);
+        
+        QDateTime end = start.addMSecs(4567); // Add 4567ms
+        
+        std::deque<TimeDuration> durations;
+        durations.emplace_back(DurationType::Activity, start, end);
+        
+        QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
+        auto loaded = manager.loadDurations();
+        
+        QCOMPARE(loaded.size(), (size_t)1);
+        // Milliseconds should be preserved
+        QCOMPARE(loaded[0].startTime.time().msec(), 123);
+        QCOMPARE(loaded[0].duration, (qint64)4567);
+    }
+
+    // ==================== Schema Validation Tests ====================
+    
+    void test_database_schema_validation_missing_start_date()
+    {
+        resetDatabaseFile();
+        
+        // Create database with old schema (missing start_date/start_time)
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "schema_test");
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        
+        QSqlQuery query(db);
+        QVERIFY(query.exec(
+            "CREATE TABLE durations ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "type INTEGER NOT NULL,"
+            "duration INTEGER NOT NULL,"
+            "end_date DATE NOT NULL,"
+            "end_time TEXT NOT NULL"
+            ")"
+        ));
+        db.close();
+        QSqlDatabase::removeDatabase("schema_test");
+        
+        // Now try to use DatabaseManager
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+        
+        // checkSchemaOnStartup should detect outdated schema
+        QVERIFY(!manager.checkSchemaOnStartup());
+    }
+
+    void test_database_schema_validation_fresh_database()
+    {
+        resetDatabaseFile();
+        
+        // No database file exists
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+        
+        // Should return true (will create fresh schema)
+        QVERIFY(manager.checkSchemaOnStartup());
+    }
+
+    // ==================== Backup System Tests ====================
+    
+    void test_database_backup_file_creation()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        // Create initial data
+        QDateTime now = QDateTime::currentDateTime();
+        std::deque<TimeDuration> durations;
+        durations.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-90));
+        
+        QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
+        
+        // Save again to trigger backup
+        durations.clear();
+        durations.emplace_back(DurationType::Pause, now.addSecs(-50), now.addSecs(-40));
+        QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
+        
+        // Check that backup files exist in qtest directory
+        QDir testDir(QCoreApplication::applicationDirPath());
+        QStringList backupFiles = testDir.entryList(QStringList() << "*.backup", QDir::Files);
+        QVERIFY(backupFiles.size() > 0);
+        
+        QStringList durationTxtFiles = testDir.entryList(QStringList() << "*.durations.txt", QDir::Files);
+        QVERIFY(durationTxtFiles.size() > 0);
+    }
+
+    void test_database_backup_preserves_data()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        // Create data
+        QDateTime now = QDateTime::currentDateTime();
+        std::deque<TimeDuration> original;
+        original.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-90));
+        original.emplace_back(DurationType::Pause, now.addSecs(-80), now.addSecs(-70));
+        
+        QVERIFY(manager.saveDurations(original, TransactionMode::Append));
+        
+        // Trigger backup with Replace mode
+        std::deque<TimeDuration> replacement;
+        replacement.emplace_back(DurationType::Activity, now.addSecs(-50), now.addSecs(-40));
+        QVERIFY(manager.saveDurations(replacement, TransactionMode::Replace));
+        
+        // Find the most recent backup file
+        QDir testDir(QCoreApplication::applicationDirPath());
+        QStringList backupFiles = testDir.entryList(QStringList() << "*.backup", QDir::Files, QDir::Time);
+        QVERIFY(backupFiles.size() > 0);
+        
+        QString backupPath = testDir.filePath(backupFiles.first());
+        
+        // Restore from backup and verify it has original data
+        QFile::remove(db_path_);
+        QVERIFY(QFile::copy(backupPath, db_path_));
+        
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)2); // Original had 2 entries
+    }
+
+    // ==================== Integration Tests ====================
+    
+    void test_integration_checkpoint_recovery_on_restart()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        QString settingsPath = createSettingsFile(tempDir.path(), 7);
+        
+        QDateTime start = QDateTime::currentDateTime();
+        
+        {
+            // First session: Start timer and save checkpoint
+            Settings settings(settingsPath);
+            TimeTracker tracker(settings);
+            
+            tracker.useTimerViaButton(Button::Start);
+            QTest::qWait(100);
+            
+            // Manually save checkpoint
+            tracker.saveCheckpointInternal();
+            QVERIFY(tracker.current_checkpoint_id_ != -1);
+            
+            // Simulate crash (tracker destroyed without stopping)
+        }
+        
+        {
+            // Second session: Load from database (simulates app restart)
+            Settings settings(settingsPath);
+            DatabaseManager db(settings);
+            
+            auto loaded = db.loadDurations();
+            QCOMPARE(loaded.size(), (size_t)1); // Checkpoint recovered
+            QCOMPARE(loaded[0].type, DurationType::Activity);
+        }
+    }
+
+    void test_integration_memory_db_consistency()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        TimeTracker tracker(settings);
+
+        // Start -> Activity for 50ms
+        tracker.useTimerViaButton(Button::Start);
+        QTest::qWait(50);
+        
+        // Pause
+        tracker.useTimerViaButton(Button::Pause);
+        auto memoryDurations = tracker.getCurrentDurations();
+        QVERIFY(memoryDurations.size() >= 1);
+        
+        // Resume -> Activity for 50ms
+        tracker.useTimerViaButton(Button::Start);
+        QTest::qWait(50);
+        
+        // Save checkpoint
+        tracker.saveCheckpointInternal();
+        QVERIFY(tracker.current_checkpoint_id_ != -1);
+        
+        // Stop
+        tracker.useTimerViaButton(Button::Stop);
+        
+        // Load from DB
+        DatabaseManager db(settings);
+        auto dbDurations = db.loadDurations();
+        
+        // Total durations should match (memory + checkpoint)
+        qint64 memoryTotal = sumDurations(memoryDurations, DurationType::Activity) + 
+                            sumDurations(memoryDurations, DurationType::Pause);
+        qint64 dbTotal = sumDurations(dbDurations, DurationType::Activity) +
+                        sumDurations(dbDurations, DurationType::Pause);
+        
+        // Allow small tolerance for timing differences
+        QVERIFY(qAbs(memoryTotal - dbTotal) < 200);
+    }
+
+    void test_integration_retention_cleanup_preserves_current()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 2)); // Keep 2 days
+        DatabaseManager manager(settings);
+
+        QDateTime now = QDateTime::currentDateTimeUtc();
+        
+        // Insert data from 5 days ago (should be deleted)
+        std::deque<TimeDuration> old;
+        old.emplace_back(DurationType::Activity, now.addDays(-5), now.addDays(-5).addSecs(60));
+        QVERIFY(manager.saveDurations(old, TransactionMode::Append));
+        
+        // Insert data from today (should be kept)
+        std::deque<TimeDuration> current;
+        current.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-90));
+        QVERIFY(manager.saveDurations(current, TransactionMode::Append));
+        
+        // Force cleanup by reopening database
+        DatabaseManager manager2(settings);
+        
+        auto loaded = manager2.loadDurations();
+        QVERIFY(loaded.size() >= 1); // Current day preserved
+        
+        // Verify old entries are gone
+        bool hasOldEntry = false;
+        for (const auto& d : loaded) {
+            if (d.endTime.date() == now.addDays(-5).date()) {
+                hasOldEntry = true;
+                break;
+            }
+        }
+        QVERIFY(!hasOldEntry);
+    }
+
+    void test_integration_duplicate_prevention()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        QDateTime start = QDateTime::currentDateTime();
+        QDateTime end = start.addSecs(10);
+        
+        // Insert same duration twice using saveDurations
+        std::deque<TimeDuration> durations;
+        durations.emplace_back(DurationType::Activity, start, end);
+        
+        QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
+        QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
+        
+        // Load - due to UNIQUE constraint, should have only 1 entry
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)1);
+    }
+
+    void test_integration_empty_database_operations()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        // Operations on empty database should succeed
+        QVERIFY(manager.saveDurations({}, TransactionMode::Append));
+        auto loaded = manager.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)0);
+        
+        QVERIFY(!manager.hasEntriesForDate(QDate::currentDate()));
+        
+        std::deque<TimeDuration> empty;
+        QVERIFY(manager.updateDurationsByStartTime(empty));
+    }
+
+    void test_integration_backpause_db_update()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        TimeTracker tracker(settings);
+
+        // Start activity
+        tracker.useTimerViaButton(Button::Start);
+        QTest::qWait(100);
+        
+        // Save checkpoint
+        tracker.saveCheckpointInternal();
+        long long checkpointId = tracker.current_checkpoint_id_;
+        QVERIFY(checkpointId != -1);
+        
+        // Simulate lock
+        tracker.useTimerViaLockEvent(LockEvent::Lock);
+        
+        // Checkpoint ID should still be valid (lock doesn't reset it)
+        QCOMPARE(tracker.current_checkpoint_id_, checkpointId);
+        
+        // Simulate long ongoing lock (triggers backpause)
+        tracker.useTimerViaLockEvent(LockEvent::LongOngoingLock);
+        
+        // Verify checkpoint ID was reset by backpause
+        QCOMPARE(tracker.current_checkpoint_id_, (long long)-1);
+        
+        // Verify durations were updated in DB
+        DatabaseManager db(settings);
+        auto loaded = db.loadDurations();
+        QVERIFY(loaded.size() >= 1);
+    }
+
     void cleanup()
     {
     }
