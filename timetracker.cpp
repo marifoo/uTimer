@@ -429,6 +429,20 @@ std::deque<TimeDuration> TimeTracker::getDurationsHistory()
     return db_.loadDurations();
 }
 
+std::optional<TimeDuration> TimeTracker::getOngoingDuration() const
+{
+    QMutexLocker locker(&mutex_);
+    if (mode_ == Mode::None) {
+        return std::nullopt;
+    }
+    QDateTime now = QDateTime::currentDateTime();
+    if (!segment_start_time_.isValid() || segment_start_time_ >= now) {
+        return std::nullopt;
+    }
+    DurationType type = (mode_ == Mode::Activity) ? DurationType::Activity : DurationType::Pause;
+    return TimeDuration(type, segment_start_time_, now);
+}
+
 bool TimeTracker::appendDurationsToDB()
 {
     if (durations_.empty())

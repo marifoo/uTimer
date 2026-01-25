@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QMutex>
 #include <QTimer>
+#include <optional>
 #include <deque>
 #include <memory>
 #include "settings.h"
@@ -50,6 +51,7 @@ public:
     const std::deque<TimeDuration>& getCurrentDurations() const;
     void setCurrentDurations(const std::deque<TimeDuration>& newDurations);
     std::deque<TimeDuration> getDurationsHistory();
+    std::optional<TimeDuration> getOngoingDuration() const;
     void setDurationType(size_t idx, DurationType type);
     bool appendDurationsToDB();
     bool updateDurationsInDB();

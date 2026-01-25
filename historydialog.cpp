@@ -5,8 +5,8 @@
  * - Transactional Editing: All changes (type toggling, splitting) are performed
  *   on a local copy (`pendingChanges_`). The actual database and TimeTracker
  *   are only updated when the user clicks "OK".
- * - Paging Model: Data is grouped by Date (Pages). Page 0 is always the
- *   "Current Session" (in-memory), while subsequent pages are historical (DB).
+ * - Paging Model: Data is grouped by Date (Pages). Page 0 is always "Today"
+ *   (in-memory + today's DB + ongoing), while subsequent pages are historical (DB).
  * - Safety: Checkpoints are paused while this dialog is open to prevent
  *   database race conditions or state inconsistencies during editing.
  */
@@ -65,34 +65,66 @@ HistoryDialog::HistoryDialog(TimeTracker& timetracker, const Settings& settings,
  * Organizes raw time entries into a paged structure for display.
  *
  * Structure:
- * - Page 0: The "Active" session (currently in memory).
+ * - Page 0: "Today" (in-memory + today's DB + ongoing).
  * - Page 1..N: Historical sessions loaded from the database, grouped by Date.
  *
- * This separation allows the user to see what they are doing 'today' vs
- * what has been permanently archived.
+ * This keeps all sessions for the current day in one place, while older days
+ * remain separate.
  */
 void HistoryDialog::createPages()
 {
     auto currentDurations = timetracker_.getCurrentDurations();
     auto historyDurations = timetracker_.getDurationsHistory();
+    auto ongoingDuration = timetracker_.getOngoingDuration();
+    const QDate today = QDate::currentDate();
+    std::set<QString> currentKeys;
+    for (const auto& d : currentDurations) {
+        currentKeys.insert(QString::number(d.startTime.toMSecsSinceEpoch()) + "|" + QString::number(static_cast<int>(d.type)));
+    }
+    if (ongoingDuration.has_value()) {
+        currentKeys.insert(QString::number(ongoingDuration->startTime.toMSecsSinceEpoch()) + "|" + QString::number(static_cast<int>(ongoingDuration->type)));
+    }
 
     // Group historical durations by date
     QMap<QDate, std::deque<TimeDuration>> historyByDay;
     for (const auto& d : historyDurations) {
+        QString key = QString::number(d.startTime.toMSecsSinceEpoch()) + "|" + QString::number(static_cast<int>(d.type));
+        if (currentKeys.find(key) != currentKeys.end()) {
+            continue;
+        }
         historyByDay[d.endTime.date()].push_back(d);
     }
     QList<QDate> historyDates = historyByDay.keys();
     std::sort(historyDates.begin(), historyDates.end(), std::greater<QDate>()); // Most recent first
 
-    // Add current session as first page
+    std::deque<TimeDuration> currentPageDurations;
+    std::vector<RowOrigin> currentPageOrigins;
+    currentPageDurations.insert(currentPageDurations.end(), currentDurations.begin(), currentDurations.end());
+    currentPageOrigins.insert(currentPageOrigins.end(), currentDurations.size(), RowOrigin::CurrentMemory);
+
+    auto todayIt = historyByDay.find(today);
+    if (todayIt != historyByDay.end()) {
+        currentPageDurations.insert(currentPageDurations.end(), todayIt->begin(), todayIt->end());
+        currentPageOrigins.insert(currentPageOrigins.end(), todayIt->size(), RowOrigin::CurrentDatabase);
+    }
+
+    if (ongoingDuration.has_value()) {
+        currentPageDurations.push_back(ongoingDuration.value());
+        currentPageOrigins.push_back(RowOrigin::Ongoing);
+    }
+
+    // Add today page (current session + today's DB + ongoing)
     pages_.push_back({
-        QString("Current Session (entries: ") + QString::number(currentDurations.size()) + QString(")"),
-        currentDurations,
+        QString("Today (entries: ") + QString::number(currentPageDurations.size()) + QString(")"),
+        currentPageDurations,
         true
     });
 
     // Add historical pages (one per day)
     for (const QDate& date : historyDates) {
+        if (date == today) {
+            continue;
+        }
         pages_.push_back({
             date.toString("yyyy-MM-dd") + QString(" (entries: ") + QString::number(historyByDay[date].size()) + QString(")"),
             historyByDay[date],
@@ -102,8 +134,14 @@ void HistoryDialog::createPages()
 
     // Initialize working copy for pending changes
     pendingChanges_.resize(pages_.size());
+    rowOrigins_.resize(pages_.size());
     for (size_t i = 0; i < pages_.size(); ++i) {
         pendingChanges_[i] = pages_[i].durations;
+        if (i == 0) {
+            rowOrigins_[i] = currentPageOrigins;
+        } else {
+            rowOrigins_[i].assign(pages_[i].durations.size(), RowOrigin::HistoricalDatabase);
+        }
     }
 }
 
@@ -235,11 +273,18 @@ void HistoryDialog::updateTable(uint idx)
     // Populate table rows
     for (int row = 0; row < int(pendingChanges_[idx].size()); ++row) {
         const auto& d = pendingChanges_[idx][row];
+        bool isOngoingRow = (idx < rowOrigins_.size()
+                             && row < static_cast<int>(rowOrigins_[idx].size())
+                             && rowOrigins_[idx][row] == RowOrigin::Ongoing);
         QString typeStr = d.type == DurationType::Activity ? "Activity  " : "Pause  ";
         QTableWidgetItem* typeItem = new QTableWidgetItem(typeStr);
         // Use stored startTime directly instead of computing from end - duration
         QTableWidgetItem* startEndItem = new QTableWidgetItem(d.startTime.toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss"));
-        QTableWidgetItem* durationItem = new QTableWidgetItem(convMSecToTimeStr(d.duration) + "  ");
+        QString durationText = convMSecToTimeStr(d.duration) + "  ";
+        if (isOngoingRow) {
+            durationText += "(Running)";
+        }
+        QTableWidgetItem* durationItem = new QTableWidgetItem(durationText);
         table_->setItem(row, 0, typeItem);
         table_->setItem(row, 1, startEndItem);
         table_->setItem(row, 2, durationItem);
@@ -247,10 +292,16 @@ void HistoryDialog::updateTable(uint idx)
         // Add checkbox for Activity/Pause toggle
         QCheckBox* box = new QCheckBox(table_);
         box->setChecked(d.type == DurationType::Activity);
+        box->setEnabled(!isOngoingRow);
         table_->setCellWidget(row, 3, box);
 
         // Handle checkbox state changes with proper validation
         connect(box, &QCheckBox::stateChanged, this, [this, capturedPageIdx = idx, capturedRow = row](int state) {
+            if (capturedPageIdx < rowOrigins_.size()
+                && capturedRow < static_cast<int>(rowOrigins_[capturedPageIdx].size())
+                && rowOrigins_[capturedPageIdx][capturedRow] == RowOrigin::Ongoing) {
+                return;
+            }
             // Reject stale events from checkboxes on other pages
             if (capturedPageIdx != pageIndex_) {
                 return;
@@ -338,16 +389,29 @@ void HistoryDialog::saveChanges()
     }
 
     // Update TimeTracker's current session (in-memory only)
-    // Collect ONLY historical durations for DB
+    // Collect historical durations + current-day finished DB rows for save
     std::deque<TimeDuration> historyDurations;
 
     for (size_t i = 0; i < pages_.size(); ++i) {
         if (pages_[i].isCurrent) {
-            // Update in-memory current session - NOT saved to DB yet
-            timetracker_.setCurrentDurations(pages_[i].durations);
+            std::deque<TimeDuration> currentMemoryDurations;
+            std::deque<TimeDuration> currentDbDurations;
+            for (size_t row = 0; row < pages_[i].durations.size(); ++row) {
+                if (i < rowOrigins_.size() && row < rowOrigins_[i].size()) {
+                    if (rowOrigins_[i][row] == RowOrigin::CurrentMemory) {
+                        currentMemoryDurations.push_back(pages_[i].durations[row]);
+                    } else if (rowOrigins_[i][row] == RowOrigin::CurrentDatabase) {
+                        currentDbDurations.push_back(pages_[i].durations[row]);
+                    }
+                }
+            }
+            timetracker_.setCurrentDurations(currentMemoryDurations);
             if (settings_.logToFile()) {
                 Logger::Log("[HISTORY] Updated TimeTracker current session (in-memory)");
             }
+            historyDurations.insert(historyDurations.end(),
+                                   currentDbDurations.begin(),
+                                   currentDbDurations.end());
         } else {
             // Collect historical durations for DB save
             historyDurations.insert(historyDurations.end(),
@@ -356,7 +420,12 @@ void HistoryDialog::saveChanges()
         }
     }
 
-    // Save ONLY historical durations to DB
+    // Save historical + current-day DB durations to DB
+    auto ongoingDuration = timetracker_.getOngoingDuration();
+    if (ongoingDuration.has_value()) {
+        historyDurations.push_back(ongoingDuration.value());
+    }
+
     if (!historyDurations.empty()) {
         if (settings_.logToFile()) {
             Logger::Log(QString("[HISTORY] Saving %1 historical durations to DB").arg(historyDurations.size()));
@@ -382,7 +451,14 @@ void HistoryDialog::showContextMenu(const QPoint& pos)
     int row = table_->rowAt(pos.y());
     if (row < 0) return;
     
+    if (pageIndex_ < rowOrigins_.size()
+        && row < static_cast<int>(rowOrigins_[pageIndex_].size())
+        && rowOrigins_[pageIndex_][row] == RowOrigin::Ongoing) {
+        return;
+    }
+
     contextMenuRow_ = row;
+    contextMenuPage_ = static_cast<int>(pageIndex_);
     QMenu menu(this);
     QAction* splitAction = menu.addAction("Split..");
     connect(splitAction, &QAction::triggered, this, &HistoryDialog::onSplitRow);
@@ -409,12 +485,21 @@ void HistoryDialog::onSplitRow()
     int row = contextMenuRow_;
     contextMenuRow_ = -1;
 
-    uint idx = pageIndex_;
+    if (contextMenuPage_ < 0) {
+        return;
+    }
+    uint idx = static_cast<uint>(contextMenuPage_);
+    contextMenuPage_ = -1;
 
     if (idx >= pendingChanges_.size() || row >= static_cast<int>(pendingChanges_[idx].size())) {
         if (settings_.logToFile()) {
             Logger::Log(QString("[HISTORY] Error: onSplitRow: Invalid indices - page: %1, row: %2").arg(idx).arg(row));
         }
+        return;
+    }
+    if (idx < rowOrigins_.size()
+        && row < static_cast<int>(rowOrigins_[idx].size())
+        && rowOrigins_[idx][row] == RowOrigin::Ongoing) {
         return;
     }
 
@@ -618,6 +703,7 @@ HistoryDialog::~HistoryDialog() {
     }
 
     pendingChanges_.clear();
+    rowOrigins_.clear();
 
     // Resume checkpoints now that dialog is closed
     timetracker_.resumeCheckpoints();

@@ -23,6 +23,7 @@ class HistoryDialog : public QDialog
     Q_OBJECT
 
 private:
+    enum class RowOrigin {CurrentMemory, CurrentDatabase, HistoricalDatabase, Ongoing};
     struct Page {
         QString title;
         std::deque<TimeDuration> durations;
@@ -33,8 +34,10 @@ private:
     const Settings& settings_;
     std::vector<Page> pages_;
     std::vector<std::deque<TimeDuration>> pendingChanges_; // Store the entire edited page for each page index
+    std::vector<std::vector<RowOrigin>> rowOrigins_;
     uint pageIndex_;
     int contextMenuRow_ = -1;
+    int contextMenuPage_ = -1;
 
     QLabel* pageLabel_;
     QTableWidget* table_;
