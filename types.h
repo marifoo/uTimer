@@ -12,10 +12,12 @@ enum class DurationType { Activity, Pause };
 struct TimeDuration {
     DurationType type;
     qint64 duration;
+    QDateTime startTime;
     QDateTime endTime;
 
-    TimeDuration(DurationType type, qint64 dur, QDateTime end)
-        : type(type), duration(dur), endTime(end) {
+    // Primary constructor: explicit start and end times
+    TimeDuration(DurationType type, QDateTime start, QDateTime end)
+        : type(type), duration(start.msecsTo(end)), startTime(start), endTime(end) {
     }
 };
 

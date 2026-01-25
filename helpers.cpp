@@ -45,13 +45,16 @@ QString convTimeStrToDurationStr(const QString &time_str)
  * database and slows down history loading.
  *
  * Algorithm:
- * 1. Sorts entries chronologically to ensure deterministic processing.
+ * 1. Sorts entries chronologically using stored startTime fields.
  * 2. Merges adjacent entries of the same type (Activity/Pause) if the gap is negligible.
  * 3. Removes near-duplicate entries (overlapping or identical time ranges).
  *
  * Result:
  * A list of contiguous, non-overlapping segments that represent the same
  * timeline but with significantly fewer discrete objects.
+ *
+ * Note: After any merge, all three fields (startTime, endTime, duration) are updated
+ * to maintain consistency.
  */
 void cleanDurations(std::deque<TimeDuration>* pDurations)
 {
@@ -64,8 +67,8 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 
 	// Ensure chronological order by start time, then end time. This makes merges deterministic.
 	std::sort(durations.begin(), durations.end(), [](const TimeDuration& a, const TimeDuration& b) {
-		const qint64 a_start = a.endTime.toMSecsSinceEpoch() - a.duration;
-		const qint64 b_start = b.endTime.toMSecsSinceEpoch() - b.duration;
+		const qint64 a_start = a.startTime.toMSecsSinceEpoch();
+		const qint64 b_start = b.startTime.toMSecsSinceEpoch();
 		if (a_start != b_start) return a_start < b_start;
 		const qint64 a_end = a.endTime.toMSecsSinceEpoch();
 		const qint64 b_end = b.endTime.toMSecsSinceEpoch();
@@ -79,8 +82,8 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 
 		// Merge consecutive durations of the same type that are close in time
 		if (prevIt->type == it->type) {
-			const qint64 prev_start = prevIt->endTime.toMSecsSinceEpoch() - prevIt->duration;
-			const qint64 it_start = it->endTime.toMSecsSinceEpoch() - it->duration;
+			const qint64 prev_start = prevIt->startTime.toMSecsSinceEpoch();
+			const qint64 it_start = it->startTime.toMSecsSinceEpoch();
 			const qint64 prev_end = prevIt->endTime.toMSecsSinceEpoch();
 			const qint64 it_end = it->endTime.toMSecsSinceEpoch();
 
@@ -94,8 +97,9 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 				continue;
 			}
 
-			// Current entry starts before previous (shorter) entry -> delete
+			// Current entry starts before previous (shorter) entry -> keep current's fields
 			if (it_start < prev_start && prev_end <= it_end) {
+				prevIt->startTime = it->startTime;
 				prevIt->endTime = it->endTime;
 				prevIt->duration = it->duration;
 				it = durations.erase(it);
@@ -104,6 +108,7 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 
 			// Current entry starts before previous (longer) entry -> join
 			if (it_start < prev_start && it_end < prev_end && it_start < prev_end) {
+				prevIt->startTime = it->startTime;
 				prevIt->duration = prev_end - it_start;
 				it = durations.erase(it);
 				continue;
@@ -125,16 +130,17 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 
 			// Merge adjacent (but disjoint) entries of same type with small gaps (less than 500ms)
 			if (gap >= 0 && gap < 500) {
-				prevIt->duration += it->duration + gap;
+				// Keep prev's startTime, use it's endTime, recompute duration
 				prevIt->endTime = it->endTime;
+				prevIt->duration = prevIt->startTime.msecsTo(prevIt->endTime);
 				it = durations.erase(it);
 				continue;
 			}
 
 			// Slightly overlapping entries shall be merged as well (less than 100ms overlap)
 			if (gap < 0 && std::abs(gap) < 100) {
-				prevIt->duration = it_end - prev_start;
 				prevIt->endTime = it->endTime;
+				prevIt->duration = prevIt->startTime.msecsTo(prevIt->endTime);
 				it = durations.erase(it);
 				continue;
 			}

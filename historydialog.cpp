@@ -222,8 +222,9 @@ void HistoryDialog::updateTable(uint idx)
         for (size_t i = 0; i < pendingChanges_[idx].size(); ++i) {
             const auto& pending = pendingChanges_[idx][i];
             const auto& original = pages_[idx].durations[i];
-            if (pending.type != original.type || 
-                pending.duration != original.duration || 
+            if (pending.type != original.type ||
+                pending.duration != original.duration ||
+                pending.startTime != original.startTime ||
                 pending.endTime != original.endTime) {
                 pageModified = true;
                 break;
@@ -236,7 +237,8 @@ void HistoryDialog::updateTable(uint idx)
         const auto& d = pendingChanges_[idx][row];
         QString typeStr = d.type == DurationType::Activity ? "Activity  " : "Pause  ";
         QTableWidgetItem* typeItem = new QTableWidgetItem(typeStr);
-        QTableWidgetItem* startEndItem = new QTableWidgetItem(d.endTime.addMSecs(-d.duration).toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss"));
+        // Use stored startTime directly instead of computing from end - duration
+        QTableWidgetItem* startEndItem = new QTableWidgetItem(d.startTime.toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss"));
         QTableWidgetItem* durationItem = new QTableWidgetItem(convMSecToTimeStr(d.duration) + "  ");
         table_->setItem(row, 0, typeItem);
         table_->setItem(row, 1, startEndItem);
@@ -418,7 +420,8 @@ void HistoryDialog::onSplitRow()
 
     TimeDuration& duration = pendingChanges_[idx][row];
     qint64 originalDuration = duration.duration;
-    QDateTime start = duration.endTime.addMSecs(-originalDuration);
+    // Use stored startTime directly instead of computing from end - duration
+    QDateTime start = duration.startTime;
     QDateTime end = duration.endTime;
 
     // Check if duration is long enough to split meaningfully (at least 2 seconds)
@@ -463,8 +466,9 @@ void HistoryDialog::onSplitRow()
         DurationType firstType = dlg.getFirstSegmentType();
         DurationType secondType = dlg.getSecondSegmentType();
 
-        TimeDuration first(firstType, firstDuration, splitTime);
-        TimeDuration second(secondType, secondDuration, end);
+        // Create split segments with explicit start/end times
+        TimeDuration first(firstType, start, splitTime);
+        TimeDuration second(secondType, splitTime, end);
 
         // Replace original duration with two new segments using index-based operations
         // (Avoid iterator invalidation issues with deque erase/insert)

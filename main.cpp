@@ -2,6 +2,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QEvent>
+#include <QMessageBox>
 #include <QSettings>
 #include <QStyleFactory>
 #include <QTimer>
@@ -101,6 +102,17 @@ int main(int argc, char *argv[])
 	Settings settings(QDir(QCoreApplication::applicationDirPath()).filePath("user-settings.ini"));
 	LockStateWatcher lockstate_watcher(settings);
 	TimeTracker time_tracker(settings);
+
+	// Check database schema before starting the UI
+	if (!time_tracker.checkDatabaseSchema()) {
+		QMessageBox::critical(nullptr, "Database Error",
+			"The database schema is outdated and incompatible with this version.\n\n"
+			"Please delete or rename the following file and restart:\n"
+			+ QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.sqlite") +
+			"\n\nNote: This will delete your history data.");
+		return 1;
+	}
+
 	MainWin main_win(settings, time_tracker);
 
 #ifdef Q_OS_LINUX

@@ -18,8 +18,9 @@ public:
     bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode);
     std::deque<TimeDuration> loadDurations();
     bool hasEntriesForDate(const QDate& date);
-    bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& endTime, long long& checkpointId);
+    bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, long long& checkpointId);
     bool updateDurationsByStartTime(const std::deque<TimeDuration>& durations);
+    bool checkSchemaOnStartup(); // Returns true if schema is valid, false if outdated
 
 private:
     QSqlDatabase db;
@@ -27,8 +28,8 @@ private:
     const Settings& settings_;
     bool lazyOpen();
     void lazyClose();
+    bool validateSchema();
     bool createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
-    bool updateDurationByStartTime(DurationType type, qint64 duration, const QDateTime& endTime, int& existingId);
 };
 
 #endif // DATABASEMANAGER_H

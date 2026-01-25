@@ -32,12 +32,13 @@ private:
     QTimer checkpointTimer_;  // Timer for periodic checkpoint saving
     long long current_checkpoint_id_; // ID of the current database entry being updated by checkpoints
     qint64 checkpoint_interval_msec_; // Checkpoint interval (0 = disabled)
+    QDateTime segment_start_time_; // Wall-clock time when current segment started (set in startTimer())
 
     void startTimer();
     void stopTimer();
     void pauseTimer();
     void backpauseTimer();
-    void addDurationWithMidnightSplit(DurationType type, qint64 duration, const QDateTime& endTime);
+    void addDurationWithMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime);
     void saveCheckpointInternal();  // Internal checkpoint save (called when mutex already held)
 
 public:
@@ -56,6 +57,7 @@ public:
     bool hasEntriesForToday();
     void pauseCheckpoints();
     void resumeCheckpoints();
+    bool checkDatabaseSchema(); // Returns true if DB schema is valid, false if outdated
 
 public slots:
     void useTimerViaButton(Button button);

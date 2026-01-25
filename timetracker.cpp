@@ -66,13 +66,14 @@ void TimeTracker::startTimer()
         qint64 t_pause = timer_.restart();
         if (t_pause > 0) {
             if (durations_.empty() || durations_.back().type != DurationType::Pause) {
-                addDurationWithMidnightSplit(DurationType::Pause, t_pause, now);
+                addDurationWithMidnightSplit(DurationType::Pause, segment_start_time_, now);
             } else {
                 durations_.back().endTime = now;
-                durations_.back().duration += t_pause;
+                durations_.back().duration = durations_.back().startTime.msecsTo(now);
             }
         }
         mode_ = Mode::Activity;
+        segment_start_time_ = now; // Set start time for new Activity segment
         current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment
         if (checkpoint_interval_msec_ > 0) {
             checkpointTimer_.start(); // Resume periodic checkpoint saving
@@ -127,17 +128,12 @@ void TimeTracker::startTimer()
         has_unsaved_data_ = false;
         if (shouldAddBootTime) {
             QDateTime now = QDateTime::currentDateTime();
-            try {
-                durations_.emplace_back(TimeDuration(DurationType::Activity, static_cast<qint64>(boot_time_sec) * 1000, now));
-            } catch (const std::bad_alloc&) {
-                if (settings_.logToFile()) {
-                    Logger::Log("[CRITICAL] Memory allocation failed adding boot time - continuing without boot time");
-                }
-                // Continue without boot time rather than failing to start
-            }
+            QDateTime bootStart = now.addMSecs(-static_cast<qint64>(boot_time_sec) * 1000);
+            addDurationWithMidnightSplit(DurationType::Activity, bootStart, now);
         }
         timer_.start();
         mode_ = Mode::Activity;
+        segment_start_time_ = QDateTime::currentDateTime(); // Set start time for new Activity segment
         current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment
         if (checkpoint_interval_msec_ > 0) {
             checkpointTimer_.start(); // Start periodic checkpoint saving
@@ -165,9 +161,10 @@ void TimeTracker::pauseTimer()
     }
     // Capture timestamp before restart to minimize precision loss
     QDateTime now = QDateTime::currentDateTime();
-    qint64 t_active = timer_.restart();
-    addDurationWithMidnightSplit(DurationType::Activity, t_active, now);
+    timer_.restart();
+    addDurationWithMidnightSplit(DurationType::Activity, segment_start_time_, now);
     mode_ = Mode::Pause;
+    segment_start_time_ = now; // Set start time for new Pause segment
 
     // Sync checkpoint to DB before resetting ID (ensures Activity duration is finalized)
     updateDurationsInDB();
@@ -184,8 +181,8 @@ void TimeTracker::pauseTimer()
  *
  * Called when PC has been locked longer than the backpause threshold.
  * Splits current elapsed time into two segments:
- *   1. Activity segment: (elapsed - threshold) milliseconds, ending at (now - threshold)
- *   2. Pause segment: threshold milliseconds, ending at now
+ *   1. Activity segment: startTime = segment_start_time_, endTime = now - backpause
+ *   2. Pause segment: startTime = now - backpause, endTime = now
  *
  * This corrects any checkpoint data that was saved during the lock period,
  * since checkpoints are suspended while locked but the time before lock detection
@@ -229,18 +226,27 @@ void TimeTracker::backpauseTimer()
 
     // Capture timestamp before restart to minimize precision loss
     QDateTime now = QDateTime::currentDateTime();
-    qint64 elapsed = timer_.restart();
-    qint64 t_active = elapsed - backpause_msec;
-    if (t_active < 0) {
-        backpause_msec = elapsed;
-        t_active = 0;
-    }
+    timer_.restart();
+
+    // Calculate Activity end time (backpause boundary)
     QDateTime activity_end = now.addMSecs(-backpause_msec);
-    if (t_active > 0) {
-        addDurationWithMidnightSplit(DurationType::Activity, t_active, activity_end);
+
+    // Ensure activity_end is not before segment_start_time_
+    if (activity_end < segment_start_time_) {
+        activity_end = segment_start_time_;
     }
-    addDurationWithMidnightSplit(DurationType::Pause, backpause_msec, now);
+
+    // Activity segment: segment_start_time_ to activity_end
+    if (activity_end > segment_start_time_) {
+        addDurationWithMidnightSplit(DurationType::Activity, segment_start_time_, activity_end);
+    }
+
+    // Pause segment: activity_end to now
+    QDateTime pause_start = activity_end;
+    addDurationWithMidnightSplit(DurationType::Pause, pause_start, now);
+
     mode_ = Mode::Pause;
+    segment_start_time_ = now; // Reset for potential future resume
     current_checkpoint_id_ = -1; // Reset checkpoint ID for new segment (pause)
 
     // Immediately sync to DB to correct the Activity checkpoint we just truncated
@@ -275,16 +281,15 @@ void TimeTracker::stopTimer()
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Stopping from Pause - D=" + QString::number(durations_.size()));
         }
-        qint64 t_pause = timer_.elapsed();
-        addDurationWithMidnightSplit(DurationType::Pause, t_pause, now);
+        addDurationWithMidnightSplit(DurationType::Pause, segment_start_time_, now);
     } else if (mode_ == Mode::Activity) {
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Stopping from Activity - D=" + QString::number(durations_.size()));
         }
-        qint64 t_active = timer_.elapsed();
-        addDurationWithMidnightSplit(DurationType::Activity, t_active, now);
+        addDurationWithMidnightSplit(DurationType::Activity, segment_start_time_, now);
     }
     mode_ = Mode::None;
+    segment_start_time_ = QDateTime(); // Reset segment start time
     current_checkpoint_id_ = -1; // Reset ID
     checkpointTimer_.stop(); // Stop periodic checkpoint saving when timer is stopped
     if (settings_.logToFile()) {
@@ -478,16 +483,15 @@ bool TimeTracker::hasEntriesForToday()
  * This ensures each day's data is self-contained and can be saved independently.
  * Memory allocation failures trigger emergency saves to prevent data loss.
  */
-void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duration, const QDateTime& endTime)
+void TimeTracker::addDurationWithMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime)
 {
+    qint64 duration = startTime.msecsTo(endTime);
     if (duration <= 0) {
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Ignoring non-positive duration");
         }
         return;
     }
-
-    QDateTime startTime = endTime.addMSecs(-duration);
 
     // Check if midnight was crossed (this should rarely happen due to auto-stop/restart)
     if (startTime.date() != endTime.date()) {
@@ -501,12 +505,9 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
         QDateTime endOfStartDay(startTime.date(), QTime(23, 59, 59, 999));
         QDateTime startOfNewDay(endTime.date(), QTime(0, 0, 0, 0));
 
-        qint64 beforeMidnight = startTime.msecsTo(endOfStartDay) + 1;
-        qint64 afterMidnight = startOfNewDay.msecsTo(endTime);
-
-        if (beforeMidnight > 0) {
+        if (startTime < endOfStartDay) {
             try {
-                durations_.emplace_back(TimeDuration(type, beforeMidnight, endOfStartDay));
+                durations_.emplace_back(TimeDuration(type, startTime, endOfStartDay));
             } catch (const std::bad_alloc&) {
                 if (settings_.logToFile()) {
                     Logger::Log("[CRITICAL] Memory allocation failed in addDurationWithMidnightSplit (before midnight) - attempting emergency save");
@@ -518,7 +519,7 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
             if (settings_.logToFile()) {
                 Logger::Log(QString("[DEBUG] Added duration before midnight (%1, %2ms)")
                     .arg(type == DurationType::Activity ? "Activity" : "Pause")
-                    .arg(beforeMidnight));
+                    .arg(startTime.msecsTo(endOfStartDay)));
             }
         }
 
@@ -537,9 +538,9 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
             // Data remains in durations_ and will be saved on next stopTimer() call
         }
 
-        if (afterMidnight > 0) {
+        if (startOfNewDay < endTime) {
             try {
-                durations_.emplace_back(TimeDuration(type, afterMidnight, endTime));
+                durations_.emplace_back(TimeDuration(type, startOfNewDay, endTime));
             } catch (const std::bad_alloc&) {
                 if (settings_.logToFile()) {
                     Logger::Log("[CRITICAL] Memory allocation failed in addDurationWithMidnightSplit (after midnight) - data may be incomplete");
@@ -547,10 +548,12 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
                 has_unsaved_data_ = true;
                 return;
             }
+            // Reset segment_start_time_ to start of new day after midnight split
+            segment_start_time_ = startOfNewDay;
             if (settings_.logToFile()) {
                 Logger::Log(QString("[DEBUG] Added duration after midnight (%1, %2ms)")
                     .arg(type == DurationType::Activity ? "Activity" : "Pause")
-                    .arg(afterMidnight));
+                    .arg(startOfNewDay.msecsTo(endTime)));
             }
         }
         return;
@@ -558,7 +561,7 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, qint64 duratio
 
     // Normal case: duration does not cross midnight
     try {
-        durations_.emplace_back(TimeDuration(type, duration, endTime));
+        durations_.emplace_back(TimeDuration(type, startTime, endTime));
     } catch (const std::bad_alloc&) {
         if (settings_.logToFile()) {
             Logger::Log("[CRITICAL] Memory allocation failed in addDurationWithMidnightSplit - attempting emergency save");
@@ -624,8 +627,8 @@ void TimeTracker::saveCheckpointInternal()
     QDateTime now = QDateTime::currentDateTime();
 
     // Save checkpoint to database
-    // Pass current_checkpoint_id_ to allow updating the specific row for this segment
-    bool success = db_.saveCheckpoint(type, elapsed, now, current_checkpoint_id_);
+    // Pass segment_start_time_ and current_checkpoint_id_ to allow updating the specific row for this segment
+    bool success = db_.saveCheckpoint(type, elapsed, segment_start_time_, now, current_checkpoint_id_);
 
     if (success) {
         if (settings_.logToFile()) {
@@ -655,4 +658,9 @@ void TimeTracker::resumeCheckpoints()
     if (settings_.logToFile()) {
         Logger::Log("[CHECKPOINT] Checkpoints resumed");
     }
+}
+
+bool TimeTracker::checkDatabaseSchema()
+{
+    return db_.checkSchemaOnStartup();
 }

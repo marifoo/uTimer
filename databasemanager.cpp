@@ -89,17 +89,29 @@ bool DatabaseManager::lazyOpen()
     QSqlQuery query_new(db);
     bool tableCreated = query_new.exec(
         "CREATE TABLE IF NOT EXISTS durations ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT," 
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "type INTEGER NOT NULL," // 0 = Activity, 1 = Pause (DurationType enum)
         "duration INTEGER NOT NULL," // Duration in milliseconds
+        "start_date DATE NOT NULL," // Date when the duration started
+        "start_time TEXT NOT NULL," // Time when the duration started (UTC, TIME(3) precision)
         "end_date DATE NOT NULL," // Date when the duration ended
-        "end_time TIME NOT NULL" // Time when the duration ended (with milliseconds)
+        "end_time TEXT NOT NULL," // Time when the duration ended (UTC, TIME(3) precision)
+        "UNIQUE(start_date, start_time, type) ON CONFLICT REPLACE" // Prevent duplicate entries
         ")"
     );
-    
+
     if (!tableCreated) {
         if (settings_.logToFile())
             Logger::Log("[DB] Error creating table: " + query_new.lastError().text());
+        db.close();
+        return false;
+    }
+
+    // Validate schema - ensure start_date and start_time columns exist
+    if (!validateSchema()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] CRITICAL: Schema validation failed - database is outdated");
+        }
         db.close();
         return false;
     }
@@ -108,7 +120,16 @@ bool DatabaseManager::lazyOpen()
     QSqlQuery indexQuery(db);
     if (!indexQuery.exec("CREATE INDEX IF NOT EXISTS idx_end_date ON durations(end_date)")) {
         if (settings_.logToFile()) {
-            Logger::Log("[DB] Warning: Failed to create index: " + indexQuery.lastError().text());
+            Logger::Log("[DB] Warning: Failed to create end_date index: " + indexQuery.lastError().text());
+        }
+        // Non-fatal: continue even if index creation fails
+    }
+
+    // Create composite index for start time queries
+    QSqlQuery startIndexQuery(db);
+    if (!startIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_start_datetime ON durations(start_date, start_time, type)")) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Warning: Failed to create start_datetime index: " + startIndexQuery.lastError().text());
         }
         // Non-fatal: continue even if index creation fails
     }
@@ -144,11 +165,96 @@ bool DatabaseManager::lazyOpen()
     return true;
 }
 
-void DatabaseManager::lazyClose() 
+void DatabaseManager::lazyClose()
 {
     if (db.isOpen()) {
         db.close();
     }
+}
+
+/**
+ * Public method to check schema validity on application startup.
+ *
+ * This should be called before any other database operations to ensure
+ * the database schema is compatible with the current version. If the
+ * database file exists but has an outdated schema, returns false so
+ * the application can show an appropriate error message.
+ *
+ * Returns true if:
+ * - History storage is disabled (no DB needed)
+ * - Database file doesn't exist (will be created fresh)
+ * - Database schema is valid
+ *
+ * Returns false if:
+ * - Database exists but schema is outdated
+ */
+bool DatabaseManager::checkSchemaOnStartup()
+{
+    // If history storage is disabled, no need to check
+    if (history_days_to_keep_ == 0) {
+        return true;
+    }
+
+    // If database file doesn't exist, it will be created fresh with correct schema
+    if (!QFile::exists(db.databaseName())) {
+        return true;
+    }
+
+    // Open database to check schema
+    if (!db.open()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error opening database for schema check: " + db.lastError().text());
+        }
+        return false;
+    }
+
+    bool valid = validateSchema();
+    db.close();
+
+    return valid;
+}
+
+/**
+ * Validates that the database schema contains required columns.
+ *
+ * This function checks for the presence of start_date and start_time columns
+ * which are required for the explicit start time feature. If these columns
+ * are missing, the database is considered outdated and needs to be recreated.
+ *
+ * Returns true if schema is valid, false if outdated.
+ */
+bool DatabaseManager::validateSchema()
+{
+    QSqlQuery query(db);
+    if (!query.exec("PRAGMA table_info(durations)")) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error checking table schema: " + query.lastError().text());
+        }
+        return false;
+    }
+
+    bool hasStartDate = false;
+    bool hasStartTime = false;
+
+    while (query.next()) {
+        QString columnName = query.value(1).toString();
+        if (columnName == "start_date") {
+            hasStartDate = true;
+        } else if (columnName == "start_time") {
+            hasStartTime = true;
+        }
+    }
+
+    if (!hasStartDate || !hasStartTime) {
+        if (settings_.logToFile()) {
+            Logger::Log(QString("[DB] Schema validation failed: start_date=%1, start_time=%2")
+                .arg(hasStartDate ? "present" : "MISSING")
+                .arg(hasStartTime ? "present" : "MISSING"));
+        }
+        return false;
+    }
+
+    return true;
 }
 
 /**
@@ -205,8 +311,10 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
         for (const auto& d : durations) {
             out << "Type: " << (d.type == DurationType::Activity ? "Activity" : "Pause") << " | ";
             out << "Duration: " << d.duration << "ms | ";
-            out << "End Date: " << d.endTime.date().toString(Qt::ISODate) << " | ";
-            out << "End Time: " << d.endTime.time().toString("HH:mm:ss.zzz") << "\n";
+            out << "Start Date: " << d.startTime.toUTC().date().toString(Qt::ISODate) << " | ";
+            out << "Start Time: " << d.startTime.toUTC().time().toString("HH:mm:ss.zzz") << " | ";
+            out << "End Date: " << d.endTime.toUTC().date().toString(Qt::ISODate) << " | ";
+            out << "End Time: " << d.endTime.toUTC().time().toString("HH:mm:ss.zzz") << "\n";
         }
         
         durationsFile.close();
@@ -284,18 +392,23 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
         }
 	}
 
-    // Prepare insert statement for batch insertion
+    // Prepare insert statement for batch insertion (storing times in UTC)
     QSqlQuery query(db);
-    query.prepare("INSERT INTO durations (type, duration, end_date, end_time) "
-                  "VALUES (:type, :duration, :end_date, :end_time)");
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+                  "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time)");
 
-    // Insert each duration entry
+    // Insert each duration entry (convert to UTC for storage)
     for (const auto& d : durations) {
+        QDateTime startUtc = d.startTime.toUTC();
+        QDateTime endUtc = d.endTime.toUTC();
+
         query.bindValue(":type", static_cast<int>(d.type));
         query.bindValue(":duration", d.duration);
-        query.bindValue(":end_date", d.endTime.date().toString(Qt::ISODate));
-        query.bindValue(":end_time", d.endTime.time().toString("HH:mm:ss.zzz"));
-        
+        query.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
+        query.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
+        query.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
+        query.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
+
         if (!query.exec()) {
             db.rollback();
             if (settings_.logToFile())
@@ -318,11 +431,14 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
 /**
  * Retrieves the entire history of durations from the database.
  *
- * - Returns entries sorted by End Date/Time (chronological).
+ * - Returns entries sorted by Start Date/Time (chronological).
  * - Validates each row:
  *   - Type must be valid enum (Activity/Pause).
+ *   - Start must be <= End.
  *   - Duration must be non-negative.
+ *   - Computed duration must match stored duration within ±5ms tolerance.
  *   - Corrupted/Invalid rows are skipped and logged.
+ * - Timestamps are stored in UTC and converted to local time on load.
  */
 std::deque<TimeDuration> DatabaseManager::loadDurations()
 {
@@ -344,9 +460,9 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
         return durations;
     }
 
-    // Load all durations ordered by end date and time
+    // Load all durations ordered by start date and time
     QSqlQuery query(db);
-    query.prepare("SELECT type, duration, end_date, end_time FROM durations ORDER BY end_date, end_time");
+    query.prepare("SELECT type, duration, start_date, start_time, end_date, end_time FROM durations ORDER BY start_date, start_time");
     if (!query.exec()) {
         db.rollback();
         if (settings_.logToFile()) {
@@ -355,14 +471,21 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
         lazyClose();
         return durations;
     }
-    
+
     // Parse each row and reconstruct TimeDuration objects
     while (query.next()) {
         int typeInt = query.value(0).toInt();
-        qint64 duration = query.value(1).toLongLong();
-        QDate endDate = QDate::fromString(query.value(2).toString(), Qt::ISODate);
-        QTime endTime = QTime::fromString(query.value(3).toString(), "HH:mm:ss.zzz");
-        QDateTime endDateTime(endDate, endTime);
+        qint64 storedDuration = query.value(1).toLongLong();
+        QDate startDate = QDate::fromString(query.value(2).toString(), Qt::ISODate);
+        QTime startTime = QTime::fromString(query.value(3).toString(), "HH:mm:ss.zzz");
+        QDate endDate = QDate::fromString(query.value(4).toString(), Qt::ISODate);
+        QTime endTime = QTime::fromString(query.value(5).toString(), "HH:mm:ss.zzz");
+
+        // Reconstruct QDateTime in UTC, then convert to local time
+        QDateTime startDateTime(startDate, startTime, Qt::UTC);
+        QDateTime endDateTime(endDate, endTime, Qt::UTC);
+        startDateTime = startDateTime.toLocalTime();
+        endDateTime = endDateTime.toLocalTime();
 
         // Validate type enum range
         if (typeInt != static_cast<int>(DurationType::Activity) &&
@@ -375,13 +498,45 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
 
         DurationType type = static_cast<DurationType>(typeInt);
 
-        // Validate parsed data before adding
-        if (endDate.isValid() && endTime.isValid() && duration >= 0) {
-            durations.emplace_back(TimeDuration(type, duration, endDateTime));
-        } else if (settings_.logToFile()) {
-            Logger::Log(QString("[DB] Warning: Skipped invalid duration entry - Date: %1, Time: %2, Duration: %3")
-                .arg(endDate.toString()).arg(endTime.toString()).arg(duration));
+        // Validate timestamps
+        if (!startDate.isValid() || !startTime.isValid() || !endDate.isValid() || !endTime.isValid()) {
+            if (settings_.logToFile()) {
+                Logger::Log(QString("[DB] Warning: Skipped invalid timestamp entry - StartDate: %1, StartTime: %2, EndDate: %3, EndTime: %4")
+                    .arg(startDate.toString()).arg(startTime.toString()).arg(endDate.toString()).arg(endTime.toString()));
+            }
+            continue;
         }
+
+        // Validate start <= end
+        if (startDateTime > endDateTime) {
+            if (settings_.logToFile()) {
+                Logger::Log(QString("[DB] Warning: Skipped entry with start > end - Start: %1, End: %2")
+                    .arg(startDateTime.toString(Qt::ISODate)).arg(endDateTime.toString(Qt::ISODate)));
+            }
+            continue;
+        }
+
+        // Compute duration from timestamps and validate against stored duration
+        qint64 computedDuration = startDateTime.msecsTo(endDateTime);
+        const qint64 TOLERANCE_MS = 5;
+
+        if (storedDuration < 0) {
+            if (settings_.logToFile()) {
+                Logger::Log(QString("[DB] Warning: Skipped entry with negative duration: %1ms").arg(storedDuration));
+            }
+            continue;
+        }
+
+        if (qAbs(computedDuration - storedDuration) > TOLERANCE_MS) {
+            if (settings_.logToFile()) {
+                Logger::Log(QString("[DB] Warning: Duration mismatch (stored: %1ms, computed: %2ms) - using computed value")
+                    .arg(storedDuration).arg(computedDuration));
+            }
+            // Use computed duration for consistency
+        }
+
+        // Create TimeDuration with explicit start/end times
+        durations.emplace_back(TimeDuration(type, startDateTime, endDateTime));
     }
 
     db.commit();  // Commit read transaction
@@ -425,11 +580,12 @@ bool DatabaseManager::hasEntriesForDate(const QDate& date)
  * - Does NOT create backups (for performance - called every 5 minutes)
  * - Uses checkpointId to update existing row instead of inserting new one
  * - Sets checkpointId to the new row ID on first call (when checkpointId == -1)
+ * - Stores the actual segment_start_time_ (preserves original start, only updates end/duration)
  *
  * The caller (TimeTracker) resets checkpointId to -1 on mode changes,
  * causing the next checkpoint to create a new row for the new segment.
  */
-bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& endTime, long long& checkpointId)
+bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, long long& checkpointId)
 {
     // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
@@ -443,8 +599,14 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
         return false;
     }
 
-    QString endDateStr = endTime.date().toString(Qt::ISODate);
-    QString endTimeStr = endTime.time().toString("HH:mm:ss.zzz");
+    // Convert to UTC for storage
+    QDateTime startUtc = startTime.toUTC();
+    QDateTime endUtc = endTime.toUTC();
+
+    QString startDateStr = startUtc.date().toString(Qt::ISODate);
+    QString startTimeStr = startUtc.time().toString("HH:mm:ss.zzz");
+    QString endDateStr = endUtc.date().toString(Qt::ISODate);
+    QString endTimeStr = endUtc.time().toString("HH:mm:ss.zzz");
 
     if (!db.transaction()) {
         if (settings_.logToFile()) {
@@ -458,7 +620,7 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
     QSqlQuery query(db);
 
     if (checkpointId != -1) {
-        // Update existing entry using known ID
+        // Update existing entry using known ID (preserve start time, only update end/duration)
         query.prepare(
             "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time "
             "WHERE id = :id"
@@ -478,11 +640,13 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
                 // Row was deleted (retention cleanup or manual edit). Insert a new checkpoint.
                 QSqlQuery insertQuery(db);
                 insertQuery.prepare(
-                    "INSERT INTO durations (type, duration, end_date, end_time) "
-                    "VALUES (:type, :duration, :end_date, :end_time)"
+                    "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+                    "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time)"
                 );
                 insertQuery.bindValue(":type", static_cast<int>(type));
                 insertQuery.bindValue(":duration", duration);
+                insertQuery.bindValue(":start_date", startDateStr);
+                insertQuery.bindValue(":start_time", startTimeStr);
                 insertQuery.bindValue(":end_date", endDateStr);
                 insertQuery.bindValue(":end_time", endTimeStr);
 
@@ -510,13 +674,15 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
             return false;
         }
     } else {
-        // Append new checkpoint entry
+        // Append new checkpoint entry with start time
         query.prepare(
-            "INSERT INTO durations (type, duration, end_date, end_time) "
-            "VALUES (:type, :duration, :end_date, :end_time)"
+            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+            "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time)"
         );
         query.bindValue(":type", static_cast<int>(type));
         query.bindValue(":duration", duration);
+        query.bindValue(":start_date", startDateStr);
+        query.bindValue(":start_time", startTimeStr);
         query.bindValue(":end_date", endDateStr);
         query.bindValue(":end_time", endTimeStr);
 
@@ -541,15 +707,16 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
 }
 
 /**
- * Smart upsert (update or insert) for a batch of durations.
+ * Smart upsert (update or insert) for a batch of durations using exact start time matching.
  *
- * Unlike saveDurations(Replace), this method preserves existing IDs where possible.
- * It matches in-memory objects to database rows using their Calculated Start Time.
+ * This method uses the UNIQUE constraint on (start_date, start_time, type) for
+ * conflict resolution. When a duration with matching start time/type already exists,
+ * the INSERT OR REPLACE will update the existing row.
  *
  * Use Case:
  * - When the timer stops or pauses, we want to update the "current" session in the DB
- *   without deleting and re-inserting it (which would change IDs and churn the DB).
- * - Also handles cases where new entries were added to the list.
+ *   without creating duplicates.
+ * - The UNIQUE constraint ensures no ambiguous matching is needed.
  */
 bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>& durations)
 {
@@ -577,122 +744,46 @@ bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>&
         return false;
     }
 
-    QSqlQuery updateQuery(db);
-    updateQuery.prepare(
-        "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time "
-        "WHERE id = :id"
-    );
-
+    // Use INSERT OR REPLACE which leverages the UNIQUE constraint on (start_date, start_time, type)
+    // If a row with matching start_date, start_time, and type exists, it will be replaced
     QSqlQuery insertQuery(db);
     insertQuery.prepare(
-        "INSERT INTO durations (type, duration, end_date, end_time) "
-        "VALUES (:type, :duration, :end_date, :end_time)"
+        "INSERT OR REPLACE INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+        "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time)"
     );
 
-    int updatedCount = 0;
-    int insertedCount = 0;
+    int count = 0;
 
     for (const auto& d : durations) {
-        int existingId = -1;
-        bool found = updateDurationByStartTime(d.type, d.duration, d.endTime, existingId);
+        // Convert to UTC for storage
+        QDateTime startUtc = d.startTime.toUTC();
+        QDateTime endUtc = d.endTime.toUTC();
 
-        if (found && existingId >= 0) {
-            // Update existing entry
-            updateQuery.bindValue(":duration", d.duration);
-            updateQuery.bindValue(":end_date", d.endTime.date().toString(Qt::ISODate));
-            updateQuery.bindValue(":end_time", d.endTime.time().toString("HH:mm:ss.zzz"));
-            updateQuery.bindValue(":id", existingId);
+        insertQuery.bindValue(":type", static_cast<int>(d.type));
+        insertQuery.bindValue(":duration", d.duration);
+        insertQuery.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
+        insertQuery.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
+        insertQuery.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
+        insertQuery.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
 
-            if (!updateQuery.exec()) {
-                db.rollback();
-                if (settings_.logToFile()) {
-                    Logger::Log("[DB] Error updating duration: " + updateQuery.lastError().text());
-                }
-                lazyClose();
-                return false;
+        if (!insertQuery.exec()) {
+            db.rollback();
+            if (settings_.logToFile()) {
+                Logger::Log("[DB] Error upserting duration: " + insertQuery.lastError().text());
             }
-            updatedCount++;
-        } else {
-            // Insert new entry
-            insertQuery.bindValue(":type", static_cast<int>(d.type));
-            insertQuery.bindValue(":duration", d.duration);
-            insertQuery.bindValue(":end_date", d.endTime.date().toString(Qt::ISODate));
-            insertQuery.bindValue(":end_time", d.endTime.time().toString("HH:mm:ss.zzz"));
-
-            if (!insertQuery.exec()) {
-                db.rollback();
-                if (settings_.logToFile()) {
-                    Logger::Log("[DB] Error inserting duration: " + insertQuery.lastError().text());
-                }
-                lazyClose();
-                return false;
-            }
-            insertedCount++;
+            lazyClose();
+            return false;
         }
+        count++;
     }
 
     bool success = db.commit();
     if (success && settings_.logToFile()) {
-        Logger::Log(QString("[DB] Updated durations: %1 updated, %2 inserted").arg(updatedCount).arg(insertedCount));
+        Logger::Log(QString("[DB] Upserted %1 durations").arg(count));
     } else if (!success && settings_.logToFile()) {
         Logger::Log("[DB] Error committing update transaction: " + db.lastError().text());
     }
 
     lazyClose();
     return success;
-}
-
-/**
- * Helper to find a database entry that matches the given duration's start time.
- *
- * Logic:
- * - Start Time = End Time - Duration
- * - Because of slight timing variations (milliseconds) between DB saves and memory,
- *   we use a tolerance window (2 seconds) for matching.
- * - Searches only recent history (yesterday + today) for performance.
- *
- * Returns true and sets existingId if a match is found.
- */
-bool DatabaseManager::updateDurationByStartTime(DurationType type, qint64 duration, const QDateTime& endTime, int& existingId)
-{
-    // Calculate the start time for this duration
-    QDateTime startTime = endTime.addMSecs(-duration);
-    int typeInt = static_cast<int>(type);
-    const qint64 toleranceMs = 2000; // 2 seconds tolerance for start time matching
-    
-    existingId = -1;
-    
-    // Find entries with the same start time (within tolerance) and same type
-    // Only check recent entries (yesterday and today) for performance
-    QDate minDate = QDate::currentDate().addDays(-1);
-
-    QSqlQuery checkQuery(db);
-    checkQuery.prepare(
-        "SELECT id, duration, end_date, end_time FROM durations "
-        "WHERE type = :type AND end_date >= :min_date "
-        "ORDER BY end_date DESC, end_time DESC"
-    );
-    checkQuery.bindValue(":type", typeInt);
-    checkQuery.bindValue(":min_date", minDate.toString(Qt::ISODate));
-
-    if (checkQuery.exec()) {
-        while (checkQuery.next()) {
-            qint64 existingDuration = checkQuery.value(1).toLongLong();
-            QDate existingEndDate = QDate::fromString(checkQuery.value(2).toString(), Qt::ISODate);
-            QTime existingEndTime = QTime::fromString(checkQuery.value(3).toString(), "HH:mm:ss.zzz");
-            QDateTime existingEndDateTime(existingEndDate, existingEndTime);
-            
-            // Calculate start time of existing entry
-            QDateTime existingStartTime = existingEndDateTime.addMSecs(-existingDuration);
-            
-            // Check if start times match (within tolerance)
-            qint64 startTimeDiff = qAbs(existingStartTime.msecsTo(startTime));
-            if (startTimeDiff <= toleranceMs) {
-                existingId = checkQuery.value(0).toInt();
-                return true; // Found matching start time
-            }
-        }
-    }
-    
-    return false; // No matching entry found
 }
