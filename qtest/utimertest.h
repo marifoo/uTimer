@@ -1018,6 +1018,142 @@ private slots:
         QCOMPARE(static_cast<int>(loaded.size()), 1);
     }
 
+    void test_helpers_conversions()
+    {
+        // convMSecToTimeStr
+        QCOMPARE(convMSecToTimeStr(3661000), QString("01:01:01"));
+        QCOMPARE(convMSecToTimeStr(0), QString("00:00:00"));
+
+        // convMinAndSecToHourPctString
+        // 30 min = 0.5 hours -> "50" (dot is added by caller)
+        QCOMPARE(convMinAndSecToHourPctString(30, 0), QString("50"));
+        // 15 min = 0.25 hours -> "25"
+        QCOMPARE(convMinAndSecToHourPctString(15, 0), QString("25"));
+        // 45 min = 0.75 hours -> "75"
+        QCOMPARE(convMinAndSecToHourPctString(45, 0), QString("75"));
+
+        // convTimeStrToDurationStr
+        QCOMPARE(convTimeStrToDurationStr("1:30:00"), QString("1.50"));
+        QCOMPARE(convTimeStrToDurationStr("0:15:00"), QString("0.25"));
+    }
+
+    void test_timetracker_ongoing_duration()
+    {
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        TimeTracker tracker(settings);
+
+        // Initially stopped
+        QCOMPARE(tracker.getOngoingDuration(), std::nullopt);
+
+        // Start -> Activity
+        tracker.useTimerViaButton(Button::Start);
+        QTest::qWait(10); // Ensure time advances so segment_start_time < now
+        auto ongoing = tracker.getOngoingDuration();
+        QVERIFY(ongoing.has_value());
+        QCOMPARE(ongoing->type, DurationType::Activity);
+        
+        // Pause -> Pause
+        tracker.useTimerViaButton(Button::Pause);
+        QTest::qWait(10);
+        ongoing = tracker.getOngoingDuration();
+        QVERIFY(ongoing.has_value());
+        QCOMPARE(ongoing->type, DurationType::Pause);
+
+        // Stop -> None
+        tracker.useTimerViaButton(Button::Stop);
+        QCOMPARE(tracker.getOngoingDuration(), std::nullopt);
+    }
+
+    void test_timetracker_set_duration_type()
+    {
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        TimeTracker tracker(settings);
+
+        // Add a duration manually
+        QDateTime now = QDateTime::currentDateTime();
+        tracker.durations_.emplace_back(DurationType::Activity, now.addSecs(-10), now);
+        QCOMPARE(tracker.durations_.size(), (size_t)1);
+        QCOMPARE(tracker.durations_[0].type, DurationType::Activity);
+
+        // Change to Pause
+        tracker.setDurationType(0, DurationType::Pause);
+        QCOMPARE(tracker.durations_[0].type, DurationType::Pause);
+
+        // Invalid index
+        tracker.setDurationType(99, DurationType::Activity);
+        QCOMPARE(tracker.durations_[0].type, DurationType::Pause); // Unchanged
+    }
+
+    void test_timetracker_checkpoints_paused()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        QString settingsPath = createSettingsFile(tempDir.path(), 7);
+        // Enable checkpoints (interval = 1 minute, but we'll trigger manually)
+        QSettings writer(settingsPath, QSettings::IniFormat);
+        writer.setValue("uTimer/checkpoint_interval_minutes", 1);
+        writer.sync();
+
+        Settings settings(settingsPath);
+        TimeTracker tracker(settings);
+        
+        // Must be in Activity to save checkpoints
+        tracker.useTimerViaButton(Button::Start);
+        QTest::qWait(100); // Ensure elapsed > 0
+
+        // Pause checkpoints
+        tracker.pauseCheckpoints();
+        tracker.saveCheckpoint(); // Should be ignored
+        
+        // Check DB: no entries yet
+        DatabaseManager db(settings);
+        auto loaded = db.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)0);
+
+        // Resume and trigger
+        tracker.resumeCheckpoints();
+        tracker.saveCheckpoint();
+
+        // Check DB: should have one entry
+        loaded = db.loadDurations();
+        QCOMPARE(loaded.size(), (size_t)1);
+    }
+
+    void test_databasemanager_write_failure()
+    {
+        resetDatabaseFile();
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        Settings settings(createSettingsFile(tempDir.path(), 7));
+        DatabaseManager manager(settings);
+
+        // Create DB first
+        QVERIFY(manager.saveDurations({}, TransactionMode::Append));
+        
+        // Make DB read-only
+        QFile dbFile(db_path_);
+        QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::ReadUser | QFile::ReadGroup | QFile::ReadOther));
+
+        // Try to save
+        QDateTime now = QDateTime::currentDateTime();
+        std::deque<TimeDuration> d;
+        d.emplace_back(DurationType::Activity, now, now.addSecs(10));
+        
+        // Should fail gracefully
+        QVERIFY(!manager.saveDurations(d, TransactionMode::Append));
+
+        // Restore permissions
+        QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser | QFile::ReadGroup | QFile::ReadOther));
+        
+        // Should succeed now
+        QVERIFY(manager.saveDurations(d, TransactionMode::Append));
+    }
+
     void cleanup()
     {
     }

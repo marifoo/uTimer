@@ -3,6 +3,8 @@ utimer.log
 user-settings.ini
 uTimer
 uTimer.sqlite
+*.sqlite.*.backup
+*.durations.txt
 
 # AI files
 .claude/
