@@ -88,7 +88,7 @@ void MainWin::update()
 	content_widget_->updateTimes();
 	tray_icon_->setToolTip(content_widget_->getTooltip());
 
-	if ((content_widget_->isGUIinActivity()) && (settings_.showTooMuchActivityWarning() || settings_.showTooMuchActivityWarning()))
+	if ((content_widget_->isGUIinActivity()) && (settings_.showTooMuchActivityWarning() || settings_.showNoPauseWarning()))
 		showActivityWarnings();
 }
 

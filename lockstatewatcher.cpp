@@ -181,8 +181,7 @@ void LockStateWatcher::update()
 		lock_timer_.invalidate();
 		if (settings_.logToFile())
 			Logger::Log("[LOCK] Unlock determined <<");
-		if (settings_.isAutopauseEnabled())
-			emit desktopLockEvent(LockEvent::Unlock);
+		emit desktopLockEvent(LockEvent::Unlock);
 	}
 
 	if (lock_timer_.isValid() && (lock_timer_.elapsed() >= settings_.getBackpauseMsec())) {

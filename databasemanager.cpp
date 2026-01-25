@@ -245,6 +245,11 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
  */
 bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
+    // If history storage is disabled, treat as success (no-op)
+    if (history_days_to_keep_ == 0) {
+        return true;
+    }
+
     // Create backup before any write operation
     if (!createBackup(durations, mode)) {
         if (settings_.logToFile()) {
@@ -423,9 +428,9 @@ bool DatabaseManager::hasEntriesForDate(const QDate& date)
  */
 bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& endTime, long long& checkpointId)
 {
-    // Don't save checkpoint if history storage is disabled
+    // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
-        return false;
+        return true;
     }
 
     if (!lazyOpen()) {
@@ -517,9 +522,9 @@ bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>&
         return true;
     }
 
-    // Don't update if history storage is disabled
+    // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
-        return false;
+        return true;
     }
 
     if (!lazyOpen()) {
