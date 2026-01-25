@@ -50,9 +50,11 @@ DatabaseManager::~DatabaseManager()
 {
     lazyClose();
     
-    // Remove the database connection to prevent Qt warnings
-    if (QSqlDatabase::contains(db.connectionName())) {
-        QSqlDatabase::removeDatabase(db.connectionName());
+    QString connName = db.connectionName();
+    db = QSqlDatabase();
+    
+    if (QSqlDatabase::contains(connName)) {
+        QSqlDatabase::removeDatabase(connName);
     }
 }
 

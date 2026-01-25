@@ -117,5 +117,23 @@ The project uses Qt5 qmake. Build output goes to `build/` directory. Executable 
 
 ## Testing
 
-Tests are in `qtest/` using Qt Test Framework. The test file `qtest/utimertest.cpp` covers the `cleanDurations()` helper function.
+Tests are in `qtest/` using Qt Test Framework. The main test suite is in `qtest/utimertest.h` (implementation in `qtest/utimertest.cpp`).
+
+**Running tests:**
+```bash
+cd qtest
+qmake-qt5 && make -j4
+./qtest
+```
+
+**Test coverage includes:**
+- `cleanDurations()` helper function (deduplication, merging, overlap handling)
+- TimeTracker state machine (start, pause, resume, stop)
+- Checkpoint save/restore and crash recovery
+- Backpause logic and midnight boundary splits
+- Lock state detection debouncing
+- Database operations (CRUD, schema validation, retention)
+- Explicit start time preservation across operations
+
+**Expected output:** All tests should pass with zero `QWARN` messages (46 tests currently).
 

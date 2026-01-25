@@ -5,6 +5,8 @@ uTimer
 uTimer.sqlite
 *.sqlite.*.backup
 *.durations.txt
+**/qtest
+
 
 # AI files
 .claude/
