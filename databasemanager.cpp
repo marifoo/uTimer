@@ -522,12 +522,11 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
 
         if (storedDuration < 0) {
             if (settings_.logToFile()) {
-                Logger::Log(QString("[DB] Warning: Skipped entry with negative duration: %1ms").arg(storedDuration));
+                Logger::Log(QString("[DB] Warning: Negative stored duration %1ms - using computed duration %2ms")
+                    .arg(storedDuration).arg(computedDuration));
             }
-            continue;
-        }
-
-        if (qAbs(computedDuration - storedDuration) > TOLERANCE_MS) {
+            storedDuration = computedDuration;
+        } else if (qAbs(computedDuration - storedDuration) > TOLERANCE_MS) {
             if (settings_.logToFile()) {
                 Logger::Log(QString("[DB] Warning: Duration mismatch (stored: %1ms, computed: %2ms) - using computed value")
                     .arg(storedDuration).arg(computedDuration));
