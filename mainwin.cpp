@@ -272,6 +272,12 @@ void MainWin::shutdown(bool force_direct)
 	}
 
 	// Verify timer stopped correctly
+	// Flush database to disk to reduce risk of loss during Windows shutdown
+	if (settings_.logToFile()) {
+		Logger::Log("[DB] Flushing database to disk before shutdown");
+	}
+	timetracker_.flushDatabaseToDisc();
+
 	if (settings_.logToFile()) {
 		if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
 			Logger::Log("[TIMER] Error: Timer did not stop correctly during shutdown");

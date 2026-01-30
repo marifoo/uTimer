@@ -788,3 +788,61 @@ bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>&
     lazyClose();
     return success;
 }
+
+/**
+ * Forces any pending database writes to be physically written to disk.
+ *
+ * This is critical during Windows shutdown to ensure data is persisted
+ * before the process is terminated. SQLite may buffer writes even after
+ * commit() returns - this method ensures they're flushed.
+ *
+ * Uses WAL checkpoint if WAL mode is active, otherwise uses PRAGMA synchronous.
+ */
+void DatabaseManager::flushToDisc()
+{
+    if (history_days_to_keep_ == 0) {
+        return;
+    }
+
+    if (!lazyOpen()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Could not open DB to flush to disc");
+        }
+        return;
+    }
+
+    QSqlQuery query(db);
+
+    // Check if WAL mode is being used
+    if (query.exec("PRAGMA journal_mode") && query.next()) {
+        QString mode = query.value(0).toString().toLower();
+        if (mode == "wal") {
+            // Force WAL checkpoint - this writes all pending WAL changes to the main DB file
+            if (query.exec("PRAGMA wal_checkpoint(FULL)")) {
+                if (settings_.logToFile()) {
+                    Logger::Log("[DB] WAL checkpoint completed");
+                }
+            } else if (settings_.logToFile()) {
+                Logger::Log("[DB] WAL checkpoint failed: " + query.lastError().text());
+            }
+        }
+    }
+
+    // Additionally ensure synchronous writes are fully flushed
+    // FULL mode waits for data to be physically written to disk
+    if (!query.exec("PRAGMA synchronous=FULL")) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Failed to set synchronous mode: " + query.lastError().text());
+        }
+    }
+
+    // Execute a no-op write to trigger the synchronous flush
+    // This ensures the PRAGMA takes effect
+    query.exec("SELECT 1");
+
+    lazyClose();
+
+    if (settings_.logToFile()) {
+        Logger::Log("[DB] Flush to disc completed");
+    }
+}

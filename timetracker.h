@@ -60,6 +60,7 @@ public:
     void pauseCheckpoints();
     void resumeCheckpoints();
     bool checkDatabaseSchema(); // Returns true if DB schema is valid, false if outdated
+    void flushDatabaseToDisc(); // Force pending writes to disk (for shutdown safety)
 
 public slots:
     void useTimerViaButton(Button button);

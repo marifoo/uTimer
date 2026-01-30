@@ -678,3 +678,8 @@ bool TimeTracker::checkDatabaseSchema()
 {
     return db_.checkSchemaOnStartup();
 }
+
+void TimeTracker::flushDatabaseToDisc()
+{
+    db_.flushToDisc();
+}

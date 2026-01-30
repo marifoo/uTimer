@@ -21,6 +21,7 @@ public:
     bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, long long& checkpointId);
     bool updateDurationsByStartTime(const std::deque<TimeDuration>& durations);
     bool checkSchemaOnStartup(); // Returns true if schema is valid, false if outdated
+    void flushToDisc(); // Force pending writes to disk (for shutdown safety)
 
 private:
     QSqlDatabase db;
