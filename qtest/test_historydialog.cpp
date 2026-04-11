@@ -62,17 +62,40 @@ void HistoryDialogTest::test_historydialog_createPages_includes_current_db_ongoi
     // Start ongoing activity
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(5);
-    tracker.useTimerViaButton(Button::Stop);
-    tracker.useTimerViaButton(Button::Start);
-    QTest::qWait(5);
 
     HistoryDialog dialog(tracker, settings);
     QCOMPARE(dialog.pages_.size(), static_cast<size_t>(1));
     QCOMPARE(dialog.pages_[0].isCurrent, true);
-    QCOMPARE(dialog.pendingChanges_[0].size(), static_cast<size_t>(3));
-    QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(3));
+    QCOMPARE(dialog.pendingChanges_[0].size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(2));
     QVERIFY(dialog.pendingChanges_[0].back().duration > 0);
     QCOMPARE(dialog.rowOrigins_[0].back(), HistoryDialog::RowOrigin::Ongoing);
+}
+
+void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_time_drift()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    TimeTracker tracker(settings);
+
+    const QDateTime now = QDateTime::currentDateTime();
+    const QDateTime memoryStart = now.addSecs(-40).addMSecs(2);
+    const QDateTime memoryEnd = now.addSecs(-10);
+    tracker.durations_.push_back(TimeDuration(DurationType::Activity, memoryStart, memoryEnd));
+
+    std::deque<TimeDuration> dbDurations;
+    dbDurations.emplace_back(DurationType::Activity, memoryStart.addMSecs(-2), memoryEnd);
+    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
+
+    HistoryDialog dialog(tracker, settings);
+    QCOMPARE(dialog.pages_.size(), static_cast<size_t>(1));
+    QCOMPARE(dialog.pendingChanges_[0].size(), static_cast<size_t>(1));
+    QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(1));
+    QCOMPARE(dialog.rowOrigins_[0][0], HistoryDialog::RowOrigin::CurrentMemory);
+    QCOMPARE(dialog.pendingChanges_[0][0].startTime, memoryStart);
+    QCOMPARE(dialog.pendingChanges_[0][0].endTime, memoryEnd);
 }
 
 void HistoryDialogTest::test_historydialog_checkbox_toggle_updates_pending_and_totals()

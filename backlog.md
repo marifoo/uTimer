@@ -220,7 +220,7 @@ of failures. They depend on Phase 1 being done but can overlap with Phase 2.
     simulate a crash (no further `stopTimer`), reopen the DB, assert the
     current segment is still present as an unfinalized row.
 
-### T8. [C5] Replace fragile dedup key in `HistoryDialog::createPages`
+### T8. [DONE] [C5] Replace fragile dedup key in `HistoryDialog::createPages`
 - **Where:** `historydialog.cpp:80–94`.
 - **Problem:** Dedup key is
   `QString::number(d.startTime.toMSecsSinceEpoch()) + "|" +

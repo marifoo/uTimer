@@ -29,6 +29,23 @@
 #include <QRadioButton>
 #include <QGroupBox>
 #include <QButtonGroup>
+#include <algorithm>
+
+namespace {
+constexpr qint64 kDedupStartToleranceMs = 1000;
+constexpr qint64 kDedupEndToleranceMs = 1000;
+
+bool isCurrentAndDbNearDuplicate(const TimeDuration& dbDuration, const TimeDuration& currentDuration)
+{
+    if (dbDuration.type != currentDuration.type) {
+        return false;
+    }
+
+    const qint64 startDeltaMs = dbDuration.startTime.msecsTo(currentDuration.startTime);
+    const qint64 endDeltaMs = dbDuration.endTime.msecsTo(currentDuration.endTime);
+    return qAbs(startDeltaMs) < kDedupStartToleranceMs && qAbs(endDeltaMs) < kDedupEndToleranceMs;
+}
+}
 
 HistoryDialog::HistoryDialog(TimeTracker& timetracker, const Settings& settings, QWidget* parent)
     : QDialog(parent), timetracker_(timetracker), settings_(settings), pageIndex_(0)
@@ -77,19 +94,26 @@ void HistoryDialog::createPages()
     auto historyDurations = timetracker_.getDurationsHistory();
     auto ongoingDuration = timetracker_.getOngoingDuration();
     const QDate today = QDate::currentDate();
-    std::set<QString> currentKeys;
-    for (const auto& d : currentDurations) {
-        currentKeys.insert(QString::number(d.startTime.toMSecsSinceEpoch()) + "|" + QString::number(static_cast<int>(d.type)));
-    }
+
+    std::vector<TimeDuration> currentComparableDurations;
+    currentComparableDurations.reserve(currentDurations.size() + (ongoingDuration.has_value() ? 1 : 0));
+    currentComparableDurations.insert(currentComparableDurations.end(), currentDurations.begin(), currentDurations.end());
     if (ongoingDuration.has_value()) {
-        currentKeys.insert(QString::number(ongoingDuration->startTime.toMSecsSinceEpoch()) + "|" + QString::number(static_cast<int>(ongoingDuration->type)));
+        currentComparableDurations.push_back(ongoingDuration.value());
     }
 
     // Group historical durations by date
     QMap<QDate, std::deque<TimeDuration>> historyByDay;
     for (const auto& d : historyDurations) {
-        QString key = QString::number(d.startTime.toMSecsSinceEpoch()) + "|" + QString::number(static_cast<int>(d.type));
-        if (currentKeys.find(key) != currentKeys.end()) {
+        const bool isDuplicateOfCurrent = std::any_of(
+            currentComparableDurations.begin(),
+            currentComparableDurations.end(),
+            [&d](const TimeDuration& currentDuration) {
+                return isCurrentAndDbNearDuplicate(d, currentDuration);
+            }
+        );
+
+        if (isDuplicateOfCurrent) {
             continue;
         }
         historyByDay[d.endTime.date()].push_back(d);
