@@ -232,7 +232,7 @@ void MainWin::start()
 	}
 
 	const qint64 recoveredSeconds = timetracker_.getStartupRecoveredSeconds();
-	if (recoveredSeconds > 0) {
+	if (recoveredSeconds > 0 && timetracker_.shouldShowStartupRecoveryNotification()) {
 		const QString message = QString("Recovered %1 seconds from the last session after an unclean shutdown.")
 			.arg(recoveredSeconds);
 		statusBar()->showMessage(message, 10000);
@@ -304,6 +304,10 @@ void MainWin::shutdown(bool force_direct)
 		Logger::Log("[DB] Flushing database to disk before shutdown");
 	}
 	timetracker_.flushDatabaseToDisc();
+
+	if (timetracker_.canMarkCleanShutdown()) {
+		timetracker_.markCleanShutdown();
+	}
 
 	if (settings_.logToFile()) {
 		if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {

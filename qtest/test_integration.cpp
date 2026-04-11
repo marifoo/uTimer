@@ -167,6 +167,64 @@ void IntegrationTest::test_integration_orphan_reconciliation_drops_stale_and_too
     QCOMPARE(loaded.size(), static_cast<size_t>(0));
 }
 
+void IntegrationTest::test_integration_orphan_reconciliation_marker_present_is_silent()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+
+    {
+        Settings settings(settingsPath);
+        TimeTracker tracker(settings);
+        tracker.useTimerViaButton(Button::Start);
+        QTest::qWait(1200);
+        tracker.saveCheckpointInternal();
+        QVERIFY(tracker.current_checkpoint_id_ != -1);
+        tracker.current_checkpoint_id_ = -1;
+        tracker.mode_ = TimeTracker::Mode::None;
+    }
+
+    {
+        Settings settings(settingsPath);
+        DatabaseManager db(settings);
+        QVERIFY(db.setLastCleanShutdownMarker(QDateTime::currentDateTime()));
+    }
+
+    {
+        Settings settings(settingsPath);
+        TimeTracker tracker(settings);
+        QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
+        QVERIFY(!tracker.shouldShowStartupRecoveryNotification());
+    }
+}
+
+void IntegrationTest::test_integration_orphan_reconciliation_marker_absent_shows_notification()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+
+    {
+        Settings settings(settingsPath);
+        TimeTracker tracker(settings);
+        tracker.useTimerViaButton(Button::Start);
+        QTest::qWait(1200);
+        tracker.saveCheckpointInternal();
+        QVERIFY(tracker.current_checkpoint_id_ != -1);
+        tracker.current_checkpoint_id_ = -1;
+        tracker.mode_ = TimeTracker::Mode::None;
+    }
+
+    {
+        Settings settings(settingsPath);
+        TimeTracker tracker(settings);
+        QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
+        QVERIFY(tracker.shouldShowStartupRecoveryNotification());
+    }
+}
+
 void IntegrationTest::test_integration_memory_db_consistency()
 {
     resetDatabaseFile();

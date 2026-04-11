@@ -40,6 +40,7 @@ private:
     int last_history_load_skipped_;
     int last_history_load_repaired_;
     qint64 startup_recovered_seconds_;
+    bool startup_recovery_notification_needed_;
 
     void startTimer();
     void stopTimer();
@@ -48,7 +49,9 @@ private:
     void addDurationWithMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime);
     void saveCheckpointInternal();  // Internal checkpoint save (called when mutex already held)
     bool appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
-    qint64 reconcileOrphanCheckpoints(const std::deque<DatabaseManager::OrphanCheckpoint>& orphans);
+    qint64 reconcileOrphanCheckpoints(
+        const std::deque<DatabaseManager::OrphanCheckpoint>& orphans,
+        const std::optional<QDateTime>& cleanShutdownMarker);
 
 public:
     explicit TimeTracker(const Settings & settings, QObject *parent = nullptr);
@@ -62,6 +65,7 @@ public:
     std::pair<int, int> getLastHistoryLoadStats() const;
     std::optional<TimeDuration> getOngoingDuration() const;
     qint64 getStartupRecoveredSeconds() const;
+    bool shouldShowStartupRecoveryNotification() const;
     void setDurationType(size_t idx, DurationType type);
     bool appendDurationsToDB();
     bool updateDurationsInDB();
@@ -71,6 +75,8 @@ public:
     void resumeCheckpoints();
     bool checkDatabaseSchema(); // Returns true if DB schema is valid, false if outdated
     void flushDatabaseToDisc(); // Force pending writes to disk (for shutdown safety)
+    bool markCleanShutdown();
+    bool canMarkCleanShutdown() const;
 
 public slots:
     void useTimerViaButton(Button button);

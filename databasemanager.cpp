@@ -32,6 +32,7 @@
 
 namespace {
 constexpr qint64 kDurationReconciliationToleranceMs = 100;
+const char* kLastCleanShutdownKey = "last_clean_shutdown";
 }
 
 DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
@@ -118,6 +119,12 @@ bool DatabaseManager::lazyOpen()
     // We migrate all existing rows to finalized=1 because checkpoints from older
     // versions are indistinguishable from completed entries.
     if (!ensureIsFinalizedColumn()) {
+        db.close();
+        return false;
+    }
+
+    // Keep a tiny key/value table for lifecycle markers (e.g. clean shutdown).
+    if (!ensureSettingsTable()) {
         db.close();
         return false;
     }
@@ -310,6 +317,23 @@ bool DatabaseManager::ensureIsFinalizedColumn()
     if (!migrateQuery.exec("UPDATE durations SET is_finalized = 1")) {
         if (settings_.logToFile()) {
             Logger::Log("[DB] Error finalizing migrated rows: " + migrateQuery.lastError().text());
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool DatabaseManager::ensureSettingsTable()
+{
+    QSqlQuery query(db);
+    if (!query.exec(
+            "CREATE TABLE IF NOT EXISTS app_settings ("
+            "key TEXT PRIMARY KEY,"
+            "value TEXT NOT NULL"
+            ")")) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error creating app_settings table: " + query.lastError().text());
         }
         return false;
     }
@@ -1005,4 +1029,90 @@ bool DatabaseManager::reconcileUnfinalizedCheckpoints(const std::vector<long lon
     }
     lazyClose();
     return committed;
+}
+
+bool DatabaseManager::setLastCleanShutdownMarker(const QDateTime& timestamp)
+{
+    if (history_days_to_keep_ == 0) {
+        return true;
+    }
+
+    if (!lazyOpen()) {
+        return false;
+    }
+
+    if (!db.transaction()) {
+        lazyClose();
+        return false;
+    }
+
+    const QString markerValue = timestamp.toUTC().toString(Qt::ISODateWithMs);
+    QSqlQuery query(db);
+    query.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (:key, :value)");
+    query.bindValue(":key", QString::fromLatin1(kLastCleanShutdownKey));
+    query.bindValue(":value", markerValue);
+
+    if (!query.exec()) {
+        db.rollback();
+        lazyClose();
+        return false;
+    }
+
+    const bool committed = db.commit();
+    if (!committed) {
+        db.rollback();
+    }
+
+    lazyClose();
+    return committed;
+}
+
+std::optional<QDateTime> DatabaseManager::consumeLastCleanShutdownMarker()
+{
+    if (history_days_to_keep_ == 0) {
+        return std::nullopt;
+    }
+
+    if (!lazyOpen()) {
+        return std::nullopt;
+    }
+
+    if (!db.transaction()) {
+        lazyClose();
+        return std::nullopt;
+    }
+
+    std::optional<QDateTime> marker;
+    QSqlQuery readQuery(db);
+    readQuery.prepare("SELECT value FROM app_settings WHERE key = :key");
+    readQuery.bindValue(":key", QString::fromLatin1(kLastCleanShutdownKey));
+    if (readQuery.exec() && readQuery.next()) {
+        const QString value = readQuery.value(0).toString();
+        QDateTime parsed = QDateTime::fromString(value, Qt::ISODateWithMs);
+        if (!parsed.isValid()) {
+            parsed = QDateTime::fromString(value, Qt::ISODate);
+        }
+        if (parsed.isValid()) {
+            marker = parsed.toLocalTime();
+        }
+    }
+
+    QSqlQuery deleteQuery(db);
+    deleteQuery.prepare("DELETE FROM app_settings WHERE key = :key");
+    deleteQuery.bindValue(":key", QString::fromLatin1(kLastCleanShutdownKey));
+    if (!deleteQuery.exec()) {
+        db.rollback();
+        lazyClose();
+        return std::nullopt;
+    }
+
+    const bool committed = db.commit();
+    if (!committed) {
+        db.rollback();
+        lazyClose();
+        return std::nullopt;
+    }
+
+    lazyClose();
+    return marker;
 }

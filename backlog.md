@@ -142,7 +142,7 @@ doing the schema rework in Phase 4.
   - Orphan older than 24 h or below the 1-second threshold is dropped, not
     committed.
 
-### T5. [F3 follow-up] Write a `last_clean_shutdown` marker for diagnostic clarity
+### T5. [DONE] [F3 follow-up] Write a `last_clean_shutdown` marker for diagnostic clarity
 - **Where:** `DatabaseManager` settings table (add one if absent) or
   `user-settings.ini`.
 - **Problem:** The reconciliation pass in T4 needs to *know* a crash happened

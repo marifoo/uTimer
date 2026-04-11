@@ -21,6 +21,7 @@
 #include <QtDebug>
 #include <QDateTime>
 #include <QMutexLocker>
+#include <algorithm>
 #include <new>  // for std::bad_alloc
 #include "logger.h"
 #include "helpers.h"
@@ -35,7 +36,8 @@ TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
       was_active_before_autopause_(false), has_unsaved_data_(false), is_locked_(false),
       checkpoints_paused_(false), db_(settings, parent), current_checkpoint_id_(-1),
       checkpoint_interval_msec_(settings.getCheckpointIntervalMsec()),
-      last_history_load_skipped_(0), last_history_load_repaired_(0), startup_recovered_seconds_(0)
+      last_history_load_skipped_(0), last_history_load_repaired_(0),
+      startup_recovered_seconds_(0), startup_recovery_notification_needed_(false)
 {
     // Setup checkpoint timer (disabled if interval is 0)
     if (checkpoint_interval_msec_ > 0) {
@@ -49,7 +51,8 @@ TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
         Logger::Log("[CHECKPOINT] Checkpoints disabled (interval = 0)");
     }
 
-    startup_recovered_seconds_ = reconcileOrphanCheckpoints(db_.loadUnfinalizedCheckpoints());
+    const std::optional<QDateTime> cleanShutdownMarker = db_.consumeLastCleanShutdownMarker();
+    startup_recovered_seconds_ = reconcileOrphanCheckpoints(db_.loadUnfinalizedCheckpoints(), cleanShutdownMarker);
 }
 
 TimeTracker::~TimeTracker()
@@ -320,6 +323,7 @@ void TimeTracker::stopTimer()
         durations_.clear();
         has_unsaved_data_ = false;
         unsaved_durations_.clear();
+        db_.setLastCleanShutdownMarker(QDateTime::currentDateTime());
         if (settings_.logToFile()) {
             Logger::Log("[DB] Session durations updated");
         }
@@ -476,6 +480,23 @@ qint64 TimeTracker::getStartupRecoveredSeconds() const
 {
     QMutexLocker locker(&mutex_);
     return startup_recovered_seconds_;
+}
+
+bool TimeTracker::shouldShowStartupRecoveryNotification() const
+{
+    QMutexLocker locker(&mutex_);
+    return startup_recovery_notification_needed_;
+}
+
+bool TimeTracker::markCleanShutdown()
+{
+    return db_.setLastCleanShutdownMarker(QDateTime::currentDateTime());
+}
+
+bool TimeTracker::canMarkCleanShutdown() const
+{
+    QMutexLocker locker(&mutex_);
+    return mode_ == Mode::None && !has_unsaved_data_;
 }
 
 bool TimeTracker::appendDurationsToDB()
@@ -726,8 +747,12 @@ void TimeTracker::flushDatabaseToDisc()
     db_.flushToDisc();
 }
 
-qint64 TimeTracker::reconcileOrphanCheckpoints(const std::deque<DatabaseManager::OrphanCheckpoint>& orphans)
+qint64 TimeTracker::reconcileOrphanCheckpoints(
+    const std::deque<DatabaseManager::OrphanCheckpoint>& orphans,
+    const std::optional<QDateTime>& cleanShutdownMarker)
 {
+    startup_recovery_notification_needed_ = false;
+
     if (orphans.empty()) {
         return 0;
     }
@@ -755,6 +780,31 @@ qint64 TimeTracker::reconcileOrphanCheckpoints(const std::deque<DatabaseManager:
             Logger::Log("[DB] Failed to reconcile orphan checkpoints");
         }
         return 0;
+    }
+
+    if (!finalizeIds.empty()) {
+        bool showNotification = true;
+
+        if (cleanShutdownMarker.has_value() && cleanShutdownMarker->isValid()) {
+            const QDateTime markerUtc = cleanShutdownMarker->toUTC();
+            QDateTime oldestFinalizedOrphanEndUtc;
+            for (const auto& orphan : orphans) {
+                if (std::find(finalizeIds.begin(), finalizeIds.end(), orphan.id) == finalizeIds.end()) {
+                    continue;
+                }
+
+                const QDateTime orphanEndUtc = orphan.endTime.toUTC();
+                if (!oldestFinalizedOrphanEndUtc.isValid() || orphanEndUtc < oldestFinalizedOrphanEndUtc) {
+                    oldestFinalizedOrphanEndUtc = orphanEndUtc;
+                }
+            }
+
+            if (oldestFinalizedOrphanEndUtc.isValid() && markerUtc >= oldestFinalizedOrphanEndUtc) {
+                showNotification = false;
+            }
+        }
+
+        startup_recovery_notification_needed_ = showNotification;
     }
 
     if (settings_.logToFile()) {

@@ -6,6 +6,7 @@
 #include <QDateTime>
 #include <deque>
 #include <vector>
+#include <optional>
 #include "types.h"
 #include "settings.h"
 
@@ -50,6 +51,8 @@ public:
     void flushToDisc(); // Force pending writes to disk (for shutdown safety)
     std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints();
     bool reconcileUnfinalizedCheckpoints(const std::vector<long long>& finalizeIds, const std::vector<long long>& dropIds);
+    bool setLastCleanShutdownMarker(const QDateTime& timestamp);
+    std::optional<QDateTime> consumeLastCleanShutdownMarker();
 
 private:
     QSqlDatabase db;
@@ -59,6 +62,7 @@ private:
     void lazyClose();
     bool validateSchema();
     bool ensureIsFinalizedColumn();
+    bool ensureSettingsTable();
     bool createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
 };
 
