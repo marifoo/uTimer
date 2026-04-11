@@ -269,7 +269,7 @@ of failures. They depend on Phase 1 being done but can overlap with Phase 2.
   the condition to `< 3`. Pick whichever matches product intent; document it.
 - **Tests:** Boundary tests for exactly 2, 3, and 4 seconds.
 
-### T11. [m] Correct historical grouping for cross-midnight entries
+### T11. [DONE] [m] Correct historical grouping for cross-midnight entries
 - **Where:** `historydialog.cpp:95`.
 - **Problem:** Grouping uses `endTime.date()`. A cross-midnight entry (only
   possible if the midnight auto-split path is skipped) is attached to the end

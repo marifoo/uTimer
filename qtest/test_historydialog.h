@@ -25,6 +25,7 @@ private slots:
 
     void test_historydialog_createPages_includes_current_db_ongoing();
     void test_historydialog_createPages_dedups_db_row_with_small_time_drift();
+    void test_historydialog_createPages_groups_unsplit_cross_midnight_row_by_start_date();
     void test_historydialog_checkbox_toggle_updates_pending_and_totals();
     void test_historydialog_saveChanges_updates_timetracker_and_db();
     void test_historydialog_split_action_splits_row();

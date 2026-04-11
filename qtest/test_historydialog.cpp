@@ -98,6 +98,35 @@ void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_
     QCOMPARE(dialog.pendingChanges_[0][0].endTime, memoryEnd);
 }
 
+void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midnight_row_by_start_date()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    TimeTracker tracker(settings);
+
+    const QDate startDate = QDate::currentDate().addDays(-1);
+    const QDateTime crossMidnightStart(startDate, QTime(23, 59, 50));
+    const QDateTime crossMidnightEnd = crossMidnightStart.addSecs(20);
+
+    std::deque<TimeDuration> dbDurations;
+    dbDurations.emplace_back(DurationType::Activity, crossMidnightStart, crossMidnightEnd);
+    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
+
+    HistoryDialog dialog(tracker, settings);
+
+    QCOMPARE(dialog.pages_.size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.pages_[0].isCurrent, true);
+    QCOMPARE(dialog.pages_[0].durations.size(), static_cast<size_t>(0));
+
+    QCOMPARE(dialog.pages_[1].isCurrent, false);
+    QCOMPARE(dialog.pages_[1].durations.size(), static_cast<size_t>(1));
+    QCOMPARE(dialog.pages_[1].durations[0].startTime, crossMidnightStart);
+    QCOMPARE(dialog.pages_[1].durations[0].endTime, crossMidnightEnd);
+    QVERIFY(dialog.pages_[1].title.startsWith(startDate.toString("yyyy-MM-dd")));
+}
+
 void HistoryDialogTest::test_historydialog_checkbox_toggle_updates_pending_and_totals()
 {
     resetDatabaseFile();

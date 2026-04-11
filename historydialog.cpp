@@ -117,7 +117,7 @@ void HistoryDialog::createPages()
         if (isDuplicateOfCurrent) {
             continue;
         }
-        historyByDay[d.endTime.date()].push_back(d);
+        historyByDay[d.startTime.date()].push_back(d);
     }
     QList<QDate> historyDates = historyByDay.keys();
     std::sort(historyDates.begin(), historyDates.end(), std::greater<QDate>()); // Most recent first
