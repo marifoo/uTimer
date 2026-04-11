@@ -280,7 +280,7 @@ of failures. They depend on Phase 1 being done but can overlap with Phase 2.
 - **Tests:** Seed the DB with an unsplit cross-midnight row, verify it
   appears on its start date.
 
-### T12. [m] Clarify Prev/Next navigation direction
+### T12. [DONE] [m] Clarify Prev/Next navigation direction
 - **Where:** `historydialog.cpp:346–347`.
 - **Problem:** Prev/Next enable logic is inverted relative to natural UX
   (Prev goes backward in time, but the array index math makes this confusing

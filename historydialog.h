@@ -58,8 +58,8 @@ private:
     QString buildLoadReconciliationMessage() const;
 
 private slots:
-    void onPrevClicked();
-    void onNextClicked();
+    void onOlder();
+    void onNewer();
     void onSplitRow();
 
 public:

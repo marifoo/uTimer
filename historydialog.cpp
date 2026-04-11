@@ -220,8 +220,8 @@ void HistoryDialog::setupUI()
     layout->addLayout(buttonLayout);
 
     // Connect signals
-    connect(prevButton_, &QPushButton::clicked, this, &HistoryDialog::onPrevClicked);
-    connect(nextButton_, &QPushButton::clicked, this, &HistoryDialog::onNextClicked);
+    connect(prevButton_, &QPushButton::clicked, this, &HistoryDialog::onOlder);
+    connect(nextButton_, &QPushButton::clicked, this, &HistoryDialog::onNewer);
     connect(okButton, &QPushButton::clicked, this, &QDialog::accept);
     connect(cancelButton, &QPushButton::clicked, this, &QDialog::reject);
 
@@ -414,7 +414,7 @@ void HistoryDialog::updateTable(uint idx)
     nextButton_->setEnabled(pageIndex_ > 0);
 }
 
-void HistoryDialog::onPrevClicked()
+void HistoryDialog::onOlder()
 {
     if (pageIndex_ < pages_.size() - 1) {
         pageIndex_++;
@@ -422,7 +422,7 @@ void HistoryDialog::onPrevClicked()
     }
 }
 
-void HistoryDialog::onNextClicked()
+void HistoryDialog::onNewer()
 {
     if (pageIndex_ > 0) {
         pageIndex_--;
