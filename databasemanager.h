@@ -16,6 +16,7 @@ class DatabaseManager : public QObject
 public:
     struct OrphanCheckpoint {
         long long id = -1;
+        QString segment_id;
         DurationType type = DurationType::Activity;
         qint64 duration = 0;
         QDateTime startTime;
@@ -47,8 +48,8 @@ public:
                               const std::deque<TimeDuration>& currentSessionDurations);
     LoadResult loadDurations();
     bool hasEntriesForDate(const QDate& date);
-    bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, long long& checkpointId);
-    bool updateDurationsByStartTime(const std::deque<TimeDuration>& durations);
+    bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId);
+    bool updateDurationsById(const std::deque<TimeDuration>& durations);
     bool checkSchemaOnStartup(); // Returns true if schema is valid, false if outdated
     void flushToDisc(); // Force pending writes to disk (for shutdown safety)
     std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints();
@@ -64,6 +65,7 @@ private:
     void lazyClose();
     bool validateSchema();
     bool ensureIsFinalizedColumn();
+    bool ensureSegmentIdColumn();
     bool ensureSettingsTable();
     bool createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
 };

@@ -32,7 +32,7 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     QString settingsPath = createSettingsFile(tempDir.path(), 7);
-    long long orphanRowId = -1;
+    QString orphanSegmentId;
     
     {
         // First session: Start timer and save checkpoint
@@ -44,12 +44,12 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
         
         // Manually save checkpoint
         tracker.saveCheckpointInternal();
-        QVERIFY(tracker.current_checkpoint_id_ != -1);
-        orphanRowId = tracker.current_checkpoint_id_;
+        QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
+        orphanSegmentId = tracker.current_checkpoint_segment_id_;
 
         // Simulate an unclean shutdown: keep checkpoint row, skip graceful stop.
         tracker.mode_ = TimeTracker::Mode::None;
-        tracker.current_checkpoint_id_ = -1;
+        tracker.current_checkpoint_segment_id_.clear();
 
         // Simulate crash (tracker destroyed without stopping)
     }
@@ -68,8 +68,8 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
         // Reconciliation must keep row identity by finalizing in place.
         QVERIFY(db.lazyOpen());
         QSqlQuery query(db.db);
-        query.prepare("SELECT is_finalized FROM durations WHERE id = :id");
-        query.bindValue(":id", orphanRowId);
+        query.prepare("SELECT is_finalized FROM durations WHERE segment_id = :segment_id");
+        query.bindValue(":segment_id", orphanSegmentId);
         QVERIFY(query.exec());
         QVERIFY(query.next());
         QCOMPARE(query.value(0).toInt(), 1);
@@ -90,8 +90,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_is_idempotent()
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal();
-        QVERIFY(tracker.current_checkpoint_id_ != -1);
-        tracker.current_checkpoint_id_ = -1;
+        QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
+        tracker.current_checkpoint_segment_id_.clear();
         tracker.mode_ = TimeTracker::Mode::None;
     }
 
@@ -128,9 +128,10 @@ void IntegrationTest::test_integration_orphan_reconciliation_drops_stale_and_too
         const QDateTime start = QDateTime::currentDateTimeUtc().addSecs(-10);
         const QDateTime end = start.addMSecs(500);
         insert.prepare(
-            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-            "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
+            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
         );
+        insert.bindValue(":segment_id", TimeDuration::createSegmentId());
         insert.bindValue(":type", static_cast<int>(DurationType::Activity));
         insert.bindValue(":duration", static_cast<qint64>(500));
         insert.bindValue(":start_date", start.date().toString(Qt::ISODate));
@@ -146,9 +147,10 @@ void IntegrationTest::test_integration_orphan_reconciliation_drops_stale_and_too
         const QDateTime start = QDateTime::currentDateTimeUtc().addDays(-2);
         const QDateTime end = start.addSecs(30);
         insert.prepare(
-            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-            "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
+            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
         );
+        insert.bindValue(":segment_id", TimeDuration::createSegmentId());
         insert.bindValue(":type", static_cast<int>(DurationType::Activity));
         insert.bindValue(":duration", static_cast<qint64>(30000));
         insert.bindValue(":start_date", start.date().toString(Qt::ISODate));
@@ -180,8 +182,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_present_is_s
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal();
-        QVERIFY(tracker.current_checkpoint_id_ != -1);
-        tracker.current_checkpoint_id_ = -1;
+        QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
+        tracker.current_checkpoint_segment_id_.clear();
         tracker.mode_ = TimeTracker::Mode::None;
     }
 
@@ -212,8 +214,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_absent_shows
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal();
-        QVERIFY(tracker.current_checkpoint_id_ != -1);
-        tracker.current_checkpoint_id_ = -1;
+        QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
+        tracker.current_checkpoint_segment_id_.clear();
         tracker.mode_ = TimeTracker::Mode::None;
     }
 
@@ -248,7 +250,7 @@ void IntegrationTest::test_integration_memory_db_consistency()
     
     // Save checkpoint
     tracker.saveCheckpointInternal();
-    QVERIFY(tracker.current_checkpoint_id_ != -1);
+    QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
     
     // Stop
     tracker.useTimerViaButton(Button::Stop);
@@ -315,14 +317,15 @@ void IntegrationTest::test_integration_duplicate_prevention()
     QDateTime start = QDateTime::currentDateTime();
     QDateTime end = start.addSecs(10);
     
-    // Insert same duration twice using saveDurations
+    // Insert same segment twice via update-by-id; second call updates same row.
     std::deque<TimeDuration> durations;
     durations.emplace_back(DurationType::Activity, start, end);
     
-    QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
-    QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
+    QVERIFY(manager.updateDurationsById(durations));
+    durations.front().endTime = end.addSecs(10);
+    durations.front().duration = durations.front().startTime.msecsTo(durations.front().endTime);
+    QVERIFY(manager.updateDurationsById(durations));
     
-    // Load - due to UNIQUE constraint, should have only 1 entry
     auto loaded = manager.loadDurations();
     QCOMPARE(loaded.size(), (size_t)1);
 }
@@ -343,7 +346,7 @@ void IntegrationTest::test_integration_empty_database_operations()
     QVERIFY(!manager.hasEntriesForDate(QDate::currentDate()));
     
     std::deque<TimeDuration> empty;
-    QVERIFY(manager.updateDurationsByStartTime(empty));
+    QVERIFY(manager.updateDurationsById(empty));
 }
 
 void IntegrationTest::test_integration_backpause_db_update()
@@ -360,20 +363,20 @@ void IntegrationTest::test_integration_backpause_db_update()
     
     // Save checkpoint
     tracker.saveCheckpointInternal();
-    long long checkpointId = tracker.current_checkpoint_id_;
-    QVERIFY(checkpointId != -1);
+    QString checkpointSegmentId = tracker.current_checkpoint_segment_id_;
+    QVERIFY(!checkpointSegmentId.isEmpty());
     
     // Simulate lock
     tracker.useTimerViaLockEvent(LockEvent::Lock);
     
     // Checkpoint ID should still be valid (lock doesn't reset it)
-    QCOMPARE(tracker.current_checkpoint_id_, checkpointId);
+    QCOMPARE(tracker.current_checkpoint_segment_id_, checkpointSegmentId);
     
     // Simulate long ongoing lock (triggers backpause)
     tracker.useTimerViaLockEvent(LockEvent::LongOngoingLock);
     
-    // Verify checkpoint ID was reset by backpause
-    QCOMPARE(tracker.current_checkpoint_id_, (long long)-1);
+    // Backpause transitions to Pause and starts a fresh segment identity.
+    QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
     
     // Verify durations were updated in DB
     DatabaseManager db(settings);

@@ -298,7 +298,7 @@ Addresses **F1**, **F2**, and the upsert-by-start-time class of bugs
 stable before starting this phase because it rewrites the persistence
 contract.
 
-### T13. [F1] Introduce stable `segment_id` as the row identity
+### T13. [DONE] [F1] Introduce stable `segment_id` as the row identity
 - **Where:** `databasemanager.cpp:101` (schema), all write paths, all upsert
   sites, `TimeTracker::durations_` container, `Duration` struct.
 - **Problem:** The `UNIQUE(start_date, start_time, type) ON CONFLICT REPLACE`

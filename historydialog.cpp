@@ -32,19 +32,14 @@
 #include <algorithm>
 
 namespace {
-constexpr qint64 kDedupStartToleranceMs = 1000;
-constexpr qint64 kDedupEndToleranceMs = 1000;
 constexpr int kMinimumSplitDurationSeconds = 3;
 
-bool isCurrentAndDbNearDuplicate(const TimeDuration& dbDuration, const TimeDuration& currentDuration)
+bool isSameSegmentId(const TimeDuration& a, const TimeDuration& b)
 {
-    if (dbDuration.type != currentDuration.type) {
+    if (a.segment_id.isEmpty() || b.segment_id.isEmpty()) {
         return false;
     }
-
-    const qint64 startDeltaMs = dbDuration.startTime.msecsTo(currentDuration.startTime);
-    const qint64 endDeltaMs = dbDuration.endTime.msecsTo(currentDuration.endTime);
-    return qAbs(startDeltaMs) < kDedupStartToleranceMs && qAbs(endDeltaMs) < kDedupEndToleranceMs;
+    return a.segment_id == b.segment_id;
 }
 }
 
@@ -110,7 +105,7 @@ void HistoryDialog::createPages()
             currentComparableDurations.begin(),
             currentComparableDurations.end(),
             [&d](const TimeDuration& currentDuration) {
-                return isCurrentAndDbNearDuplicate(d, currentDuration);
+                return isSameSegmentId(d, currentDuration);
             }
         );
 
@@ -649,7 +644,7 @@ void HistoryDialog::onSplitRow()
         DurationType secondType = dlg.getSecondSegmentType();
 
         // Create split segments with explicit start/end times
-        TimeDuration first(firstType, start, splitTime);
+        TimeDuration first(firstType, start, splitTime, duration.segment_id);
         TimeDuration second(secondType, splitTime, end);
 
         // Replace original duration with two new segments using index-based operations

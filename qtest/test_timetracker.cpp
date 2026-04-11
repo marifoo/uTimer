@@ -39,13 +39,13 @@ void TimeTrackerTest::test_timetracker_start_pause_resume_stop_and_checkpoints()
     QTest::qWait(10);
     QVERIFY(tracker.timer_.isValid());
     QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
-    QCOMPARE(tracker.current_checkpoint_id_, -1);
+    QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
 
     // Pause -> durations captured and checkpoint id reset
     tracker.useTimerViaButton(Button::Pause);
     QCOMPARE(tracker.mode_, TimeTracker::Mode::Pause);
     QVERIFY(tracker.durations_.size() >= 1);
-    QCOMPARE(tracker.current_checkpoint_id_, -1);
+    QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
 
     // Resume -> Activity and timer restarted
     tracker.useTimerViaButton(Button::Start);
@@ -56,12 +56,12 @@ void TimeTrackerTest::test_timetracker_start_pause_resume_stop_and_checkpoints()
     // Trigger checkpoint manually
     QTest::qWait(100); // Ensure elapsed > 0
     tracker.saveCheckpointInternal();
-    QVERIFY(tracker.current_checkpoint_id_ != -1);
+    QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
 
     // Stop -> move to None and durations flushed
     tracker.useTimerViaButton(Button::Stop);
     QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
-    QCOMPARE(tracker.current_checkpoint_id_, -1);
+    QVERIFY(tracker.current_checkpoint_segment_id_.isEmpty());
 }
 
 void TimeTrackerTest::test_timetracker_backpause_resets_checkpoint_and_splits()
@@ -85,7 +85,7 @@ void TimeTrackerTest::test_timetracker_backpause_resets_checkpoint_and_splits()
 
     tracker.backpauseTimer();
     QCOMPARE(tracker.mode_, TimeTracker::Mode::Pause);
-    QCOMPARE(tracker.current_checkpoint_id_, -1);
+    QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
     QVERIFY(tracker.durations_.size() >= 2);
     // Sum should equal ~120s
     qint64 total = sumDurations(tracker.durations_, DurationType::Activity) +

@@ -99,6 +99,7 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 
 			// Current entry starts before previous (shorter) entry -> keep current's fields
 			if (it_start < prev_start && prev_end <= it_end) {
+				prevIt->segment_id = it->segment_id;
 				prevIt->startTime = it->startTime;
 				prevIt->endTime = it->endTime;
 				prevIt->duration = it->duration;
@@ -108,6 +109,7 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 
 			// Current entry starts before previous (longer) entry -> join
 			if (it_start < prev_start && it_end < prev_end && it_start < prev_end) {
+				prevIt->segment_id = it->segment_id;
 				prevIt->startTime = it->startTime;
 				prevIt->duration = prev_end - it_start;
 				it = durations.erase(it);

@@ -8,7 +8,7 @@
  * Save methods:
  * - saveDurations(): Full save with backup creation, used for stopTimer/HistoryDialog
  * - saveCheckpoint(): Lightweight update without backup, used for periodic checkpoints
- * - updateDurationsByStartTime(): Smart upsert matching entries by calculated start time
+ * - updateDurationsById(): Smart upsert matching entries by stable segment_id
  *
  * Backup strategy:
  * - saveDurations() creates timestamped .backup file + .durations.txt log before writes
@@ -97,6 +97,7 @@ bool DatabaseManager::lazyOpen()
     bool tableCreated = query_new.exec(
         "CREATE TABLE IF NOT EXISTS durations ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "segment_id TEXT NOT NULL," // Stable segment identity across edits/reloads
         "type INTEGER NOT NULL," // 0 = Activity, 1 = Pause (DurationType enum)
         "duration INTEGER NOT NULL," // Duration in milliseconds
         "start_date DATE NOT NULL," // Date when the duration started
@@ -104,7 +105,7 @@ bool DatabaseManager::lazyOpen()
         "end_date DATE NOT NULL," // Date when the duration ended
         "end_time TEXT NOT NULL," // Time when the duration ended (UTC, TIME(3) precision)
         "is_finalized INTEGER NOT NULL DEFAULT 0,"
-        "UNIQUE(start_date, start_time, type) ON CONFLICT REPLACE" // Prevent duplicate entries
+        "UNIQUE(segment_id)"
         ")"
     );
 
@@ -119,6 +120,11 @@ bool DatabaseManager::lazyOpen()
     // We migrate all existing rows to finalized=1 because checkpoints from older
     // versions are indistinguishable from completed entries.
     if (!ensureIsFinalizedColumn()) {
+        db.close();
+        return false;
+    }
+
+    if (!ensureSegmentIdColumn()) {
         db.close();
         return false;
     }
@@ -147,11 +153,11 @@ bool DatabaseManager::lazyOpen()
         // Non-fatal: continue even if index creation fails
     }
 
-    // Create composite index for start time queries
-    QSqlQuery startIndexQuery(db);
-    if (!startIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_start_datetime ON durations(start_date, start_time, type)")) {
+    // Index for segment identity lookups (checkpoint/update paths).
+    QSqlQuery segmentIndexQuery(db);
+    if (!segmentIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_segment_id ON durations(segment_id)")) {
         if (settings_.logToFile()) {
-            Logger::Log("[DB] Warning: Failed to create start_datetime index: " + startIndexQuery.lastError().text());
+            Logger::Log("[DB] Warning: Failed to create segment_id index: " + segmentIndexQuery.lastError().text());
         }
         // Non-fatal: continue even if index creation fails
     }
@@ -230,7 +236,7 @@ bool DatabaseManager::checkSchemaOnStartup()
         return false;
     }
 
-    bool valid = validateSchema();
+    bool valid = ensureIsFinalizedColumn() && ensureSegmentIdColumn() && validateSchema();
     db.close();
 
     return valid;
@@ -257,6 +263,7 @@ bool DatabaseManager::validateSchema()
 
     bool hasStartDate = false;
     bool hasStartTime = false;
+    bool hasSegmentId = false;
 
     while (query.next()) {
         QString columnName = query.value(1).toString();
@@ -264,14 +271,17 @@ bool DatabaseManager::validateSchema()
             hasStartDate = true;
         } else if (columnName == "start_time") {
             hasStartTime = true;
+        } else if (columnName == "segment_id") {
+            hasSegmentId = true;
         }
     }
 
-    if (!hasStartDate || !hasStartTime) {
+    if (!hasStartDate || !hasStartTime || !hasSegmentId) {
         if (settings_.logToFile()) {
-            Logger::Log(QString("[DB] Schema validation failed: start_date=%1, start_time=%2")
+            Logger::Log(QString("[DB] Schema validation failed: start_date=%1, start_time=%2, segment_id=%3")
                 .arg(hasStartDate ? "present" : "MISSING")
-                .arg(hasStartTime ? "present" : "MISSING"));
+                .arg(hasStartTime ? "present" : "MISSING")
+                .arg(hasSegmentId ? "present" : "MISSING"));
         }
         return false;
     }
@@ -319,6 +329,107 @@ bool DatabaseManager::ensureIsFinalizedColumn()
             Logger::Log("[DB] Error finalizing migrated rows: " + migrateQuery.lastError().text());
         }
         return false;
+    }
+
+    return true;
+}
+
+bool DatabaseManager::ensureSegmentIdColumn()
+{
+    QSqlQuery tableInfo(db);
+    if (!tableInfo.exec("PRAGMA table_info(durations)")) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error checking table_info for segment_id migration: " + tableInfo.lastError().text());
+        }
+        return false;
+    }
+
+    bool hasSegmentId = false;
+    while (tableInfo.next()) {
+        if (tableInfo.value(1).toString() == "segment_id") {
+            hasSegmentId = true;
+            break;
+        }
+    }
+
+    if (hasSegmentId) {
+        return true;
+    }
+
+    if (settings_.logToFile()) {
+        Logger::Log("[DB] Migrating schema: rebuilding durations table with segment_id identity");
+    }
+
+    if (!db.transaction()) {
+        return false;
+    }
+
+    QSqlQuery createNew(db);
+    if (!createNew.exec(
+            "CREATE TABLE IF NOT EXISTS durations_new ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "segment_id TEXT NOT NULL,"
+            "type INTEGER NOT NULL,"
+            "duration INTEGER NOT NULL,"
+            "start_date DATE NOT NULL,"
+            "start_time TEXT NOT NULL,"
+            "end_date DATE NOT NULL,"
+            "end_time TEXT NOT NULL,"
+            "is_finalized INTEGER NOT NULL DEFAULT 0,"
+            "UNIQUE(segment_id)"
+            ")")) {
+        db.rollback();
+        return false;
+    }
+
+    QSqlQuery selectRows(db);
+    if (!selectRows.exec("SELECT type, duration, start_date, start_time, end_date, end_time, COALESCE(is_finalized, 1) FROM durations ORDER BY id ASC")) {
+        db.rollback();
+        return false;
+    }
+
+    QSqlQuery insertNew(db);
+    insertNew.prepare(
+        "INSERT INTO durations_new (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, :is_finalized)"
+    );
+
+    int migratedRows = 0;
+    while (selectRows.next()) {
+        insertNew.bindValue(":segment_id", TimeDuration::createSegmentId());
+        insertNew.bindValue(":type", selectRows.value(0));
+        insertNew.bindValue(":duration", selectRows.value(1));
+        insertNew.bindValue(":start_date", selectRows.value(2));
+        insertNew.bindValue(":start_time", selectRows.value(3));
+        insertNew.bindValue(":end_date", selectRows.value(4));
+        insertNew.bindValue(":end_time", selectRows.value(5));
+        insertNew.bindValue(":is_finalized", selectRows.value(6));
+        if (!insertNew.exec()) {
+            db.rollback();
+            return false;
+        }
+        migratedRows++;
+    }
+
+    QSqlQuery dropOld(db);
+    if (!dropOld.exec("DROP TABLE durations")) {
+        db.rollback();
+        return false;
+    }
+
+    QSqlQuery renameNew(db);
+    if (!renameNew.exec("ALTER TABLE durations_new RENAME TO durations")) {
+        db.rollback();
+        return false;
+    }
+
+    if (!db.commit()) {
+        db.rollback();
+        return false;
+    }
+
+    if (settings_.logToFile()) {
+        Logger::Log(QString("[DB] segment_id migration completed for %1 rows").arg(migratedRows));
     }
 
     return true;
@@ -478,14 +589,15 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
 
     // Prepare insert statement for batch insertion (storing times in UTC)
     QSqlQuery query(db);
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-                  "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 1)");
+    query.prepare("INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                  "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1)");
 
     // Insert each duration entry (convert to UTC for storage)
     for (const auto& d : durations) {
         QDateTime startUtc = d.startTime.toUTC();
         QDateTime endUtc = d.endTime.toUTC();
 
+        query.bindValue(":segment_id", d.segment_id);
         query.bindValue(":type", static_cast<int>(d.type));
         query.bindValue(":duration", d.duration);
         query.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
@@ -556,14 +668,15 @@ bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& histo
 
     QSqlQuery finalizedInsert(db);
     finalizedInsert.prepare(
-        "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-        "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 1)"
+        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1)"
     );
 
     for (const auto& d : historyDurations) {
         const QDateTime startUtc = d.startTime.toUTC();
         const QDateTime endUtc = d.endTime.toUTC();
 
+        finalizedInsert.bindValue(":segment_id", d.segment_id);
         finalizedInsert.bindValue(":type", static_cast<int>(d.type));
         finalizedInsert.bindValue(":duration", d.duration);
         finalizedInsert.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
@@ -583,14 +696,15 @@ bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& histo
 
     QSqlQuery unfinalizedInsert(db);
     unfinalizedInsert.prepare(
-        "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-        "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
+        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
     );
 
     for (const auto& d : currentSessionDurations) {
         const QDateTime startUtc = d.startTime.toUTC();
         const QDateTime endUtc = d.endTime.toUTC();
 
+        unfinalizedInsert.bindValue(":segment_id", d.segment_id);
         unfinalizedInsert.bindValue(":type", static_cast<int>(d.type));
         unfinalizedInsert.bindValue(":duration", d.duration);
         unfinalizedInsert.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
@@ -651,7 +765,7 @@ DatabaseManager::LoadResult DatabaseManager::loadDurations()
 
     // Load all durations ordered by start date and time
     QSqlQuery query(db);
-    query.prepare("SELECT type, duration, start_date, start_time, end_date, end_time FROM durations WHERE is_finalized = 1 ORDER BY start_date, start_time");
+    query.prepare("SELECT segment_id, type, duration, start_date, start_time, end_date, end_time FROM durations WHERE is_finalized = 1 ORDER BY start_date, start_time");
     if (!query.exec()) {
         db.rollback();
         if (settings_.logToFile()) {
@@ -663,12 +777,13 @@ DatabaseManager::LoadResult DatabaseManager::loadDurations()
 
     // Parse each row and reconstruct TimeDuration objects
     while (query.next()) {
-        int typeInt = query.value(0).toInt();
-        qint64 storedDuration = query.value(1).toLongLong();
-        QDate startDate = QDate::fromString(query.value(2).toString(), Qt::ISODate);
-        QTime startTime = QTime::fromString(query.value(3).toString(), "HH:mm:ss.zzz");
-        QDate endDate = QDate::fromString(query.value(4).toString(), Qt::ISODate);
-        QTime endTime = QTime::fromString(query.value(5).toString(), "HH:mm:ss.zzz");
+        const QString segmentId = query.value(0).toString();
+        int typeInt = query.value(1).toInt();
+        qint64 storedDuration = query.value(2).toLongLong();
+        QDate startDate = QDate::fromString(query.value(3).toString(), Qt::ISODate);
+        QTime startTime = QTime::fromString(query.value(4).toString(), "HH:mm:ss.zzz");
+        QDate endDate = QDate::fromString(query.value(5).toString(), Qt::ISODate);
+        QTime endTime = QTime::fromString(query.value(6).toString(), "HH:mm:ss.zzz");
 
         // Reconstruct QDateTime in UTC, then convert to local time
         QDateTime startDateTime(startDate, startTime, Qt::UTC);
@@ -726,7 +841,7 @@ DatabaseManager::LoadResult DatabaseManager::loadDurations()
         }
 
         // Create TimeDuration with explicit start/end times
-        result.durations.emplace_back(TimeDuration(type, startDateTime, endDateTime));
+        result.durations.emplace_back(TimeDuration(type, startDateTime, endDateTime, segmentId));
     }
 
     db.commit();  // Commit read transaction
@@ -774,14 +889,13 @@ bool DatabaseManager::hasEntriesForDate(const QDate& date)
  *
  * Unlike saveDurations(), this method:
  * - Does NOT create backups (for performance - called every 5 minutes)
- * - Uses checkpointId to update existing row instead of inserting new one
- * - Sets checkpointId to the new row ID on first call (when checkpointId == -1)
+ * - Uses segment_id to update existing row instead of inserting new one
  * - Stores the actual segment_start_time_ (preserves original start, only updates end/duration)
  *
- * The caller (TimeTracker) resets checkpointId to -1 on mode changes,
+ * The caller (TimeTracker) rotates current_checkpoint_segment_id_ on mode changes,
  * causing the next checkpoint to create a new row for the new segment.
  */
-bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, long long& checkpointId)
+bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId)
 {
     // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
@@ -813,88 +927,56 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
     }
 
     bool success = false;
-    QSqlQuery query(db);
+    QSqlQuery updateQuery(db);
+    updateQuery.prepare(
+        "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time, is_finalized = 0 "
+        "WHERE segment_id = :segment_id"
+    );
+    updateQuery.bindValue(":duration", duration);
+    updateQuery.bindValue(":end_date", endDateStr);
+    updateQuery.bindValue(":end_time", endTimeStr);
+    updateQuery.bindValue(":segment_id", segmentId);
 
-    if (checkpointId != -1) {
-        // Update existing entry using known ID (preserve start time, only update end/duration)
-        query.prepare(
-            "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time, is_finalized = 0 "
-            "WHERE id = :id"
+    if (!updateQuery.exec()) {
+        db.rollback();
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error updating checkpoint by segment_id: " + updateQuery.lastError().text());
+        }
+        lazyClose();
+        return false;
+    }
+
+    if (updateQuery.numRowsAffected() > 0) {
+        success = db.commit();
+        if (!success && settings_.logToFile()) {
+            Logger::Log("[DB] Error committing checkpoint update: " + db.lastError().text());
+        }
+    } else {
+        QSqlQuery insertQuery(db);
+        insertQuery.prepare(
+            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
         );
-        query.bindValue(":duration", duration);
-        query.bindValue(":end_date", endDateStr);
-        query.bindValue(":end_time", endTimeStr);
-        query.bindValue(":id", checkpointId);
+        insertQuery.bindValue(":segment_id", segmentId);
+        insertQuery.bindValue(":type", static_cast<int>(type));
+        insertQuery.bindValue(":duration", duration);
+        insertQuery.bindValue(":start_date", startDateStr);
+        insertQuery.bindValue(":start_time", startTimeStr);
+        insertQuery.bindValue(":end_date", endDateStr);
+        insertQuery.bindValue(":end_time", endTimeStr);
 
-        if (query.exec()) {
-            if (query.numRowsAffected() > 0) {
-                success = db.commit();
-                if (!success && settings_.logToFile()) {
-                    Logger::Log("[DB] Error committing checkpoint update: " + db.lastError().text());
-                }
-            } else {
-                // Row was deleted (retention cleanup or manual edit). Insert a new checkpoint.
-                QSqlQuery insertQuery(db);
-                insertQuery.prepare(
-                    "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-                    "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
-                );
-                insertQuery.bindValue(":type", static_cast<int>(type));
-                insertQuery.bindValue(":duration", duration);
-                insertQuery.bindValue(":start_date", startDateStr);
-                insertQuery.bindValue(":start_time", startTimeStr);
-                insertQuery.bindValue(":end_date", endDateStr);
-                insertQuery.bindValue(":end_time", endTimeStr);
-
-                if (insertQuery.exec()) {
-                    checkpointId = insertQuery.lastInsertId().toLongLong();
-                    success = db.commit();
-                    if (!success && settings_.logToFile()) {
-                        Logger::Log("[DB] Error committing checkpoint insert after missing row: " + db.lastError().text());
-                    }
-                } else {
-                    db.rollback();
-                    if (settings_.logToFile()) {
-                        Logger::Log("[DB] Error inserting checkpoint after missing row: " + insertQuery.lastError().text());
-                    }
-                    lazyClose();
-                    return false;
-                }
-            }
-        } else {
+        if (!insertQuery.exec()) {
             db.rollback();
             if (settings_.logToFile()) {
-                Logger::Log("[DB] Error updating checkpoint: " + query.lastError().text());
+                Logger::Log("[DB] Error inserting checkpoint by segment_id: " + insertQuery.lastError().text());
             }
             lazyClose();
             return false;
         }
-    } else {
-        // Append new checkpoint entry with start time
-        query.prepare(
-            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-            "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
-        );
-        query.bindValue(":type", static_cast<int>(type));
-        query.bindValue(":duration", duration);
-        query.bindValue(":start_date", startDateStr);
-        query.bindValue(":start_time", startTimeStr);
-        query.bindValue(":end_date", endDateStr);
-        query.bindValue(":end_time", endTimeStr);
 
-        if (query.exec()) {
-            checkpointId = query.lastInsertId().toLongLong(); // Capture the new ID
-            success = db.commit();
-            if (!success && settings_.logToFile()) {
-                Logger::Log("[DB] Error committing checkpoint insert: " + db.lastError().text());
-            }
-        } else {
-            db.rollback();
-            if (settings_.logToFile()) {
-                Logger::Log("[DB] Error inserting checkpoint: " + query.lastError().text());
-            }
-            lazyClose();
-            return false;
+        success = db.commit();
+        if (!success && settings_.logToFile()) {
+            Logger::Log("[DB] Error committing checkpoint insert: " + db.lastError().text());
         }
     }
 
@@ -903,18 +985,13 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
 }
 
 /**
- * Smart upsert (update or insert) for a batch of durations using exact start time matching.
- *
- * This method uses the UNIQUE constraint on (start_date, start_time, type) for
- * conflict resolution. When a duration with matching start time/type already exists,
- * the INSERT OR REPLACE will update the existing row.
+ * Smart upsert (update or insert) for a batch of durations using segment identity.
  *
  * Use Case:
- * - When the timer stops or pauses, we want to update the "current" session in the DB
- *   without creating duplicates.
- * - The UNIQUE constraint ensures no ambiguous matching is needed.
+ * - When the timer stops or pauses, we update existing segment rows by segment_id.
+ * - If a segment row is missing, it is inserted with the same segment_id.
  */
-bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>& durations)
+bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durations)
 {
     if (durations.empty()) {
         return true;
@@ -940,12 +1017,16 @@ bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>&
         return false;
     }
 
-    // Use INSERT OR REPLACE which leverages the UNIQUE constraint on (start_date, start_time, type)
-    // If a row with matching start_date, start_time, and type exists, it will be replaced
+    QSqlQuery updateQuery(db);
+    updateQuery.prepare(
+        "UPDATE durations SET type = :type, duration = :duration, start_date = :start_date, start_time = :start_time, "
+        "end_date = :end_date, end_time = :end_time, is_finalized = 1 WHERE segment_id = :segment_id"
+    );
+
     QSqlQuery insertQuery(db);
     insertQuery.prepare(
-        "INSERT OR REPLACE INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-        "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 1)"
+        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1)"
     );
 
     int count = 0;
@@ -955,20 +1036,45 @@ bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>&
         QDateTime startUtc = d.startTime.toUTC();
         QDateTime endUtc = d.endTime.toUTC();
 
-        insertQuery.bindValue(":type", static_cast<int>(d.type));
-        insertQuery.bindValue(":duration", d.duration);
-        insertQuery.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
-        insertQuery.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
-        insertQuery.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
-        insertQuery.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
+        const QString startDate = startUtc.date().toString(Qt::ISODate);
+        const QString startTime = startUtc.time().toString("HH:mm:ss.zzz");
+        const QString endDate = endUtc.date().toString(Qt::ISODate);
+        const QString endTime = endUtc.time().toString("HH:mm:ss.zzz");
 
-        if (!insertQuery.exec()) {
+        updateQuery.bindValue(":segment_id", d.segment_id);
+        updateQuery.bindValue(":type", static_cast<int>(d.type));
+        updateQuery.bindValue(":duration", d.duration);
+        updateQuery.bindValue(":start_date", startDate);
+        updateQuery.bindValue(":start_time", startTime);
+        updateQuery.bindValue(":end_date", endDate);
+        updateQuery.bindValue(":end_time", endTime);
+
+        if (!updateQuery.exec()) {
             db.rollback();
             if (settings_.logToFile()) {
-                Logger::Log("[DB] Error upserting duration: " + insertQuery.lastError().text());
+                Logger::Log("[DB] Error updating duration by segment_id: " + updateQuery.lastError().text());
             }
             lazyClose();
             return false;
+        }
+
+        if (updateQuery.numRowsAffected() == 0) {
+            insertQuery.bindValue(":segment_id", d.segment_id);
+            insertQuery.bindValue(":type", static_cast<int>(d.type));
+            insertQuery.bindValue(":duration", d.duration);
+            insertQuery.bindValue(":start_date", startDate);
+            insertQuery.bindValue(":start_time", startTime);
+            insertQuery.bindValue(":end_date", endDate);
+            insertQuery.bindValue(":end_time", endTime);
+
+            if (!insertQuery.exec()) {
+                db.rollback();
+                if (settings_.logToFile()) {
+                    Logger::Log("[DB] Error inserting duration by segment_id: " + insertQuery.lastError().text());
+                }
+                lazyClose();
+                return false;
+            }
         }
         count++;
     }
@@ -1051,7 +1157,7 @@ std::deque<DatabaseManager::OrphanCheckpoint> DatabaseManager::loadUnfinalizedCh
     }
 
     QSqlQuery query(db);
-    query.prepare("SELECT id, type, duration, start_date, start_time, end_date, end_time FROM durations WHERE is_finalized = 0 ORDER BY id ASC");
+    query.prepare("SELECT id, segment_id, type, duration, start_date, start_time, end_date, end_time FROM durations WHERE is_finalized = 0 ORDER BY id ASC");
     if (!query.exec()) {
         if (settings_.logToFile()) {
             Logger::Log("[DB] Error loading orphan checkpoints: " + query.lastError().text());
@@ -1061,24 +1167,25 @@ std::deque<DatabaseManager::OrphanCheckpoint> DatabaseManager::loadUnfinalizedCh
     }
 
     while (query.next()) {
-        int typeInt = query.value(1).toInt();
+        int typeInt = query.value(2).toInt();
         if (typeInt != static_cast<int>(DurationType::Activity) &&
             typeInt != static_cast<int>(DurationType::Pause)) {
             continue;
         }
 
-        QDate startDate = QDate::fromString(query.value(3).toString(), Qt::ISODate);
-        QTime startTime = QTime::fromString(query.value(4).toString(), "HH:mm:ss.zzz");
-        QDate endDate = QDate::fromString(query.value(5).toString(), Qt::ISODate);
-        QTime endTime = QTime::fromString(query.value(6).toString(), "HH:mm:ss.zzz");
+        QDate startDate = QDate::fromString(query.value(4).toString(), Qt::ISODate);
+        QTime startTime = QTime::fromString(query.value(5).toString(), "HH:mm:ss.zzz");
+        QDate endDate = QDate::fromString(query.value(6).toString(), Qt::ISODate);
+        QTime endTime = QTime::fromString(query.value(7).toString(), "HH:mm:ss.zzz");
         if (!startDate.isValid() || !startTime.isValid() || !endDate.isValid() || !endTime.isValid()) {
             continue;
         }
 
         OrphanCheckpoint checkpoint;
         checkpoint.id = query.value(0).toLongLong();
+        checkpoint.segment_id = query.value(1).toString();
         checkpoint.type = static_cast<DurationType>(typeInt);
-        checkpoint.duration = query.value(2).toLongLong();
+        checkpoint.duration = query.value(3).toLongLong();
         checkpoint.startTime = QDateTime(startDate, startTime, Qt::UTC).toLocalTime();
         checkpoint.endTime = QDateTime(endDate, endTime, Qt::UTC).toLocalTime();
         orphans.push_back(checkpoint);

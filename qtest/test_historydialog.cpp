@@ -83,10 +83,11 @@ void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_
     const QDateTime now = QDateTime::currentDateTime();
     const QDateTime memoryStart = now.addSecs(-40).addMSecs(2);
     const QDateTime memoryEnd = now.addSecs(-10);
-    tracker.durations_.push_back(TimeDuration(DurationType::Activity, memoryStart, memoryEnd));
+    const QString segmentId = TimeDuration::createSegmentId();
+    tracker.durations_.push_back(TimeDuration(DurationType::Activity, memoryStart, memoryEnd, segmentId));
 
     std::deque<TimeDuration> dbDurations;
-    dbDurations.emplace_back(DurationType::Activity, memoryStart.addMSecs(-2), memoryEnd);
+    dbDurations.emplace_back(DurationType::Activity, memoryStart.addMSecs(-2), memoryEnd, segmentId);
     QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
 
     HistoryDialog dialog(tracker, settings);
@@ -190,6 +191,7 @@ void HistoryDialogTest::test_historydialog_split_action_splits_row()
     QDateTime start = QDateTime::currentDateTime().addSecs(-10);
     QDateTime end = QDateTime::currentDateTime().addSecs(-4);
     tracker.durations_.push_back(TimeDuration(DurationType::Activity, start, end));
+    const QString originalSegmentId = tracker.durations_.back().segment_id;
 
     HistoryDialog dialog(tracker, settings);
     dialog.contextMenuRow_ = 0;
@@ -215,6 +217,9 @@ void HistoryDialogTest::test_historydialog_split_action_splits_row()
     QCOMPARE(first.endTime, second.startTime);
     QCOMPARE(first.type, DurationType::Activity);
     QCOMPARE(second.type, DurationType::Pause);
+    QCOMPARE(first.segment_id, originalSegmentId);
+    QVERIFY(!second.segment_id.isEmpty());
+    QVERIFY(second.segment_id != originalSegmentId);
 }
 
 void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_correct_bucket()
@@ -342,16 +347,18 @@ void HistoryDialogTest::test_historydialog_shows_load_reconciliation_banner()
     const QDateTime start = QDateTime::currentDateTimeUtc();
     const QDateTime end = start.addMSecs(1000);
 
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-                  "VALUES (99, 1000, :start_date, :start_time, :end_date, :end_time, 1)");
+    query.prepare("INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                  "VALUES (:segment_id, 99, 1000, :start_date, :start_time, :end_date, :end_time, 1)");
+    query.bindValue(":segment_id", TimeDuration::createSegmentId());
     query.bindValue(":start_date", start.date().toString(Qt::ISODate));
     query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
     query.bindValue(":end_date", end.date().toString(Qt::ISODate));
     query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
     QVERIFY(query.exec());
 
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-                  "VALUES (0, 1200, :start_date, :start_time, :end_date, :end_time, 1)");
+    query.prepare("INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                  "VALUES (:segment_id, 0, 1200, :start_date, :start_time, :end_date, :end_time, 1)");
+    query.bindValue(":segment_id", TimeDuration::createSegmentId());
     query.bindValue(":start_date", start.date().toString(Qt::ISODate));
     query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
     query.bindValue(":end_date", end.date().toString(Qt::ISODate));
@@ -391,8 +398,8 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
     tracker.saveCheckpoint();
-    const long long oldCheckpointId = tracker.current_checkpoint_id_;
-    QVERIFY(oldCheckpointId != -1);
+    const QString oldCheckpointSegmentId = tracker.current_checkpoint_segment_id_;
+    QVERIFY(!oldCheckpointSegmentId.isEmpty());
 
     {
         HistoryDialog dialog(tracker, settings);
@@ -402,8 +409,8 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
         dialog.saveChanges();
     }
 
-    QCOMPARE(tracker.current_checkpoint_id_ != -1, true);
-    QVERIFY(tracker.current_checkpoint_id_ != oldCheckpointId);
+    QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
+    QCOMPARE(tracker.current_checkpoint_segment_id_, oldCheckpointSegmentId);
 
     QTest::qWait(20);
     tracker.saveCheckpoint();
@@ -433,10 +440,10 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
         QCOMPARE(checkpointQuery.value(0).toInt(), 1);
 
         QSqlQuery checkpointIdQuery(db);
-        checkpointIdQuery.prepare("SELECT id FROM durations WHERE is_finalized = 0");
+        checkpointIdQuery.prepare("SELECT segment_id FROM durations WHERE is_finalized = 0");
         QVERIFY(checkpointIdQuery.exec());
         QVERIFY(checkpointIdQuery.next());
-        QVERIFY(checkpointIdQuery.value(0).toLongLong() != oldCheckpointId);
+        QCOMPARE(checkpointIdQuery.value(0).toString(), oldCheckpointSegmentId);
 
         db.close();
     }
@@ -576,7 +583,7 @@ void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_curren
 
         // Simulate crash: skip graceful stop/finalize.
         tracker.mode_ = TimeTracker::Mode::None;
-        tracker.current_checkpoint_id_ = -1;
+        tracker.current_checkpoint_segment_id_.clear();
     }
 
     {

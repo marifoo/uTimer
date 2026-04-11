@@ -34,7 +34,7 @@ private:
     DatabaseManager db_;
     mutable QRecursiveMutex mutex_;  // Protects state transitions from concurrent access
     QTimer checkpointTimer_;  // Timer for periodic checkpoint saving
-    long long current_checkpoint_id_; // ID of the current database entry being updated by checkpoints
+    QString current_checkpoint_segment_id_; // Segment identity currently used by checkpoints
     qint64 checkpoint_interval_msec_; // Checkpoint interval (0 = disabled)
     QDateTime segment_start_time_; // Wall-clock time when current segment started (set in startTimer())
     int last_history_load_skipped_;
@@ -46,7 +46,7 @@ private:
     void stopTimer();
     void pauseTimer();
     void backpauseTimer();
-    void addDurationWithMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime);
+    void addDurationWithMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId = QString());
     void saveCheckpointInternal();  // Internal checkpoint save (called when mutex already held)
     bool appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
     qint64 reconcileOrphanCheckpoints(
