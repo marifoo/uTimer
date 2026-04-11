@@ -98,7 +98,7 @@ These items address **F3**, the single most likely source of "phantom"
 entries in history, and they establish the startup invariants we need before
 doing the schema rework in Phase 4.
 
-### T4. [F3] Add a `durations.is_finalized` column and a startup reconciliation pass
+### T4. [DONE] [F3] Add a `durations.is_finalized` column and a startup reconciliation pass
 - **Where:** `databasemanager.cpp` schema at line 101; `timetracker.cpp`
   startup path at 86–149; new reconciliation method.
 - **Problem:** `saveCheckpoint` writes a row that represents the currently

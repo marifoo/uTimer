@@ -11,6 +11,7 @@
 #include <deque>
 #include <memory>
 #include <utility>
+#include <vector>
 #include "settings.h"
 #include "types.h"
 #include "databasemanager.h"
@@ -38,6 +39,7 @@ private:
     QDateTime segment_start_time_; // Wall-clock time when current segment started (set in startTimer())
     int last_history_load_skipped_;
     int last_history_load_repaired_;
+    qint64 startup_recovered_seconds_;
 
     void startTimer();
     void stopTimer();
@@ -46,6 +48,7 @@ private:
     void addDurationWithMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime);
     void saveCheckpointInternal();  // Internal checkpoint save (called when mutex already held)
     bool appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
+    qint64 reconcileOrphanCheckpoints(const std::deque<DatabaseManager::OrphanCheckpoint>& orphans);
 
 public:
     explicit TimeTracker(const Settings & settings, QObject *parent = nullptr);
@@ -58,6 +61,7 @@ public:
     std::deque<TimeDuration> getDurationsHistory();
     std::pair<int, int> getLastHistoryLoadStats() const;
     std::optional<TimeDuration> getOngoingDuration() const;
+    qint64 getStartupRecoveredSeconds() const;
     void setDurationType(size_t idx, DurationType type);
     bool appendDurationsToDB();
     bool updateDurationsInDB();

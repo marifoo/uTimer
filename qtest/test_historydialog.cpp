@@ -290,16 +290,16 @@ void HistoryDialogTest::test_historydialog_shows_load_reconciliation_banner()
     const QDateTime start = QDateTime::currentDateTimeUtc();
     const QDateTime end = start.addMSecs(1000);
 
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-                  "VALUES (99, 1000, :start_date, :start_time, :end_date, :end_time)");
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                  "VALUES (99, 1000, :start_date, :start_time, :end_date, :end_time, 1)");
     query.bindValue(":start_date", start.date().toString(Qt::ISODate));
     query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
     query.bindValue(":end_date", end.date().toString(Qt::ISODate));
     query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
     QVERIFY(query.exec());
 
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-                  "VALUES (0, 1200, :start_date, :start_time, :end_date, :end_time)");
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                  "VALUES (0, 1200, :start_date, :start_time, :end_date, :end_time, 1)");
     query.bindValue(":start_date", start.date().toString(Qt::ISODate));
     query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
     query.bindValue(":end_date", end.date().toString(Qt::ISODate));

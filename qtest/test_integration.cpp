@@ -32,8 +32,7 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     QString settingsPath = createSettingsFile(tempDir.path(), 7);
-    
-    QDateTime start = QDateTime::currentDateTime();
+    long long orphanRowId = -1;
     
     {
         // First session: Start timer and save checkpoint
@@ -41,24 +40,131 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
         TimeTracker tracker(settings);
         
         tracker.useTimerViaButton(Button::Start);
-        QTest::qWait(100);
+        QTest::qWait(1200);
         
         // Manually save checkpoint
         tracker.saveCheckpointInternal();
         QVERIFY(tracker.current_checkpoint_id_ != -1);
-        
+        orphanRowId = tracker.current_checkpoint_id_;
+
+        // Simulate an unclean shutdown: keep checkpoint row, skip graceful stop.
+        tracker.mode_ = TimeTracker::Mode::None;
+        tracker.current_checkpoint_id_ = -1;
+
         // Simulate crash (tracker destroyed without stopping)
     }
     
     {
-        // Second session: Load from database (simulates app restart)
+        // Second session: startup reconciliation finalizes orphan checkpoint
         Settings settings(settingsPath);
+        TimeTracker tracker(settings);
+        QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
+
         DatabaseManager db(settings);
-        
         auto loaded = db.loadDurations();
-        QCOMPARE(loaded.size(), (size_t)1); // Checkpoint recovered
+        QCOMPARE(loaded.size(), (size_t)1); // Reconciled orphan recovered
         QCOMPARE(loaded[0].type, DurationType::Activity);
+
+        // Reconciliation must keep row identity by finalizing in place.
+        QVERIFY(db.lazyOpen());
+        QSqlQuery query(db.db);
+        query.prepare("SELECT is_finalized FROM durations WHERE id = :id");
+        query.bindValue(":id", orphanRowId);
+        QVERIFY(query.exec());
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), 1);
+        db.lazyClose();
     }
+}
+
+void IntegrationTest::test_integration_orphan_reconciliation_is_idempotent()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+
+    {
+        Settings settings(settingsPath);
+        TimeTracker tracker(settings);
+        tracker.useTimerViaButton(Button::Start);
+        QTest::qWait(1200);
+        tracker.saveCheckpointInternal();
+        QVERIFY(tracker.current_checkpoint_id_ != -1);
+        tracker.current_checkpoint_id_ = -1;
+        tracker.mode_ = TimeTracker::Mode::None;
+    }
+
+    {
+        Settings settings(settingsPath);
+        TimeTracker tracker(settings);
+        QCOMPARE(tracker.getStartupRecoveredSeconds() >= 1, true);
+    }
+
+    {
+        Settings settings(settingsPath);
+        TimeTracker tracker(settings);
+        QCOMPARE(tracker.getStartupRecoveredSeconds(), static_cast<qint64>(0));
+        DatabaseManager db(settings);
+        auto loaded = db.loadDurations();
+        QCOMPARE(loaded.size(), static_cast<size_t>(1));
+    }
+}
+
+void IntegrationTest::test_integration_orphan_reconciliation_drops_stale_and_too_short()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+
+    Settings settings(settingsPath);
+    DatabaseManager db(settings);
+    QVERIFY(db.lazyOpen());
+
+    // Too short orphan (< 1s)
+    {
+        QSqlQuery insert(db.db);
+        const QDateTime start = QDateTime::currentDateTimeUtc().addSecs(-10);
+        const QDateTime end = start.addMSecs(500);
+        insert.prepare(
+            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
+        );
+        insert.bindValue(":type", static_cast<int>(DurationType::Activity));
+        insert.bindValue(":duration", static_cast<qint64>(500));
+        insert.bindValue(":start_date", start.date().toString(Qt::ISODate));
+        insert.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
+        insert.bindValue(":end_date", end.date().toString(Qt::ISODate));
+        insert.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+        QVERIFY(insert.exec());
+    }
+
+    // Stale orphan (>24h)
+    {
+        QSqlQuery insert(db.db);
+        const QDateTime start = QDateTime::currentDateTimeUtc().addDays(-2);
+        const QDateTime end = start.addSecs(30);
+        insert.prepare(
+            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
+        );
+        insert.bindValue(":type", static_cast<int>(DurationType::Activity));
+        insert.bindValue(":duration", static_cast<qint64>(30000));
+        insert.bindValue(":start_date", start.date().toString(Qt::ISODate));
+        insert.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
+        insert.bindValue(":end_date", end.date().toString(Qt::ISODate));
+        insert.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+        QVERIFY(insert.exec());
+    }
+
+    db.lazyClose();
+
+    TimeTracker tracker(settings);
+    QCOMPARE(tracker.getStartupRecoveredSeconds(), static_cast<qint64>(0));
+
+    auto loaded = db.loadDurations();
+    QCOMPARE(loaded.size(), static_cast<size_t>(0));
 }
 
 void IntegrationTest::test_integration_memory_db_consistency()

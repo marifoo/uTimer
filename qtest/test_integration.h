@@ -24,6 +24,8 @@ private slots:
     void cleanupTestCase();
     
     void test_integration_checkpoint_recovery_on_restart();
+    void test_integration_orphan_reconciliation_is_idempotent();
+    void test_integration_orphan_reconciliation_drops_stale_and_too_short();
     void test_integration_memory_db_consistency();
     void test_integration_retention_cleanup_preserves_current();
     void test_integration_duplicate_prevention();

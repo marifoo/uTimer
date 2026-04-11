@@ -204,18 +204,25 @@ void TimeTrackerTest::test_timetracker_checkpoints_paused()
     tracker.pauseCheckpoints();
     tracker.saveCheckpoint(); // Should be ignored
     
-    // Check DB: no entries yet
+    // Check DB: no unfinalized checkpoint entries yet
     DatabaseManager db(settings);
-    auto loaded = db.loadDurations();
-    QCOMPARE(loaded.size(), (size_t)0);
+    QVERIFY(db.lazyOpen());
+    QSqlQuery query(db.db);
+    QVERIFY(query.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 0);
+    db.lazyClose();
 
     // Resume and trigger
     tracker.resumeCheckpoints();
     tracker.saveCheckpoint();
 
-    // Check DB: should have one entry
-    loaded = db.loadDurations();
-    QCOMPARE(loaded.size(), (size_t)1);
+    // Check DB: should now have one unfinalized checkpoint entry
+    QVERIFY(db.lazyOpen());
+    QVERIFY(query.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 1);
+    db.lazyClose();
 }
 
 void TimeTrackerTest::test_timetracker_retry_append_failure_then_success_preserves_segments()

@@ -25,12 +25,17 @@
 #include "logger.h"
 #include "helpers.h"
 
+namespace {
+constexpr qint64 kMinRecoverableOrphanDurationMs = 1000;
+constexpr qint64 kOrphanStaleAgeMs = 24LL * 60LL * 60LL * 1000LL;
+}
+
 TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), mode_(Mode::None),
       was_active_before_autopause_(false), has_unsaved_data_(false), is_locked_(false),
       checkpoints_paused_(false), db_(settings, parent), current_checkpoint_id_(-1),
       checkpoint_interval_msec_(settings.getCheckpointIntervalMsec()),
-      last_history_load_skipped_(0), last_history_load_repaired_(0)
+      last_history_load_skipped_(0), last_history_load_repaired_(0), startup_recovered_seconds_(0)
 {
     // Setup checkpoint timer (disabled if interval is 0)
     if (checkpoint_interval_msec_ > 0) {
@@ -43,6 +48,8 @@ TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
     if (checkpoint_interval_msec_ == 0 && settings_.logToFile()) {
         Logger::Log("[CHECKPOINT] Checkpoints disabled (interval = 0)");
     }
+
+    startup_recovered_seconds_ = reconcileOrphanCheckpoints(db_.loadUnfinalizedCheckpoints());
 }
 
 TimeTracker::~TimeTracker()
@@ -465,6 +472,12 @@ std::optional<TimeDuration> TimeTracker::getOngoingDuration() const
     return TimeDuration(type, segment_start_time_, now);
 }
 
+qint64 TimeTracker::getStartupRecoveredSeconds() const
+{
+    QMutexLocker locker(&mutex_);
+    return startup_recovered_seconds_;
+}
+
 bool TimeTracker::appendDurationsToDB()
 {
     return appendDurationsChunkToDB(durations_);
@@ -711,4 +724,45 @@ bool TimeTracker::checkDatabaseSchema()
 void TimeTracker::flushDatabaseToDisc()
 {
     db_.flushToDisc();
+}
+
+qint64 TimeTracker::reconcileOrphanCheckpoints(const std::deque<DatabaseManager::OrphanCheckpoint>& orphans)
+{
+    if (orphans.empty()) {
+        return 0;
+    }
+
+    const QDateTime now = QDateTime::currentDateTime();
+    std::vector<long long> finalizeIds;
+    std::vector<long long> dropIds;
+    qint64 recoveredSeconds = 0;
+
+    for (const auto& orphan : orphans) {
+        const bool tooShort = orphan.duration < kMinRecoverableOrphanDurationMs;
+        const bool stale = orphan.endTime.isValid() && (orphan.endTime.msecsTo(now) > kOrphanStaleAgeMs);
+
+        if (tooShort || stale) {
+            dropIds.push_back(orphan.id);
+            continue;
+        }
+
+        finalizeIds.push_back(orphan.id);
+        recoveredSeconds += orphan.duration / 1000;
+    }
+
+    if (!db_.reconcileUnfinalizedCheckpoints(finalizeIds, dropIds)) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Failed to reconcile orphan checkpoints");
+        }
+        return 0;
+    }
+
+    if (settings_.logToFile()) {
+        Logger::Log(QString("[DB] Orphan checkpoint reconciliation finished: finalized=%1, dropped=%2, recovered_seconds=%3")
+            .arg(finalizeIds.size())
+            .arg(dropIds.size())
+            .arg(recoveredSeconds));
+    }
+
+    return recoveredSeconds;
 }

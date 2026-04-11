@@ -333,8 +333,8 @@ void DatabaseTest::test_loadDurations_skipsNegativeDurationRows()
         QVERIFY(db.open());
         QSqlQuery query(db);
         query.prepare(
-            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-            "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time)"
+            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 1)"
         );
         query.bindValue(":type", static_cast<int>(DurationType::Activity));
         query.bindValue(":duration", static_cast<qint64>(-500));
@@ -475,11 +475,17 @@ void DatabaseTest::test_database_checkpoint_id_reuse()
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 20000, start, newEnd, checkpointId));
     QCOMPARE(checkpointId, firstId); // ID unchanged
     
-    // Load and verify only ONE entry exists
-    auto loaded = manager.loadDurations();
-    QCOMPARE(loaded.size(), (size_t)1);
-    QCOMPARE(loaded[0].duration, (qint64)20000);
-    QCOMPARE(loaded[0].startTime.toString(Qt::ISODate), start.toString(Qt::ISODate));
+    // Verify checkpoint row remains unfinalized and updated in place.
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery query(manager.db);
+    query.prepare("SELECT COUNT(*), duration, is_finalized FROM durations WHERE id = :id");
+    query.bindValue(":id", checkpointId);
+    QVERIFY(query.exec());
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 1);
+    QCOMPARE(query.value(1).toLongLong(), static_cast<qint64>(20000));
+    QCOMPARE(query.value(2).toInt(), 0);
+    manager.lazyClose();
 }
 
 void DatabaseTest::test_database_checkpoint_deleted_row_creates_new()
@@ -513,10 +519,17 @@ void DatabaseTest::test_database_checkpoint_deleted_row_creates_new()
     QVERIFY(checkpointId != -1);
     QVERIFY(checkpointId != firstId); // New ID assigned
     
-    // Verify new row exists
-    auto loaded = manager.loadDurations();
-    QCOMPARE(loaded.size(), (size_t)1);
-    QCOMPARE(loaded[0].duration, (qint64)20000);
+    // Verify new checkpoint row exists as unfinalized
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery verifyQuery(manager.db);
+    verifyQuery.prepare("SELECT COUNT(*), duration, is_finalized FROM durations WHERE id = :id");
+    verifyQuery.bindValue(":id", checkpointId);
+    QVERIFY(verifyQuery.exec());
+    QVERIFY(verifyQuery.next());
+    QCOMPARE(verifyQuery.value(0).toInt(), 1);
+    QCOMPARE(verifyQuery.value(1).toLongLong(), static_cast<qint64>(20000));
+    QCOMPARE(verifyQuery.value(2).toInt(), 0);
+    manager.lazyClose();
 }
 
 void DatabaseTest::test_database_checkpoint_preserves_start_time()
@@ -538,12 +551,20 @@ void DatabaseTest::test_database_checkpoint_preserves_start_time()
     QDateTime secondEnd = originalStart.addSecs(30);
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 30000, originalStart, secondEnd, checkpointId));
     
-    // Load and verify start time is preserved
-    auto loaded = manager.loadDurations();
-    QCOMPARE(loaded.size(), (size_t)1);
-    QCOMPARE(loaded[0].startTime.toString(Qt::ISODate), originalStart.toString(Qt::ISODate));
-    QCOMPARE(loaded[0].endTime.toString(Qt::ISODate), secondEnd.toString(Qt::ISODate));
-    QCOMPARE(loaded[0].duration, (qint64)30000);
+    // Verify start/end/duration are preserved on the checkpoint row itself.
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery query(manager.db);
+    query.prepare("SELECT start_date, start_time, end_date, end_time, duration, is_finalized FROM durations WHERE id = :id");
+    query.bindValue(":id", checkpointId);
+    QVERIFY(query.exec());
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toString(), originalStart.toUTC().date().toString(Qt::ISODate));
+    QCOMPARE(query.value(1).toString(), originalStart.toUTC().time().toString("HH:mm:ss.zzz"));
+    QCOMPARE(query.value(2).toString(), secondEnd.toUTC().date().toString(Qt::ISODate));
+    QCOMPARE(query.value(3).toString(), secondEnd.toUTC().time().toString("HH:mm:ss.zzz"));
+    QCOMPARE(query.value(4).toLongLong(), static_cast<qint64>(30000));
+    QCOMPARE(query.value(5).toInt(), 0);
+    manager.lazyClose();
 }
 
 void DatabaseTest::test_database_upsert_insert_mode()
@@ -649,8 +670,8 @@ void DatabaseTest::test_database_load_negative_duration()
     QVERIFY(manager.lazyOpen());
     QSqlQuery query(manager.db);
     QDateTime now = QDateTime::currentDateTimeUtc();
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-                 "VALUES (0, -5000, :start_date, :start_time, :end_date, :end_time)");
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                 "VALUES (0, -5000, :start_date, :start_time, :end_date, :end_time, 1)");
     query.bindValue(":start_date", now.date().toString(Qt::ISODate));
     query.bindValue(":start_time", now.time().toString("HH:mm:ss.zzz"));
     QDateTime end = now.addSecs(5);
@@ -680,8 +701,8 @@ void DatabaseTest::test_database_load_start_after_end()
     QDateTime start = now;
     QDateTime end = now.addSecs(-10); // End BEFORE start
     
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-                 "VALUES (0, 10000, :start_date, :start_time, :end_date, :end_time)");
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                 "VALUES (0, 10000, :start_date, :start_time, :end_date, :end_time, 1)");
     query.bindValue(":start_date", start.date().toString(Qt::ISODate));
     query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
     query.bindValue(":end_date", end.date().toString(Qt::ISODate));
@@ -708,8 +729,8 @@ void DatabaseTest::test_database_load_invalid_enum_type()
     QDateTime now = QDateTime::currentDateTimeUtc();
     QDateTime end = now.addSecs(10);
     
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-                 "VALUES (99, 10000, :start_date, :start_time, :end_date, :end_time)");
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                 "VALUES (99, 10000, :start_date, :start_time, :end_date, :end_time, 1)");
     query.bindValue(":start_date", now.date().toString(Qt::ISODate));
     query.bindValue(":start_time", now.time().toString("HH:mm:ss.zzz"));
     query.bindValue(":end_date", end.date().toString(Qt::ISODate));
@@ -736,8 +757,8 @@ void DatabaseTest::test_database_load_duration_mismatch_tolerance()
     // Insert with stored duration = 1003ms (within 100ms tolerance)
     QVERIFY(manager.lazyOpen());
     QSqlQuery query(manager.db);
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-                 "VALUES (0, 1003, :start_date, :start_time, :end_date, :end_time)");
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                 "VALUES (0, 1003, :start_date, :start_time, :end_date, :end_time, 1)");
     query.bindValue(":start_date", start.date().toString(Qt::ISODate));
     query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
     query.bindValue(":end_date", end.date().toString(Qt::ISODate));
@@ -788,8 +809,8 @@ void DatabaseTest::test_database_load_invalid_type_increments_skipped_and_omits_
     QSqlQuery query(manager.db);
     const QDateTime start = QDateTime::currentDateTimeUtc();
     const QDateTime end = start.addSecs(10);
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-                 "VALUES (99, 10000, :start_date, :start_time, :end_date, :end_time)");
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                 "VALUES (99, 10000, :start_date, :start_time, :end_date, :end_time, 1)");
     query.bindValue(":start_date", start.date().toString(Qt::ISODate));
     query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
     query.bindValue(":end_date", end.date().toString(Qt::ISODate));
@@ -814,8 +835,8 @@ void DatabaseTest::test_database_load_200ms_mismatch_increments_repaired_and_use
     QSqlQuery query(manager.db);
     const QDateTime start = QDateTime::currentDateTimeUtc();
     const QDateTime end = start.addMSecs(1000);
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-                 "VALUES (0, 1200, :start_date, :start_time, :end_date, :end_time)");
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                 "VALUES (0, 1200, :start_date, :start_time, :end_date, :end_time, 1)");
     query.bindValue(":start_date", start.date().toString(Qt::ISODate));
     query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
     query.bindValue(":end_date", end.date().toString(Qt::ISODate));
@@ -901,6 +922,69 @@ void DatabaseTest::test_database_schema_validation_fresh_database()
     
     // Should return true (will create fresh schema)
     QVERIFY(manager.checkSchemaOnStartup());
+}
+
+void DatabaseTest::test_database_schema_migration_adds_is_finalized_and_marks_existing_rows()
+{
+    resetDatabaseFile();
+
+    const QString connName = "schema_migration_is_finalized";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+        QVERIFY(query.exec(
+            "CREATE TABLE durations ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "type INTEGER NOT NULL,"
+            "duration INTEGER NOT NULL,"
+            "start_date DATE NOT NULL,"
+            "start_time TEXT NOT NULL,"
+            "end_date DATE NOT NULL,"
+            "end_time TEXT NOT NULL,"
+            "UNIQUE(start_date, start_time, type) ON CONFLICT REPLACE"
+            ")"
+        ));
+
+        const QDateTime start = QDateTime::currentDateTimeUtc().addSecs(-30);
+        const QDateTime end = start.addSecs(20);
+        query.prepare(
+            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+            "VALUES (0, :duration, :start_date, :start_time, :end_date, :end_time)"
+        );
+        query.bindValue(":duration", static_cast<qint64>(20000));
+        query.bindValue(":start_date", start.date().toString(Qt::ISODate));
+        query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
+        query.bindValue(":end_date", end.date().toString(Qt::ISODate));
+        query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+        QVERIFY(query.exec());
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    DatabaseManager manager(settings);
+
+    QVERIFY(manager.loadDurations().size() == static_cast<size_t>(1));
+
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery query(manager.db);
+    QVERIFY(query.exec("PRAGMA table_info(durations)"));
+    bool hasIsFinalized = false;
+    while (query.next()) {
+        if (query.value(1).toString() == "is_finalized") {
+            hasIsFinalized = true;
+            break;
+        }
+    }
+    QVERIFY(hasIsFinalized);
+
+    QVERIFY(query.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 1"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 1);
+    manager.lazyClose();
 }
 
 void DatabaseTest::test_database_backup_file_creation()

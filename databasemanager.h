@@ -5,6 +5,7 @@
 #include <QSqlDatabase>
 #include <QDateTime>
 #include <deque>
+#include <vector>
 #include "types.h"
 #include "settings.h"
 
@@ -12,6 +13,14 @@ class DatabaseManager : public QObject
 {
     Q_OBJECT
 public:
+    struct OrphanCheckpoint {
+        long long id = -1;
+        DurationType type = DurationType::Activity;
+        qint64 duration = 0;
+        QDateTime startTime;
+        QDateTime endTime;
+    };
+
     struct LoadResult {
         std::deque<TimeDuration> durations;
         int skipped = 0;
@@ -39,6 +48,8 @@ public:
     bool updateDurationsByStartTime(const std::deque<TimeDuration>& durations);
     bool checkSchemaOnStartup(); // Returns true if schema is valid, false if outdated
     void flushToDisc(); // Force pending writes to disk (for shutdown safety)
+    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints();
+    bool reconcileUnfinalizedCheckpoints(const std::vector<long long>& finalizeIds, const std::vector<long long>& dropIds);
 
 private:
     QSqlDatabase db;
@@ -47,6 +58,7 @@ private:
     bool lazyOpen();
     void lazyClose();
     bool validateSchema();
+    bool ensureIsFinalizedColumn();
     bool createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
 };
 

@@ -102,6 +102,7 @@ bool DatabaseManager::lazyOpen()
         "start_time TEXT NOT NULL," // Time when the duration started (UTC, TIME(3) precision)
         "end_date DATE NOT NULL," // Date when the duration ended
         "end_time TEXT NOT NULL," // Time when the duration ended (UTC, TIME(3) precision)
+        "is_finalized INTEGER NOT NULL DEFAULT 0,"
         "UNIQUE(start_date, start_time, type) ON CONFLICT REPLACE" // Prevent duplicate entries
         ")"
     );
@@ -109,6 +110,14 @@ bool DatabaseManager::lazyOpen()
     if (!tableCreated) {
         if (settings_.logToFile())
             Logger::Log("[DB] Error creating table: " + query_new.lastError().text());
+        db.close();
+        return false;
+    }
+
+    // Keep schema forward-compatible: older databases do not have is_finalized.
+    // We migrate all existing rows to finalized=1 because checkpoints from older
+    // versions are indistinguishable from completed entries.
+    if (!ensureIsFinalizedColumn()) {
         db.close();
         return false;
     }
@@ -263,6 +272,51 @@ bool DatabaseManager::validateSchema()
     return true;
 }
 
+bool DatabaseManager::ensureIsFinalizedColumn()
+{
+    QSqlQuery tableInfo(db);
+    if (!tableInfo.exec("PRAGMA table_info(durations)")) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error checking table_info for is_finalized migration: " + tableInfo.lastError().text());
+        }
+        return false;
+    }
+
+    bool hasIsFinalized = false;
+    while (tableInfo.next()) {
+        if (tableInfo.value(1).toString() == "is_finalized") {
+            hasIsFinalized = true;
+            break;
+        }
+    }
+
+    if (hasIsFinalized) {
+        return true;
+    }
+
+    if (settings_.logToFile()) {
+        Logger::Log("[DB] Migrating schema: adding durations.is_finalized and marking existing rows as finalized");
+    }
+
+    QSqlQuery alterQuery(db);
+    if (!alterQuery.exec("ALTER TABLE durations ADD COLUMN is_finalized INTEGER NOT NULL DEFAULT 0")) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error adding is_finalized column: " + alterQuery.lastError().text());
+        }
+        return false;
+    }
+
+    QSqlQuery migrateQuery(db);
+    if (!migrateQuery.exec("UPDATE durations SET is_finalized = 1")) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error finalizing migrated rows: " + migrateQuery.lastError().text());
+        }
+        return false;
+    }
+
+    return true;
+}
+
 /**
  * Creates a safety copy of the database before critical write operations.
  *
@@ -400,8 +454,8 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
 
     // Prepare insert statement for batch insertion (storing times in UTC)
     QSqlQuery query(db);
-    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-                  "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time)");
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                  "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 1)");
 
     // Insert each duration entry (convert to UTC for storage)
     for (const auto& d : durations) {
@@ -468,7 +522,7 @@ DatabaseManager::LoadResult DatabaseManager::loadDurations()
 
     // Load all durations ordered by start date and time
     QSqlQuery query(db);
-    query.prepare("SELECT type, duration, start_date, start_time, end_date, end_time FROM durations ORDER BY start_date, start_time");
+    query.prepare("SELECT type, duration, start_date, start_time, end_date, end_time FROM durations WHERE is_finalized = 1 ORDER BY start_date, start_time");
     if (!query.exec()) {
         db.rollback();
         if (settings_.logToFile()) {
@@ -569,7 +623,7 @@ bool DatabaseManager::hasEntriesForDate(const QDate& date)
 
     // Check if any entries exist for the specified date
     QSqlQuery query(db);
-    query.prepare("SELECT COUNT(*) FROM durations WHERE end_date = :date");
+    query.prepare("SELECT COUNT(*) FROM durations WHERE end_date = :date AND is_finalized = 1");
     query.bindValue(":date", date.toString(Qt::ISODate));
     
     bool hasEntries = false;
@@ -635,7 +689,7 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
     if (checkpointId != -1) {
         // Update existing entry using known ID (preserve start time, only update end/duration)
         query.prepare(
-            "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time "
+            "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time, is_finalized = 0 "
             "WHERE id = :id"
         );
         query.bindValue(":duration", duration);
@@ -653,8 +707,8 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
                 // Row was deleted (retention cleanup or manual edit). Insert a new checkpoint.
                 QSqlQuery insertQuery(db);
                 insertQuery.prepare(
-                    "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-                    "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time)"
+                    "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+                    "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
                 );
                 insertQuery.bindValue(":type", static_cast<int>(type));
                 insertQuery.bindValue(":duration", duration);
@@ -689,8 +743,8 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
     } else {
         // Append new checkpoint entry with start time
         query.prepare(
-            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-            "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time)"
+            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
         );
         query.bindValue(":type", static_cast<int>(type));
         query.bindValue(":duration", duration);
@@ -761,8 +815,8 @@ bool DatabaseManager::updateDurationsByStartTime(const std::deque<TimeDuration>&
     // If a row with matching start_date, start_time, and type exists, it will be replaced
     QSqlQuery insertQuery(db);
     insertQuery.prepare(
-        "INSERT OR REPLACE INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-        "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time)"
+        "INSERT OR REPLACE INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+        "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 1)"
     );
 
     int count = 0;
@@ -857,4 +911,98 @@ void DatabaseManager::flushToDisc()
     if (settings_.logToFile()) {
         Logger::Log("[DB] Flush to disc completed");
     }
+}
+
+std::deque<DatabaseManager::OrphanCheckpoint> DatabaseManager::loadUnfinalizedCheckpoints()
+{
+    std::deque<OrphanCheckpoint> orphans;
+
+    if (!lazyOpen()) {
+        return orphans;
+    }
+
+    QSqlQuery query(db);
+    query.prepare("SELECT id, type, duration, start_date, start_time, end_date, end_time FROM durations WHERE is_finalized = 0 ORDER BY id ASC");
+    if (!query.exec()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error loading orphan checkpoints: " + query.lastError().text());
+        }
+        lazyClose();
+        return orphans;
+    }
+
+    while (query.next()) {
+        int typeInt = query.value(1).toInt();
+        if (typeInt != static_cast<int>(DurationType::Activity) &&
+            typeInt != static_cast<int>(DurationType::Pause)) {
+            continue;
+        }
+
+        QDate startDate = QDate::fromString(query.value(3).toString(), Qt::ISODate);
+        QTime startTime = QTime::fromString(query.value(4).toString(), "HH:mm:ss.zzz");
+        QDate endDate = QDate::fromString(query.value(5).toString(), Qt::ISODate);
+        QTime endTime = QTime::fromString(query.value(6).toString(), "HH:mm:ss.zzz");
+        if (!startDate.isValid() || !startTime.isValid() || !endDate.isValid() || !endTime.isValid()) {
+            continue;
+        }
+
+        OrphanCheckpoint checkpoint;
+        checkpoint.id = query.value(0).toLongLong();
+        checkpoint.type = static_cast<DurationType>(typeInt);
+        checkpoint.duration = query.value(2).toLongLong();
+        checkpoint.startTime = QDateTime(startDate, startTime, Qt::UTC).toLocalTime();
+        checkpoint.endTime = QDateTime(endDate, endTime, Qt::UTC).toLocalTime();
+        orphans.push_back(checkpoint);
+    }
+
+    lazyClose();
+    return orphans;
+}
+
+bool DatabaseManager::reconcileUnfinalizedCheckpoints(const std::vector<long long>& finalizeIds, const std::vector<long long>& dropIds)
+{
+    if (finalizeIds.empty() && dropIds.empty()) {
+        return true;
+    }
+
+    if (!lazyOpen()) {
+        return false;
+    }
+
+    if (!db.transaction()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error starting orphan reconciliation transaction: " + db.lastError().text());
+        }
+        lazyClose();
+        return false;
+    }
+
+    QSqlQuery finalizeQuery(db);
+    finalizeQuery.prepare("UPDATE durations SET is_finalized = 1 WHERE id = :id AND is_finalized = 0");
+    for (long long id : finalizeIds) {
+        finalizeQuery.bindValue(":id", id);
+        if (!finalizeQuery.exec()) {
+            db.rollback();
+            lazyClose();
+            return false;
+        }
+    }
+
+    QSqlQuery dropQuery(db);
+    dropQuery.prepare("DELETE FROM durations WHERE id = :id AND is_finalized = 0");
+    for (long long id : dropIds) {
+        dropQuery.bindValue(":id", id);
+        if (!dropQuery.exec()) {
+            db.rollback();
+            lazyClose();
+            return false;
+        }
+    }
+
+    const bool committed = db.commit();
+    if (!committed) {
+        db.rollback();
+    }
+    lazyClose();
+    return committed;
 }
