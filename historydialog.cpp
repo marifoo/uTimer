@@ -143,6 +143,8 @@ void HistoryDialog::createPages()
             rowOrigins_[i].assign(pages_[i].durations.size(), RowOrigin::HistoricalDatabase);
         }
     }
+
+    assertPendingOriginsInvariant();
 }
 
 void HistoryDialog::setupUI()
@@ -204,6 +206,20 @@ std::pair<qint64, qint64> HistoryDialog::calculateTotals(const std::deque<TimeDu
             totalPause += duration.duration;
     }
     return std::make_pair(totalActivity, totalPause);
+}
+
+void HistoryDialog::assertPendingOriginsInvariant() const
+{
+#ifndef QT_NO_DEBUG
+    Q_ASSERT_X(rowOrigins_.size() == pendingChanges_.size(),
+        "HistoryDialog::assertPendingOriginsInvariant",
+        "rowOrigins_ and pendingChanges_ must have same page count");
+    for (size_t i = 0; i < pendingChanges_.size(); ++i) {
+        Q_ASSERT_X(rowOrigins_[i].size() == pendingChanges_[i].size(),
+            "HistoryDialog::assertPendingOriginsInvariant",
+            "rowOrigins_[i] and pendingChanges_[i] must have same row count");
+    }
+#endif
 }
 
 void HistoryDialog::updateTotalsLabel(uint idx)
@@ -316,6 +332,7 @@ void HistoryDialog::updateTable(uint idx)
 
             // Update the duration type in pending changes
             pendingChanges_[capturedPageIdx][capturedRow].type = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
+            assertPendingOriginsInvariant();
             QString typeStr = pendingChanges_[capturedPageIdx][capturedRow].type == DurationType::Activity ? "Activity  " : "Pause  ";
 
             // Update UI
@@ -387,6 +404,7 @@ void HistoryDialog::saveChanges()
     for (size_t i = 0; i < pages_.size(); ++i) {
         std::swap(pages_[i].durations, pendingChanges_[i]);
     }
+    assertPendingOriginsInvariant();
 
     // Update TimeTracker's current session (in-memory only)
     // Collect historical durations + current-day finished DB rows for save
@@ -558,10 +576,18 @@ void HistoryDialog::onSplitRow()
         // Replace original duration with two new segments using index-based operations
         // (Avoid iterator invalidation issues with deque erase/insert)
         auto& durationsDeque = pendingChanges_[idx];
+        auto& origins = rowOrigins_[idx];
+        const RowOrigin originalOrigin = origins[static_cast<size_t>(row)];
         durationsDeque.erase(durationsDeque.begin() + row);
         durationsDeque.insert(durationsDeque.begin() + row, first);
         durationsDeque.insert(durationsDeque.begin() + row + 1, second);
-       
+
+        origins.erase(origins.begin() + row);
+        origins.insert(origins.begin() + row, originalOrigin);
+        origins.insert(origins.begin() + row + 1, originalOrigin);
+
+        assertPendingOriginsInvariant();
+        
         updateTable(idx);
     }
 }
@@ -704,6 +730,7 @@ HistoryDialog::~HistoryDialog() {
 
     pendingChanges_.clear();
     rowOrigins_.clear();
+    assertPendingOriginsInvariant();
 
     // Resume checkpoints now that dialog is closed
     timetracker_.resumeCheckpoints();

@@ -165,6 +165,117 @@ void HistoryDialogTest::test_historydialog_split_action_splits_row()
     QCOMPARE(second.type, DurationType::Pause);
 }
 
+void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_correct_bucket()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    TimeTracker tracker(settings);
+
+    const QDateTime now = QDateTime::currentDateTime();
+    const QDateTime memStart = now.addSecs(-20);
+    const QDateTime memEnd = now.addSecs(-12);
+    const QDateTime dbStart = now.addSecs(-11);
+    const QDateTime dbEnd = now.addSecs(-6);
+
+    tracker.durations_.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+
+    std::deque<TimeDuration> dbDurations;
+    dbDurations.emplace_back(DurationType::Pause, dbStart, dbEnd);
+    QVERIFY(tracker.replaceDurationsInDB(dbDurations));
+
+    HistoryDialog dialog(tracker, settings);
+    QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.rowOrigins_[0][0], HistoryDialog::RowOrigin::CurrentMemory);
+    QCOMPARE(dialog.rowOrigins_[0][1], HistoryDialog::RowOrigin::CurrentDatabase);
+
+    dialog.contextMenuRow_ = 0;
+    dialog.contextMenuPage_ = 0;
+
+    QTimer::singleShot(0, []() {
+        for (QWidget* widget : QApplication::topLevelWidgets()) {
+            auto* split = qobject_cast<SplitDialog*>(widget);
+            if (!split) continue;
+            split->setFirstSegmentType(DurationType::Activity);
+            split->setSecondSegmentType(DurationType::Pause);
+            split->accept();
+            return;
+        }
+    });
+
+    dialog.onSplitRow();
+    QCOMPARE(dialog.pendingChanges_[0].size(), static_cast<size_t>(3));
+    QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(3));
+    QCOMPARE(dialog.rowOrigins_[0][0], HistoryDialog::RowOrigin::CurrentMemory);
+    QCOMPARE(dialog.rowOrigins_[0][1], HistoryDialog::RowOrigin::CurrentMemory);
+    QCOMPARE(dialog.rowOrigins_[0][2], HistoryDialog::RowOrigin::CurrentDatabase);
+
+    dialog.done(QDialog::Accepted);
+    dialog.saveChanges();
+
+    QCOMPARE(tracker.durations_.size(), static_cast<size_t>(2));
+    QCOMPARE(tracker.durations_[0].startTime, memStart);
+    QCOMPARE(tracker.durations_[1].endTime, memEnd);
+    QCOMPARE(tracker.durations_[0].endTime, tracker.durations_[1].startTime);
+
+    DatabaseManager db(settings);
+    auto loaded = db.loadDurations();
+    QCOMPARE(loaded.size(), static_cast<size_t>(1));
+    QCOMPARE(loaded[0].startTime, dbStart);
+    QCOMPARE(loaded[0].endTime, dbEnd);
+    QCOMPARE(loaded[0].type, DurationType::Pause);
+}
+
+void HistoryDialogTest::test_historydialog_split_non_today_db_row_survives_save_roundtrip()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 30));
+    TimeTracker tracker(settings);
+
+    const QDateTime start(QDate::currentDate().addDays(-1), QTime(10, 0, 0));
+    const QDateTime end = start.addSecs(8);
+
+    std::deque<TimeDuration> dbDurations;
+    dbDurations.emplace_back(DurationType::Activity, start, end);
+    QVERIFY(tracker.replaceDurationsInDB(dbDurations));
+
+    HistoryDialog dialog(tracker, settings);
+    QVERIFY(dialog.pages_.size() >= static_cast<size_t>(2));
+
+    dialog.contextMenuRow_ = 0;
+    dialog.contextMenuPage_ = 1;
+
+    QTimer::singleShot(0, []() {
+        for (QWidget* widget : QApplication::topLevelWidgets()) {
+            auto* split = qobject_cast<SplitDialog*>(widget);
+            if (!split) continue;
+            split->setFirstSegmentType(DurationType::Activity);
+            split->setSecondSegmentType(DurationType::Pause);
+            split->accept();
+            return;
+        }
+    });
+
+    dialog.onSplitRow();
+    QCOMPARE(dialog.pendingChanges_[1].size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.rowOrigins_[1].size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.rowOrigins_[1][0], HistoryDialog::RowOrigin::HistoricalDatabase);
+    QCOMPARE(dialog.rowOrigins_[1][1], HistoryDialog::RowOrigin::HistoricalDatabase);
+
+    dialog.done(QDialog::Accepted);
+    dialog.saveChanges();
+
+    DatabaseManager db(settings);
+    auto loaded = db.loadDurations();
+    QCOMPARE(loaded.size(), static_cast<size_t>(2));
+    QCOMPARE(loaded[0].startTime, start);
+    QCOMPARE(loaded[1].endTime, end);
+    QCOMPARE(loaded[0].endTime, loaded[1].startTime);
+}
+
 void HistoryDialogTest::test_splitdialog_default_types_and_bounds()
 {
     QDateTime start = makeTime(0);

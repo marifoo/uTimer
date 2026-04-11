@@ -49,6 +49,7 @@ private:
     void updateTotalsLabel(uint idx);
     void updateTable(uint idx);
     std::pair<qint64, qint64> calculateTotals(const std::deque<TimeDuration>& durations);
+    void assertPendingOriginsInvariant() const;
     void saveChanges();
     void showContextMenu(const QPoint& pos);
 
