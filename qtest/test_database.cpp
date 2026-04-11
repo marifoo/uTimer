@@ -733,7 +733,7 @@ void DatabaseTest::test_database_load_duration_mismatch_tolerance()
     QDateTime start = QDateTime::currentDateTimeUtc();
     QDateTime end = start.addMSecs(1000); // Actual duration: 1000ms
     
-    // Insert with stored duration = 1003ms (within 5ms tolerance)
+    // Insert with stored duration = 1003ms (within 100ms tolerance)
     QVERIFY(manager.lazyOpen());
     QSqlQuery query(manager.db);
     query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
@@ -774,6 +774,59 @@ void DatabaseTest::test_database_timezone_roundtrip()
     // Times should be preserved (stored as UTC, loaded as local)
     QCOMPARE(loaded[0].startTime.toString(Qt::ISODate), localStart.toString(Qt::ISODate));
     QCOMPARE(loaded[0].endTime.toString(Qt::ISODate), localEnd.toString(Qt::ISODate));
+}
+
+void DatabaseTest::test_database_load_invalid_type_increments_skipped_and_omits_row()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    DatabaseManager manager(settings);
+
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery query(manager.db);
+    const QDateTime start = QDateTime::currentDateTimeUtc();
+    const QDateTime end = start.addSecs(10);
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+                 "VALUES (99, 10000, :start_date, :start_time, :end_date, :end_time)");
+    query.bindValue(":start_date", start.date().toString(Qt::ISODate));
+    query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
+    query.bindValue(":end_date", end.date().toString(Qt::ISODate));
+    query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+    QVERIFY(query.exec());
+    manager.lazyClose();
+
+    auto loaded = manager.loadDurations();
+    QCOMPARE(loaded.skipped, 1);
+    QCOMPARE(loaded.size(), static_cast<size_t>(0));
+}
+
+void DatabaseTest::test_database_load_200ms_mismatch_increments_repaired_and_uses_computed()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    DatabaseManager manager(settings);
+
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery query(manager.db);
+    const QDateTime start = QDateTime::currentDateTimeUtc();
+    const QDateTime end = start.addMSecs(1000);
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+                 "VALUES (0, 1200, :start_date, :start_time, :end_date, :end_time)");
+    query.bindValue(":start_date", start.date().toString(Qt::ISODate));
+    query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
+    query.bindValue(":end_date", end.date().toString(Qt::ISODate));
+    query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+    QVERIFY(query.exec());
+    manager.lazyClose();
+
+    auto loaded = manager.loadDurations();
+    QCOMPARE(loaded.repaired, 1);
+    QCOMPARE(loaded.size(), static_cast<size_t>(1));
+    QCOMPARE(loaded[0].duration, static_cast<qint64>(1000));
 }
 
 void DatabaseTest::test_database_millisecond_precision()

@@ -39,6 +39,8 @@ private slots:
     void test_database_load_start_after_end();
     void test_database_load_invalid_enum_type();
     void test_database_load_duration_mismatch_tolerance();
+    void test_database_load_invalid_type_increments_skipped_and_omits_row();
+    void test_database_load_200ms_mismatch_increments_repaired_and_uses_computed();
     void test_database_timezone_roundtrip();
     void test_database_millisecond_precision();
     void test_database_schema_validation_missing_start_date();

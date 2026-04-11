@@ -64,6 +64,7 @@ signals:
 	void minToTray();
 	void toggleAlwaysOnTop();
 	void pressedButton(Button button);
+	void historyLoadReconciliationAvailable(const QString& text);
 
 public slots:
 	void pressedStartPauseButton();

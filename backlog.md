@@ -68,7 +68,7 @@ architectural issues.
   - Unit test that a failed retry leaves `has_unsaved_data_ == true` and
     `durations_` non-empty.
 
-### T3. [M7] Surface `loadDurations` skip/repair decisions to the user
+### T3. [DONE] [M7] Surface `loadDurations` skip/repair decisions to the user
 - **Where:** `databasemanager.cpp:492–540`.
 - **Problem:** Rows with invalid type/timestamps are silently skipped with only
   a log line. Rows whose stored duration disagrees with the computed duration

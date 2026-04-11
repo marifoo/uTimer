@@ -10,6 +10,7 @@
 #include <optional>
 #include <deque>
 #include <memory>
+#include <utility>
 #include "settings.h"
 #include "types.h"
 #include "databasemanager.h"
@@ -35,6 +36,8 @@ private:
     long long current_checkpoint_id_; // ID of the current database entry being updated by checkpoints
     qint64 checkpoint_interval_msec_; // Checkpoint interval (0 = disabled)
     QDateTime segment_start_time_; // Wall-clock time when current segment started (set in startTimer())
+    int last_history_load_skipped_;
+    int last_history_load_repaired_;
 
     void startTimer();
     void stopTimer();
@@ -53,6 +56,7 @@ public:
     const std::deque<TimeDuration>& getCurrentDurations() const;
     void setCurrentDurations(const std::deque<TimeDuration>& newDurations);
     std::deque<TimeDuration> getDurationsHistory();
+    std::pair<int, int> getLastHistoryLoadStats() const;
     std::optional<TimeDuration> getOngoingDuration() const;
     void setDurationType(size_t idx, DurationType type);
     bool appendDurationsToDB();

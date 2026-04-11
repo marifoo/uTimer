@@ -156,6 +156,14 @@ void HistoryDialog::setupUI()
     pageLabel_ = new QLabel(this);
     layout->addWidget(pageLabel_);
 
+    loadReconciliationLabel_ = new QLabel(this);
+    loadReconciliationLabel_->setWordWrap(true);
+    loadReconciliationLabel_->setStyleSheet("QLabel { color: #9A6B00; }");
+    const QString reconciliationMessage = buildLoadReconciliationMessage();
+    loadReconciliationLabel_->setText(reconciliationMessage);
+    loadReconciliationLabel_->setVisible(!reconciliationMessage.isEmpty());
+    layout->addWidget(loadReconciliationLabel_);
+
     // Main table showing duration entries
     table_ = new QTableWidget(this);
     table_->setColumnCount(4);
@@ -193,6 +201,23 @@ void HistoryDialog::setupUI()
     connect(cancelButton, &QPushButton::clicked, this, &QDialog::reject);
 
     resize(400, 400);
+}
+
+QString HistoryDialog::buildLoadReconciliationMessage() const
+{
+    const auto [skipped, repaired] = timetracker_.getLastHistoryLoadStats();
+    if (skipped <= 0 && repaired <= 0) {
+        return QString();
+    }
+
+    return QString("%1 rows skipped due to corrupt data, %2 rows auto-repaired.")
+        .arg(skipped)
+        .arg(repaired);
+}
+
+QString HistoryDialog::getLoadReconciliationMessage() const
+{
+    return buildLoadReconciliationMessage();
 }
 
 std::pair<qint64, qint64> HistoryDialog::calculateTotals(const std::deque<TimeDuration>& durations)

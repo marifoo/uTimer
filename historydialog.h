@@ -40,6 +40,7 @@ private:
     int contextMenuPage_ = -1;
 
     QLabel* pageLabel_;
+    QLabel* loadReconciliationLabel_;
     QTableWidget* table_;
     QPushButton* prevButton_;
     QPushButton* nextButton_;
@@ -52,6 +53,7 @@ private:
     void assertPendingOriginsInvariant() const;
     void saveChanges();
     void showContextMenu(const QPoint& pos);
+    QString buildLoadReconciliationMessage() const;
 
 private slots:
     void onPrevClicked();
@@ -61,6 +63,7 @@ private slots:
 public:
     explicit HistoryDialog(TimeTracker& timetracker, const Settings& settings, QWidget* parent = nullptr);
     ~HistoryDialog();
+    QString getLoadReconciliationMessage() const;
 
     int exec() override {
         int result = QDialog::exec();

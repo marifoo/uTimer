@@ -276,6 +276,45 @@ void HistoryDialogTest::test_historydialog_split_non_today_db_row_survives_save_
     QCOMPARE(loaded[0].endTime, loaded[1].startTime);
 }
 
+void HistoryDialogTest::test_historydialog_shows_load_reconciliation_banner()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    TimeTracker tracker(settings);
+
+    DatabaseManager manager(settings);
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery query(manager.db);
+    const QDateTime start = QDateTime::currentDateTimeUtc();
+    const QDateTime end = start.addMSecs(1000);
+
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+                  "VALUES (99, 1000, :start_date, :start_time, :end_date, :end_time)");
+    query.bindValue(":start_date", start.date().toString(Qt::ISODate));
+    query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
+    query.bindValue(":end_date", end.date().toString(Qt::ISODate));
+    query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+    QVERIFY(query.exec());
+
+    query.prepare("INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
+                  "VALUES (0, 1200, :start_date, :start_time, :end_date, :end_time)");
+    query.bindValue(":start_date", start.date().toString(Qt::ISODate));
+    query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
+    query.bindValue(":end_date", end.date().toString(Qt::ISODate));
+    query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+    QVERIFY(query.exec());
+    manager.lazyClose();
+
+    HistoryDialog dialog(tracker, settings);
+    const QString msg = dialog.getLoadReconciliationMessage();
+    QCOMPARE(msg, QString("1 rows skipped due to corrupt data, 1 rows auto-repaired."));
+    QVERIFY(dialog.loadReconciliationLabel_ != nullptr);
+    QCOMPARE(dialog.loadReconciliationLabel_->text(), msg);
+    QVERIFY(!dialog.loadReconciliationLabel_->isHidden());
+}
+
 void HistoryDialogTest::test_splitdialog_default_types_and_bounds()
 {
     QDateTime start = makeTime(0);

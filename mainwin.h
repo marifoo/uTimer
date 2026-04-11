@@ -56,6 +56,7 @@ public slots:
 	void toggleAlwaysOnTop();
 	void reactOnLockState(LockEvent event);
 	void showUserWarning(const QString& text);
+	void showHistoryLoadReconciliation(const QString& text);
 	void onAboutToQuit();
 };
 

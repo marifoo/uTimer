@@ -30,6 +30,10 @@
 #include "logger.h"
 #include "settings.h"
 
+namespace {
+constexpr qint64 kDurationReconciliationToleranceMs = 100;
+}
+
 DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
     : QObject(parent), history_days_to_keep_(std::max(settings.getHistoryDays(), 0)), settings_(settings)
 {
@@ -438,19 +442,19 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
  *   - Type must be valid enum (Activity/Pause).
  *   - Start must be <= End.
  *   - Duration must be non-negative.
- *   - Computed duration must match stored duration within ±5ms tolerance.
+ *   - Computed duration must match stored duration within reconciliation tolerance.
  *   - Corrupted/Invalid rows are skipped and logged.
  * - Timestamps are stored in UTC and converted to local time on load.
  */
-std::deque<TimeDuration> DatabaseManager::loadDurations()
+DatabaseManager::LoadResult DatabaseManager::loadDurations()
 {
-    std::deque<TimeDuration> durations;
+    LoadResult result;
 
     if (!lazyOpen()) {
         if (settings_.logToFile()) {
             Logger::Log("[DB] Could not lazy open DB to load Durations");
         }
-        return durations;
+        return result;
     }
 
     // Start read transaction for consistent snapshot
@@ -459,7 +463,7 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
             Logger::Log("[DB] Error starting read transaction: " + db.lastError().text());
         }
         lazyClose();
-        return durations;
+        return result;
     }
 
     // Load all durations ordered by start date and time
@@ -471,7 +475,7 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
             Logger::Log("[DB] Error executing load query: " + query.lastError().text());
         }
         lazyClose();
-        return durations;
+        return result;
     }
 
     // Parse each row and reconstruct TimeDuration objects
@@ -495,6 +499,7 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
             if (settings_.logToFile()) {
                 Logger::Log(QString("[DB] Warning: Invalid type value %1, skipping entry").arg(typeInt));
             }
+            result.skipped++;
             continue;
         }
 
@@ -506,6 +511,7 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
                 Logger::Log(QString("[DB] Warning: Skipped invalid timestamp entry - StartDate: %1, StartTime: %2, EndDate: %3, EndTime: %4")
                     .arg(startDate.toString()).arg(startTime.toString()).arg(endDate.toString()).arg(endTime.toString()));
             }
+            result.skipped++;
             continue;
         }
 
@@ -515,35 +521,41 @@ std::deque<TimeDuration> DatabaseManager::loadDurations()
                 Logger::Log(QString("[DB] Warning: Skipped entry with start > end - Start: %1, End: %2")
                     .arg(startDateTime.toString(Qt::ISODate)).arg(endDateTime.toString(Qt::ISODate)));
             }
+            result.skipped++;
             continue;
         }
 
         // Compute duration from timestamps and validate against stored duration
         qint64 computedDuration = startDateTime.msecsTo(endDateTime);
-        const qint64 TOLERANCE_MS = 5;
 
         if (storedDuration < 0) {
             if (settings_.logToFile()) {
                 Logger::Log(QString("[DB] Warning: Negative stored duration %1ms - using computed duration %2ms")
                     .arg(storedDuration).arg(computedDuration));
             }
-            storedDuration = computedDuration;
-        } else if (qAbs(computedDuration - storedDuration) > TOLERANCE_MS) {
+            result.repaired++;
+        } else if (qAbs(computedDuration - storedDuration) > kDurationReconciliationToleranceMs) {
             if (settings_.logToFile()) {
                 Logger::Log(QString("[DB] Warning: Duration mismatch (stored: %1ms, computed: %2ms) - using computed value")
                     .arg(storedDuration).arg(computedDuration));
             }
-            // Use computed duration for consistency
+            result.repaired++;
         }
 
         // Create TimeDuration with explicit start/end times
-        durations.emplace_back(TimeDuration(type, startDateTime, endDateTime));
+        result.durations.emplace_back(TimeDuration(type, startDateTime, endDateTime));
     }
 
     db.commit();  // Commit read transaction
     lazyClose();
 
-    return durations;
+    if ((result.skipped > 0 || result.repaired > 0) && settings_.logToFile()) {
+        Logger::Log(QString("[DB] loadDurations reconciliation summary: skipped=%1, repaired=%2")
+            .arg(result.skipped)
+            .arg(result.repaired));
+    }
+
+    return result;
 }
 
 bool DatabaseManager::hasEntriesForDate(const QDate& date)

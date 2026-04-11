@@ -192,6 +192,10 @@ void ContentWidget::pressedAutoPauseButton()
 void ContentWidget::pressedShowHistoryButton()
 {
     HistoryDialog dlg(timetracker_, settings_, this);
+    const QString reconciliationMessage = dlg.getLoadReconciliationMessage();
+    if (!reconciliationMessage.isEmpty()) {
+        emit historyLoadReconciliationAvailable(reconciliationMessage);
+    }
     dlg.exec();
 }
 
@@ -286,4 +290,3 @@ bool ContentWidget::isGUIinPause()
 { 
 	return startpause_button_->text() == "CONTINUE"; 
 }
-

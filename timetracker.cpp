@@ -29,7 +29,8 @@ TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), mode_(Mode::None),
       was_active_before_autopause_(false), has_unsaved_data_(false), is_locked_(false),
       checkpoints_paused_(false), db_(settings, parent), current_checkpoint_id_(-1),
-      checkpoint_interval_msec_(settings.getCheckpointIntervalMsec())
+      checkpoint_interval_msec_(settings.getCheckpointIntervalMsec()),
+      last_history_load_skipped_(0), last_history_load_repaired_(0)
 {
     // Setup checkpoint timer (disabled if interval is 0)
     if (checkpoint_interval_msec_ > 0) {
@@ -438,7 +439,16 @@ void TimeTracker::setCurrentDurations(const std::deque<TimeDuration>& newDuratio
 std::deque<TimeDuration> TimeTracker::getDurationsHistory()
 {
     QMutexLocker locker(&mutex_);
-    return db_.loadDurations();
+    auto loadResult = db_.loadDurations();
+    last_history_load_skipped_ = loadResult.skipped;
+    last_history_load_repaired_ = loadResult.repaired;
+    return loadResult.durations;
+}
+
+std::pair<int, int> TimeTracker::getLastHistoryLoadStats() const
+{
+    QMutexLocker locker(&mutex_);
+    return std::make_pair(last_history_load_skipped_, last_history_load_repaired_);
 }
 
 std::optional<TimeDuration> TimeTracker::getOngoingDuration() const

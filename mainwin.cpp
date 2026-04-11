@@ -52,6 +52,8 @@ void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
 
 	setCentralWidget(content_widget_);
 	QObject::connect(content_widget_, SIGNAL(pressedButton(Button)), this, SIGNAL(sendButtons(Button)));
+	QObject::connect(content_widget_, &ContentWidget::historyLoadReconciliationAvailable,
+		this, &MainWin::showHistoryLoadReconciliation);
 	QObject::connect(content_widget_, SIGNAL(minToTray()), this, SLOT(minToTray()));
 	QObject::connect(content_widget_, SIGNAL(toggleAlwaysOnTop()), this, SLOT(toggleAlwaysOnTop()));
 	
@@ -138,6 +140,11 @@ void MainWin::showUserWarning(const QString& text)
 		tray_icon_->showMessage("uTimer Warning", text, QSystemTrayIcon::Warning, 10000);
 	}
 
+	statusBar()->showMessage(text, 10000);
+}
+
+void MainWin::showHistoryLoadReconciliation(const QString& text)
+{
 	statusBar()->showMessage(text, 10000);
 }
 

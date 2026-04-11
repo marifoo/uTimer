@@ -29,6 +29,7 @@ private slots:
     void test_historydialog_split_action_splits_row();
     void test_historydialog_split_today_mixed_origins_routes_to_correct_bucket();
     void test_historydialog_split_non_today_db_row_survives_save_roundtrip();
+    void test_historydialog_shows_load_reconciliation_banner();
 
     void test_splitdialog_default_types_and_bounds();
     void test_splitdialog_short_duration_disables_slider();
