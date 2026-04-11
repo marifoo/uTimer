@@ -34,6 +34,7 @@
 namespace {
 constexpr qint64 kDedupStartToleranceMs = 1000;
 constexpr qint64 kDedupEndToleranceMs = 1000;
+constexpr int kMinimumSplitDurationSeconds = 3;
 
 bool isCurrentAndDbNearDuplicate(const TimeDuration& dbDuration, const TimeDuration& currentDuration)
 {
@@ -565,7 +566,7 @@ void HistoryDialog::showContextMenu(const QPoint& pos)
  * Handles the "Split" context menu action.
  *
  * Algorithm:
- * 1. Validates that the selected duration is long enough to be split (min 2s).
+ * 1. Validates that the selected duration is long enough to be split (min 3s).
  * 2. Launches SplitDialog to get user input (split point and types).
  * 3. Validates the result to ensure no duration is lost or created (sum check).
  * 4. Atomically replaces the original entry with the two new entries in the deque.
@@ -605,8 +606,8 @@ void HistoryDialog::onSplitRow()
     QDateTime start = duration.startTime;
     QDateTime end = duration.endTime;
 
-    // Check if duration is long enough to split meaningfully (at least 2 seconds)
-    if (start.secsTo(end) <= 2) {
+    // Check if duration is long enough to split meaningfully (at least 3 seconds)
+    if (start.secsTo(end) < kMinimumSplitDurationSeconds) {
         if (settings_.logToFile()) {
             Logger::Log(QString("[HISTORY] Error: onSplitRow: Duration too short to split - only %1 seconds")
                 .arg(start.secsTo(end)));
@@ -696,7 +697,7 @@ SplitDialog::SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* 
     slider_ = new QSlider(Qt::Horizontal, this);
     
     int totalSecs = start.secsTo(end);
-    if (totalSecs <= 2) {
+    if (totalSecs < kMinimumSplitDurationSeconds) {
         // Duration too short to split meaningfully
         slider_->setMinimum(1);
         slider_->setMaximum(1);

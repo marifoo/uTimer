@@ -260,7 +260,7 @@ of failures. They depend on Phase 1 being done but can overlap with Phase 2.
     OK without editing, assert the saved ongoing row's `endTime` equals the
     snapshot time, not `now_2`.
 
-### T10. [m] Fix off-by-one in the "minimum 3 seconds" user message
+### T10. [DONE] [m] Fix off-by-one in the "minimum 3 seconds" user message
 - **Where:** `historydialog.cpp:519`.
 - **Problem:** Error text reads "minimum 3 seconds" but the code rejects
   `duration <= 2` seconds (i.e. accepts 3+). The threshold logic is correct;

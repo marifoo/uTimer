@@ -645,6 +645,36 @@ void HistoryDialogTest::test_splitdialog_short_duration_disables_slider()
     QVERIFY(!dialog.slider_->isEnabled());
 }
 
+void HistoryDialogTest::test_splitdialog_minimum_duration_boundaries()
+{
+    {
+        QDateTime start = makeTime(0);
+        QDateTime end = makeTime(2 * 1000);
+        SplitDialog dialog(start, end);
+        QVERIFY(!dialog.slider_->isEnabled());
+        QCOMPARE(dialog.slider_->minimum(), 1);
+        QCOMPARE(dialog.slider_->maximum(), 1);
+    }
+
+    {
+        QDateTime start = makeTime(0);
+        QDateTime end = makeTime(3 * 1000);
+        SplitDialog dialog(start, end);
+        QVERIFY(dialog.slider_->isEnabled());
+        QCOMPARE(dialog.slider_->minimum(), 1);
+        QCOMPARE(dialog.slider_->maximum(), 2);
+    }
+
+    {
+        QDateTime start = makeTime(0);
+        QDateTime end = makeTime(4 * 1000);
+        SplitDialog dialog(start, end);
+        QVERIFY(dialog.slider_->isEnabled());
+        QCOMPARE(dialog.slider_->minimum(), 1);
+        QCOMPARE(dialog.slider_->maximum(), 3);
+    }
+}
+
 void HistoryDialogTest::test_splitdialog_setters_affect_types()
 {
     QDateTime start = makeTime(0);

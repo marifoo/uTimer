@@ -39,6 +39,7 @@ private slots:
 
     void test_splitdialog_default_types_and_bounds();
     void test_splitdialog_short_duration_disables_slider();
+    void test_splitdialog_minimum_duration_boundaries();
     void test_splitdialog_setters_affect_types();
 };
 
