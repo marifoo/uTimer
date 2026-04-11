@@ -57,7 +57,7 @@ void HistoryDialogTest::test_historydialog_createPages_includes_current_db_ongoi
     // Save a DB entry for today
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, now.addSecs(-50), now.addSecs(-40));
-    QVERIFY(tracker.replaceDurationsInDB(dbDurations));
+    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
 
     // Start ongoing activity
     tracker.useTimerViaButton(Button::Start);
@@ -111,7 +111,7 @@ void HistoryDialogTest::test_historydialog_saveChanges_updates_timetracker_and_d
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, now.addSecs(-140), now.addSecs(-120));
-    QVERIFY(tracker.replaceDurationsInDB(dbDurations));
+    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
 
     HistoryDialog dialog(tracker, settings);
     dialog.pendingChanges_[0][0].type = DurationType::Pause;
@@ -183,7 +183,7 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, dbStart, dbEnd);
-    QVERIFY(tracker.replaceDurationsInDB(dbDurations));
+    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
 
     HistoryDialog dialog(tracker, settings);
     QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(2));
@@ -240,7 +240,7 @@ void HistoryDialogTest::test_historydialog_split_non_today_db_row_survives_save_
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Activity, start, end);
-    QVERIFY(tracker.replaceDurationsInDB(dbDurations));
+    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
 
     HistoryDialog dialog(tracker, settings);
     QVERIFY(dialog.pages_.size() >= static_cast<size_t>(2));
@@ -333,7 +333,8 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
     const QDateTime historicalEnd = historicalStart.addSecs(300);
     std::deque<TimeDuration> historicalRows;
     historicalRows.emplace_back(DurationType::Pause, historicalStart, historicalEnd);
-    QVERIFY(tracker.replaceDurationsInDB(historicalRows));
+    QVERIFY(tracker.replaceDurationsInDB(historicalRows, {}));
+
 
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
@@ -450,6 +451,97 @@ void HistoryDialogTest::test_historydialog_pauses_checkpoint_timer_for_dialog_li
         db.close();
     }
     QSqlDatabase::removeDatabase(connName);
+}
+
+void HistoryDialogTest::test_historydialog_save_keeps_db_rows_for_history_plus_current_session()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    TimeTracker tracker(settings);
+
+    const QDateTime historicalStart(QDate::currentDate().addDays(-1), QTime(9, 0, 0));
+    const QDateTime historicalEnd = historicalStart.addSecs(60);
+    std::deque<TimeDuration> historicalRows;
+    historicalRows.emplace_back(DurationType::Pause, historicalStart, historicalEnd);
+    QVERIFY(tracker.replaceDurationsInDB(historicalRows, {}));
+
+    const QDateTime now = QDateTime::currentDateTime();
+    tracker.durations_.push_back(TimeDuration(DurationType::Activity, now.addSecs(-30), now.addSecs(-20)));
+    tracker.durations_.push_back(TimeDuration(DurationType::Pause, now.addSecs(-20), now.addSecs(-10)));
+
+    const int expectedHistoryRows = 1;
+    const int expectedCurrentSessionRows = 2;
+
+    HistoryDialog dialog(tracker, settings);
+    dialog.done(QDialog::Accepted);
+    dialog.saveChanges();
+
+    const QString connName = "historydialog_t7_row_count";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+
+        QSqlQuery totalQuery(db);
+        QVERIFY(totalQuery.exec("SELECT COUNT(*) FROM durations"));
+        QVERIFY(totalQuery.next());
+        QCOMPARE(totalQuery.value(0).toInt(), expectedHistoryRows + expectedCurrentSessionRows);
+
+        QSqlQuery finalizedQuery(db);
+        QVERIFY(finalizedQuery.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 1"));
+        QVERIFY(finalizedQuery.next());
+        QCOMPARE(finalizedQuery.value(0).toInt(), expectedHistoryRows);
+
+        QSqlQuery unfinalizedQuery(db);
+        QVERIFY(unfinalizedQuery.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0"));
+        QVERIFY(unfinalizedQuery.next());
+        QCOMPARE(unfinalizedQuery.value(0).toInt(), expectedCurrentSessionRows);
+
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+}
+
+void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_current_segment_row()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString settingsPath = createSettingsFile(tempDir.path(), 7);
+
+    {
+        Settings settings(settingsPath);
+        TimeTracker tracker(settings);
+
+        const QDateTime now = QDateTime::currentDateTime();
+        tracker.durations_.push_back(TimeDuration(DurationType::Activity, now.addSecs(-15), now.addSecs(-5)));
+
+        HistoryDialog dialog(tracker, settings);
+        dialog.done(QDialog::Accepted);
+        dialog.saveChanges();
+
+        // Simulate crash: skip graceful stop/finalize.
+        tracker.mode_ = TimeTracker::Mode::None;
+        tracker.current_checkpoint_id_ = -1;
+    }
+
+    {
+        Settings settings(settingsPath);
+        DatabaseManager db(settings);
+
+        QVERIFY(db.lazyOpen());
+        QSqlQuery unfinalizedQuery(db.db);
+        QVERIFY(unfinalizedQuery.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0"));
+        QVERIFY(unfinalizedQuery.next());
+        QCOMPARE(unfinalizedQuery.value(0).toInt(), 1);
+        db.lazyClose();
+
+        TimeTracker reopened(settings);
+        auto loaded = db.loadDurations();
+        QCOMPARE(loaded.size(), static_cast<size_t>(1));
+    }
 }
 
 void HistoryDialogTest::test_splitdialog_default_types_and_bounds()

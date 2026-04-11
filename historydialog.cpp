@@ -411,10 +411,11 @@ void HistoryDialog::onNextClicked()
  * Strategy:
  * 1. Applies in-memory changes to the page models.
  * 2. Updates TimeTracker's current session (if Page 0 was edited).
- * 3. Aggregates all historical pages and performs a bulk REPLACE in the DB.
+ * 3. Aggregates historical + current-session rows and rewrites DB atomically.
  *
- * Note: Uses replaceDurationsInDB() which wipes and rewrites the history
- * table. This is safe because we loaded the entire history on startup.
+ * Note: replaceDurationsInDB() rewrites the full durations table. Historical
+ * rows are written as finalized, while current-session rows keep DB backing as
+ * unfinalized so crash recovery can restore ongoing work.
  */
 void HistoryDialog::saveChanges()
 {
@@ -436,6 +437,7 @@ void HistoryDialog::saveChanges()
     // after replaceDurationsInDB assigns fresh row IDs.
     std::deque<TimeDuration> historyDurations;
     std::deque<TimeDuration> currentMemoryDurations;
+    std::deque<TimeDuration> currentSessionDurations;
     std::optional<TimeDuration> editedOngoingDuration;
 
     for (size_t i = 0; i < pages_.size(); ++i) {
@@ -445,6 +447,7 @@ void HistoryDialog::saveChanges()
                 if (i < rowOrigins_.size() && row < rowOrigins_[i].size()) {
                     if (rowOrigins_[i][row] == RowOrigin::CurrentMemory) {
                         currentMemoryDurations.push_back(pages_[i].durations[row]);
+                        currentSessionDurations.push_back(pages_[i].durations[row]);
                     } else if (rowOrigins_[i][row] == RowOrigin::CurrentDatabase) {
                         currentDbDurations.push_back(pages_[i].durations[row]);
                     } else if (rowOrigins_[i][row] == RowOrigin::Ongoing) {
@@ -463,17 +466,19 @@ void HistoryDialog::saveChanges()
         }
     }
 
-    // Save historical + current-day DB durations to DB
+    // Save historical + current-session durations to DB
     if (editedOngoingDuration.has_value()) {
-        historyDurations.push_back(editedOngoingDuration.value());
+        currentSessionDurations.push_back(editedOngoingDuration.value());
     }
 
-    if (!historyDurations.empty()) {
+    if (!historyDurations.empty() || !currentSessionDurations.empty()) {
         if (settings_.logToFile()) {
-            Logger::Log(QString("[HISTORY] Saving %1 historical durations to DB").arg(historyDurations.size()));
+            Logger::Log(QString("[HISTORY] Saving %1 historical + %2 current-session durations to DB")
+                .arg(historyDurations.size())
+                .arg(currentSessionDurations.size()));
         }
 
-        bool success = timetracker_.replaceDurationsInDB(historyDurations);
+        bool success = timetracker_.replaceDurationsInDB(historyDurations, currentSessionDurations);
         if (!success) {
             if (settings_.logToFile()) {
                 Logger::Log("[HISTORY] CRITICAL: Failed to save durations to DB");

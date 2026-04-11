@@ -43,6 +43,8 @@ public:
     ~DatabaseManager();
 
     bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode);
+    bool replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
+                              const std::deque<TimeDuration>& currentSessionDurations);
     LoadResult loadDurations();
     bool hasEntriesForDate(const QDate& date);
     bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, long long& checkpointId);

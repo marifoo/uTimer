@@ -198,7 +198,7 @@ of failures. They depend on Phase 1 being done but can overlap with Phase 2.
     row exists for the ongoing segment.
   - Verify `checkpoint_timer_` is paused for the dialog's lifetime.
 
-### T7. [C4] Stop stripping DB backing from in-memory current-session rows
+### T7. [DONE] [C4] Stop stripping DB backing from in-memory current-session rows
 - **Where:** `historydialog.cpp:402–408`; `databasemanager.cpp:386–394`.
 - **Problem:** `replaceDurationsInDB` deletes the whole `durations` table, then
   re-inserts only `historyDurations`. Rows classified as `CurrentMemory` used

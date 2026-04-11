@@ -555,14 +555,26 @@ bool TimeTracker::updateDurationsInDB()
     return db_.updateDurationsByStartTime(temp);
 }
 
-bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> durations)
+bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> historyDurations,
+                                       std::deque<TimeDuration> currentSessionDurations)
 {
-    size_t original = durations.size();
-    cleanDurations(&durations);
-    if (settings_.logToFile() && original != durations.size()) {
-        Logger::Log(QString("[DB] Cleaned durations for replace: %1 -> %2").arg(original).arg(durations.size()));
+    size_t originalHistory = historyDurations.size();
+    cleanDurations(&historyDurations);
+    if (settings_.logToFile() && originalHistory != historyDurations.size()) {
+        Logger::Log(QString("[DB] Cleaned history durations for replace: %1 -> %2")
+            .arg(originalHistory)
+            .arg(historyDurations.size()));
     }
-    return db_.saveDurations(durations, TransactionMode::Replace);
+
+    size_t originalCurrent = currentSessionDurations.size();
+    cleanDurations(&currentSessionDurations);
+    if (settings_.logToFile() && originalCurrent != currentSessionDurations.size()) {
+        Logger::Log(QString("[DB] Cleaned current-session durations for replace: %1 -> %2")
+            .arg(originalCurrent)
+            .arg(currentSessionDurations.size()));
+    }
+
+    return db_.replaceDurationsInDB(historyDurations, currentSessionDurations);
 }
 
 bool TimeTracker::hasEntriesForToday()

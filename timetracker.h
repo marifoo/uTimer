@@ -70,7 +70,8 @@ public:
     void setDurationType(size_t idx, DurationType type);
     bool appendDurationsToDB();
     bool updateDurationsInDB();
-    bool replaceDurationsInDB(std::deque<TimeDuration> durations);
+    bool replaceDurationsInDB(std::deque<TimeDuration> historyDurations,
+                              std::deque<TimeDuration> currentSessionDurations);
     bool hasEntriesForToday();
     void pauseCheckpoints();
     void resumeCheckpoints();

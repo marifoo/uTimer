@@ -512,6 +512,111 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
     return commitSuccessful;
 }
 
+bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
+                                           const std::deque<TimeDuration>& currentSessionDurations)
+{
+    if (history_days_to_keep_ == 0) {
+        return true;
+    }
+
+    std::deque<TimeDuration> allDurations;
+    allDurations.insert(allDurations.end(), historyDurations.begin(), historyDurations.end());
+    allDurations.insert(allDurations.end(), currentSessionDurations.begin(), currentSessionDurations.end());
+
+    if (!createBackup(allDurations, TransactionMode::Replace)) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Warning: Backup failed before REPLACE operation - proceeding without backup");
+        }
+    }
+
+    if (!lazyOpen()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Could not lazy open DB to replace durations");
+        }
+        return false;
+    }
+
+    if (!db.transaction()) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error starting transaction for replace: " + db.lastError().text());
+        }
+        lazyClose();
+        return false;
+    }
+
+    QSqlQuery clearQuery(db);
+    if (!clearQuery.exec("DELETE FROM durations")) {
+        db.rollback();
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
+        }
+        lazyClose();
+        return false;
+    }
+
+    QSqlQuery finalizedInsert(db);
+    finalizedInsert.prepare(
+        "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+        "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 1)"
+    );
+
+    for (const auto& d : historyDurations) {
+        const QDateTime startUtc = d.startTime.toUTC();
+        const QDateTime endUtc = d.endTime.toUTC();
+
+        finalizedInsert.bindValue(":type", static_cast<int>(d.type));
+        finalizedInsert.bindValue(":duration", d.duration);
+        finalizedInsert.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
+        finalizedInsert.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
+        finalizedInsert.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
+        finalizedInsert.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
+
+        if (!finalizedInsert.exec()) {
+            db.rollback();
+            if (settings_.logToFile()) {
+                Logger::Log("[DB] Error inserting finalized duration: " + finalizedInsert.lastError().text());
+            }
+            lazyClose();
+            return false;
+        }
+    }
+
+    QSqlQuery unfinalizedInsert(db);
+    unfinalizedInsert.prepare(
+        "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+        "VALUES (:type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
+    );
+
+    for (const auto& d : currentSessionDurations) {
+        const QDateTime startUtc = d.startTime.toUTC();
+        const QDateTime endUtc = d.endTime.toUTC();
+
+        unfinalizedInsert.bindValue(":type", static_cast<int>(d.type));
+        unfinalizedInsert.bindValue(":duration", d.duration);
+        unfinalizedInsert.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
+        unfinalizedInsert.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
+        unfinalizedInsert.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
+        unfinalizedInsert.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
+
+        if (!unfinalizedInsert.exec()) {
+            db.rollback();
+            if (settings_.logToFile()) {
+                Logger::Log("[DB] Error inserting current-session duration: " + unfinalizedInsert.lastError().text());
+            }
+            lazyClose();
+            return false;
+        }
+    }
+
+    const bool success = db.commit();
+    if (!success && settings_.logToFile()) {
+        Logger::Log("[DB] Error committing replace transaction: " + db.lastError().text());
+    }
+
+    lazyClose();
+    return success;
+}
+
 /**
  * Retrieves the entire history of durations from the database.
  *
