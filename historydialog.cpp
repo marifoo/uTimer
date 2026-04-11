@@ -431,13 +431,15 @@ void HistoryDialog::saveChanges()
     }
     assertPendingOriginsInvariant();
 
-    // Update TimeTracker's current session (in-memory only)
-    // Collect historical durations + current-day finished DB rows for save
+    // Update TimeTracker's current session and collect rows for DB replace.
+    // The ongoing row is handled separately so checkpoint tracking can be reset
+    // after replaceDurationsInDB assigns fresh row IDs.
     std::deque<TimeDuration> historyDurations;
+    std::deque<TimeDuration> currentMemoryDurations;
+    std::optional<TimeDuration> editedOngoingDuration;
 
     for (size_t i = 0; i < pages_.size(); ++i) {
         if (pages_[i].isCurrent) {
-            std::deque<TimeDuration> currentMemoryDurations;
             std::deque<TimeDuration> currentDbDurations;
             for (size_t row = 0; row < pages_[i].durations.size(); ++row) {
                 if (i < rowOrigins_.size() && row < rowOrigins_[i].size()) {
@@ -445,12 +447,10 @@ void HistoryDialog::saveChanges()
                         currentMemoryDurations.push_back(pages_[i].durations[row]);
                     } else if (rowOrigins_[i][row] == RowOrigin::CurrentDatabase) {
                         currentDbDurations.push_back(pages_[i].durations[row]);
+                    } else if (rowOrigins_[i][row] == RowOrigin::Ongoing) {
+                        editedOngoingDuration = pages_[i].durations[row];
                     }
                 }
-            }
-            timetracker_.setCurrentDurations(currentMemoryDurations);
-            if (settings_.logToFile()) {
-                Logger::Log("[HISTORY] Updated TimeTracker current session (in-memory)");
             }
             historyDurations.insert(historyDurations.end(),
                                    currentDbDurations.begin(),
@@ -464,9 +464,8 @@ void HistoryDialog::saveChanges()
     }
 
     // Save historical + current-day DB durations to DB
-    auto ongoingDuration = timetracker_.getOngoingDuration();
-    if (ongoingDuration.has_value()) {
-        historyDurations.push_back(ongoingDuration.value());
+    if (editedOngoingDuration.has_value()) {
+        historyDurations.push_back(editedOngoingDuration.value());
     }
 
     if (!historyDurations.empty()) {
@@ -486,6 +485,18 @@ void HistoryDialog::saveChanges()
         }
     } else if (settings_.logToFile()) {
         Logger::Log("[HISTORY] No historical durations to save");
+    }
+
+    timetracker_.setCurrentDurations(currentMemoryDurations);
+    if (settings_.logToFile()) {
+        Logger::Log("[HISTORY] Updated TimeTracker current session (in-memory)");
+    }
+
+    if (editedOngoingDuration.has_value()) {
+        timetracker_.resetCheckpointTrackingForOngoing(editedOngoingDuration.value());
+        if (settings_.logToFile()) {
+            Logger::Log("[HISTORY] Reset checkpoint tracking for ongoing segment");
+        }
     }
 }
 

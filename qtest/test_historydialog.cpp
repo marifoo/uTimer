@@ -315,6 +315,143 @@ void HistoryDialogTest::test_historydialog_shows_load_reconciliation_banner()
     QVERIFY(!dialog.loadReconciliationLabel_->isHidden());
 }
 
+void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and_creates_new_checkpoint()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/checkpoint_interval_minutes", 1);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    TimeTracker tracker(settings);
+
+    const QDateTime historicalStart(QDate::currentDate().addDays(-1), QTime(10, 0, 0));
+    const QDateTime historicalEnd = historicalStart.addSecs(300);
+    std::deque<TimeDuration> historicalRows;
+    historicalRows.emplace_back(DurationType::Pause, historicalStart, historicalEnd);
+    QVERIFY(tracker.replaceDurationsInDB(historicalRows));
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(20);
+    tracker.saveCheckpoint();
+    const long long oldCheckpointId = tracker.current_checkpoint_id_;
+    QVERIFY(oldCheckpointId != -1);
+
+    {
+        HistoryDialog dialog(tracker, settings);
+        QVERIFY(dialog.pages_.size() >= static_cast<size_t>(2));
+        dialog.pendingChanges_[1][0].type = DurationType::Activity;
+        dialog.done(QDialog::Accepted);
+        dialog.saveChanges();
+    }
+
+    QCOMPARE(tracker.current_checkpoint_id_ != -1, true);
+    QVERIFY(tracker.current_checkpoint_id_ != oldCheckpointId);
+
+    QTest::qWait(20);
+    tracker.saveCheckpoint();
+
+    const QString connName = "historydialog_t6_case1";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+
+        QSqlQuery historicalQuery(db);
+        historicalQuery.prepare(
+            "SELECT type, duration FROM durations WHERE start_date = :start_date AND start_time = :start_time AND end_date = :end_date AND end_time = :end_time"
+        );
+        historicalQuery.bindValue(":start_date", historicalStart.toUTC().date().toString(Qt::ISODate));
+        historicalQuery.bindValue(":start_time", historicalStart.toUTC().time().toString("HH:mm:ss.zzz"));
+        historicalQuery.bindValue(":end_date", historicalEnd.toUTC().date().toString(Qt::ISODate));
+        historicalQuery.bindValue(":end_time", historicalEnd.toUTC().time().toString("HH:mm:ss.zzz"));
+        QVERIFY(historicalQuery.exec());
+        QVERIFY(historicalQuery.next());
+        QCOMPARE(historicalQuery.value(0).toInt(), static_cast<int>(DurationType::Activity));
+        QCOMPARE(historicalQuery.value(1).toLongLong(), historicalStart.msecsTo(historicalEnd));
+
+        QSqlQuery checkpointQuery(db);
+        checkpointQuery.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0");
+        QVERIFY(checkpointQuery.next());
+        QCOMPARE(checkpointQuery.value(0).toInt(), 1);
+
+        QSqlQuery checkpointIdQuery(db);
+        checkpointIdQuery.prepare("SELECT id FROM durations WHERE is_finalized = 0");
+        QVERIFY(checkpointIdQuery.exec());
+        QVERIFY(checkpointIdQuery.next());
+        QVERIFY(checkpointIdQuery.value(0).toLongLong() != oldCheckpointId);
+
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+}
+
+void HistoryDialogTest::test_historydialog_pauses_checkpoint_timer_for_dialog_lifetime()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+
+    const QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/checkpoint_interval_minutes", 1);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    TimeTracker tracker(settings);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(20);
+    QVERIFY(tracker.checkpointTimer_.isActive());
+
+    {
+        HistoryDialog dialog(tracker, settings);
+        QVERIFY(tracker.checkpoints_paused_);
+        QVERIFY(!tracker.checkpointTimer_.isActive());
+
+        tracker.saveCheckpoint();
+
+        const QString connName = "historydialog_t6_case2_open";
+        {
+            QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+            db.setDatabaseName(db_path_);
+            QVERIFY(db.open());
+
+            QSqlQuery countQuery(db);
+            QVERIFY(countQuery.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0"));
+            QVERIFY(countQuery.next());
+            QCOMPARE(countQuery.value(0).toInt(), 0);
+
+            db.close();
+        }
+        QSqlDatabase::removeDatabase(connName);
+    }
+
+    QVERIFY(!tracker.checkpoints_paused_);
+    QVERIFY(tracker.checkpointTimer_.isActive());
+
+    tracker.saveCheckpoint();
+
+    const QString connName = "historydialog_t6_case2_closed";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+
+        QSqlQuery countQuery(db);
+        QVERIFY(countQuery.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0"));
+        QVERIFY(countQuery.next());
+        QCOMPARE(countQuery.value(0).toInt(), 1);
+
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+}
+
 void HistoryDialogTest::test_splitdialog_default_types_and_bounds()
 {
     QDateTime start = makeTime(0);

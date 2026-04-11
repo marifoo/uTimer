@@ -166,7 +166,7 @@ These items decouple the dialog from the checkpoint subsystem and stop the
 "dialog saved this row but the next checkpoint silently overwrites it" class
 of failures. They depend on Phase 1 being done but can overlap with Phase 2.
 
-### T6. [C3 / F4] Reset TimeTracker checkpoint tracking when HistoryDialog saves
+### T6. [DONE] [C3 / F4] Reset TimeTracker checkpoint tracking when HistoryDialog saves
 - **Where:** `historydialog.cpp:408, 434`; `timetracker.cpp:420–424`
   (`setCurrentDurations`).
 - **Problem:** `HistoryDialog::saveChanges` calls `replaceDurationsInDB`

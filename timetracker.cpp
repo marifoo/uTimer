@@ -447,6 +447,28 @@ void TimeTracker::setCurrentDurations(const std::deque<TimeDuration>& newDuratio
     durations_ = newDurations;
 }
 
+void TimeTracker::resetCheckpointTrackingForOngoing(const TimeDuration& ongoing)
+{
+    QMutexLocker locker(&mutex_);
+
+    current_checkpoint_id_ = -1;
+    segment_start_time_ = ongoing.startTime;
+
+    if (checkpoint_interval_msec_ == 0 || mode_ != Mode::Activity || ongoing.type != DurationType::Activity) {
+        return;
+    }
+
+    if (ongoing.duration <= 0 || !ongoing.startTime.isValid() || !ongoing.endTime.isValid()) {
+        return;
+    }
+
+    db_.saveCheckpoint(ongoing.type,
+                       ongoing.duration,
+                       ongoing.startTime,
+                       ongoing.endTime,
+                       current_checkpoint_id_);
+}
+
 std::deque<TimeDuration> TimeTracker::getDurationsHistory()
 {
     QMutexLocker locker(&mutex_);
@@ -723,6 +745,7 @@ void TimeTracker::pauseCheckpoints()
 {
     QMutexLocker locker(&mutex_);
     checkpoints_paused_ = true;
+    checkpointTimer_.stop();
     if (settings_.logToFile()) {
         Logger::Log("[CHECKPOINT] Checkpoints paused");
     }
@@ -732,6 +755,9 @@ void TimeTracker::resumeCheckpoints()
 {
     QMutexLocker locker(&mutex_);
     checkpoints_paused_ = false;
+    if (checkpoint_interval_msec_ > 0 && mode_ == Mode::Activity && !is_locked_) {
+        checkpointTimer_.start();
+    }
     if (settings_.logToFile()) {
         Logger::Log("[CHECKPOINT] Checkpoints resumed");
     }
