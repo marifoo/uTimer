@@ -30,6 +30,8 @@ private slots:
     void test_timetracker_ongoing_duration();
     void test_timetracker_set_duration_type();
     void test_timetracker_checkpoints_paused();
+    void test_timetracker_retry_append_failure_then_success_preserves_segments();
+    void test_timetracker_retry_failure_keeps_unsaved_state_and_durations();
 };
 
 #endif // TEST_TIMETRACKER_H

@@ -23,6 +23,7 @@ private:
     const Settings & settings_;
     QElapsedTimer timer_;
     std::deque<TimeDuration> durations_;
+    std::deque<TimeDuration> unsaved_durations_;  // Cached subset that still needs append-retry
     Mode mode_;
     bool was_active_before_autopause_;
     bool has_unsaved_data_;  // Track if previous DB save failed
@@ -41,6 +42,7 @@ private:
     void backpauseTimer();
     void addDurationWithMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime);
     void saveCheckpointInternal();  // Internal checkpoint save (called when mutex already held)
+    bool appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
 
 public:
     explicit TimeTracker(const Settings & settings, QObject *parent = nullptr);
@@ -65,6 +67,9 @@ public:
 public slots:
     void useTimerViaButton(Button button);
     void useTimerViaLockEvent(LockEvent event);
+
+signals:
+    void userWarning(const QString& text);
 
 private slots:
     void saveCheckpoint();  // Periodic checkpoint saving every 5 minutes

@@ -88,20 +88,27 @@ void TimeTracker::startTimer()
             Logger::Log("[DEBUG] Starting Timer from Stopped - D=" + QString::number(durations_.size()));
         }
 
-        // Try to save any unsaved data from previous failed save attempt
-        if (has_unsaved_data_ && !durations_.empty()) {
+        bool retry_succeeded = true;
+
+        // Try to save any unsaved data from previous failed save attempt.
+        // Use unsaved_durations_ if present to keep retries idempotent.
+        const std::deque<TimeDuration>& retry_source = unsaved_durations_.empty() ? durations_ : unsaved_durations_;
+        if (has_unsaved_data_ && !retry_source.empty()) {
             if (settings_.logToFile()) {
                 Logger::Log("[DB] Retrying save of previously unsaved durations");
             }
-            if (appendDurationsToDB()) {
-                durations_.clear();
+            if (appendDurationsChunkToDB(retry_source)) {
+                unsaved_durations_.clear();
                 has_unsaved_data_ = false;
                 if (settings_.logToFile()) {
                     Logger::Log("[DB] Previously unsaved durations saved successfully");
                 }
-            } else if (settings_.logToFile()) {
-                Logger::Log("[DB] CRITICAL: Retry save failed - data will be lost");
-                // Continue anyway to avoid blocking the user indefinitely
+            } else {
+                retry_succeeded = false;
+                if (settings_.logToFile()) {
+                    Logger::Log("[DB] CRITICAL: Retry save failed - unsaved data retained for another retry");
+                }
+                emit userWarning("Could not save previous session data. It is kept in memory and will be retried.");
             }
         }
 
@@ -124,8 +131,11 @@ void TimeTracker::startTimer()
                             : "[TIMER] Boot time not added - entries already exist for today");
             }
         }
-        durations_.clear();
-        has_unsaved_data_ = false;
+        if (retry_succeeded) {
+            durations_.clear();
+            has_unsaved_data_ = false;
+            unsaved_durations_.clear();
+        }
         if (shouldAddBootTime) {
             QDateTime now = QDateTime::currentDateTime();
             QDateTime bootStart = now.addMSecs(-static_cast<qint64>(boot_time_sec) * 1000);
@@ -301,11 +311,13 @@ void TimeTracker::stopTimer()
     if (updateDurationsInDB()) {
         durations_.clear();
         has_unsaved_data_ = false;
+        unsaved_durations_.clear();
         if (settings_.logToFile()) {
             Logger::Log("[DB] Session durations updated");
         }
     } else {
         has_unsaved_data_ = true;  // Mark for retry on next start
+        unsaved_durations_ = durations_;
         if (settings_.logToFile()) {
             Logger::Log("[DB] Error updating session durations - data retained for next save attempt");
         }
@@ -445,9 +457,14 @@ std::optional<TimeDuration> TimeTracker::getOngoingDuration() const
 
 bool TimeTracker::appendDurationsToDB()
 {
-    if (durations_.empty())
+    return appendDurationsChunkToDB(durations_);
+}
+
+bool TimeTracker::appendDurationsChunkToDB(const std::deque<TimeDuration>& durations)
+{
+    if (durations.empty())
         return true;
-    auto temp = durations_;
+    auto temp = durations;
     size_t original = temp.size();
     cleanDurations(&temp);
     if (settings_.logToFile() && original != temp.size()) {
@@ -541,11 +558,13 @@ void TimeTracker::addDurationWithMidnightSplit(DurationType type, const QDateTim
         if (appendDurationsToDB()) {
             durations_.clear();
             has_unsaved_data_ = false;
+            unsaved_durations_.clear();
             if (settings_.logToFile()) {
                 Logger::Log("[DB] Previous day saved to DB (fallback midnight handling)");
             }
         } else {
             has_unsaved_data_ = true;
+            unsaved_durations_ = durations_;
             if (settings_.logToFile()) {
                 Logger::Log("[DB] CRITICAL: Failed to save previous day during midnight crossing - data retained in memory for next save attempt");
             }

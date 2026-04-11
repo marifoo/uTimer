@@ -217,3 +217,83 @@ void TimeTrackerTest::test_timetracker_checkpoints_paused()
     loaded = db.loadDurations();
     QCOMPARE(loaded.size(), (size_t)1);
 }
+
+void TimeTrackerTest::test_timetracker_retry_append_failure_then_success_preserves_segments()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    Settings settings(settingsPath);
+    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    QVERIFY(db.saveDurations({}, TransactionMode::Append));
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(20);
+
+    // Force stop save to fail and keep data in memory for retry.
+    QFile dbFile(db_path_);
+    QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::ReadUser | QFile::ReadGroup | QFile::ReadOther));
+    tracker.useTimerViaButton(Button::Stop);
+
+    QVERIFY(tracker.has_unsaved_data_);
+    QVERIFY(!tracker.durations_.empty());
+    std::deque<TimeDuration> unsavedCopy = tracker.durations_;
+
+    // Retry while DB is still blocked -> must stay unsaved.
+    tracker.useTimerViaButton(Button::Start);
+    QVERIFY(tracker.has_unsaved_data_);
+    QVERIFY(!tracker.durations_.empty());
+
+    // Restore DB and retry again -> previously unsaved rows should be appended.
+    QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser | QFile::ReadGroup | QFile::ReadOther));
+    tracker.useTimerViaButton(Button::Stop);
+    tracker.useTimerViaButton(Button::Start);
+
+    auto loaded = db.loadDurations();
+
+    for (const auto& d : unsavedCopy) {
+        bool found = false;
+        for (const auto& row : loaded) {
+            if (row.type == d.type && row.startTime == d.startTime && row.endTime == d.endTime && row.duration == d.duration) {
+                found = true;
+                break;
+            }
+        }
+        QVERIFY(found);
+    }
+}
+
+void TimeTrackerTest::test_timetracker_retry_failure_keeps_unsaved_state_and_durations()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    Settings settings(settingsPath);
+    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    QVERIFY(db.saveDurations({}, TransactionMode::Append));
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(20);
+
+    // Force first stop save to fail.
+    QFile dbFile(db_path_);
+    QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::ReadUser | QFile::ReadGroup | QFile::ReadOther));
+    tracker.useTimerViaButton(Button::Stop);
+
+    QVERIFY(tracker.has_unsaved_data_);
+    QVERIFY(!tracker.durations_.empty());
+    const size_t sizeBeforeRetry = tracker.durations_.size();
+
+    // Retry still fails.
+    tracker.useTimerViaButton(Button::Start);
+    QVERIFY(tracker.has_unsaved_data_);
+    QVERIFY(!tracker.durations_.empty());
+    QVERIFY(tracker.durations_.size() >= sizeBeforeRetry);
+
+    // Cleanup permissions for following tests.
+    QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser | QFile::ReadGroup | QFile::ReadOther));
+}

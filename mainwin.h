@@ -55,6 +55,7 @@ public slots:
 	void minToTray();
 	void toggleAlwaysOnTop();
 	void reactOnLockState(LockEvent event);
+	void showUserWarning(const QString& text);
 	void onAboutToQuit();
 };
 

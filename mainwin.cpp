@@ -19,6 +19,7 @@
 #include <QMessageBox>
 #include <QCloseEvent>
 #include <QCoreApplication>
+#include <QStatusBar>
 #include "logger.h"
 #include "helpers.h"
 
@@ -129,6 +130,15 @@ void MainWin::showMsgBox(const QString &text)
 	msgBox.setText(text);
 	msgBox.setIcon(QMessageBox::Warning);
 	msgBox.exec();
+}
+
+void MainWin::showUserWarning(const QString& text)
+{
+	if (tray_icon_ && tray_icon_->isVisible()) {
+		tray_icon_->showMessage("uTimer Warning", text, QSystemTrayIcon::Warning, 10000);
+	}
+
+	statusBar()->showMessage(text, 10000);
 }
 
 void MainWin::reactOnLockState(LockEvent event)
