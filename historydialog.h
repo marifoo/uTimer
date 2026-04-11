@@ -4,6 +4,7 @@
 #include <QDialog>
 #include <QDate>
 #include <QMap>
+#include <optional>
 #include <vector>
 #include <deque>
 #include <set>
@@ -35,6 +36,7 @@ private:
     std::vector<Page> pages_;
     std::vector<std::deque<TimeDuration>> pendingChanges_; // Store the entire edited page for each page index
     std::vector<std::vector<RowOrigin>> rowOrigins_;
+    std::optional<TimeDuration> ongoingSnapshot_;
     uint pageIndex_;
     int contextMenuRow_ = -1;
     int contextMenuPage_ = -1;

@@ -35,6 +35,7 @@ private slots:
     void test_historydialog_pauses_checkpoint_timer_for_dialog_lifetime();
     void test_historydialog_save_keeps_db_rows_for_history_plus_current_session();
     void test_historydialog_save_then_crash_reopen_retains_current_segment_row();
+    void test_historydialog_save_uses_ongoing_snapshot_endtime_after_wait();
 
     void test_splitdialog_default_types_and_bounds();
     void test_splitdialog_short_duration_disables_slider();

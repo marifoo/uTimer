@@ -567,6 +567,59 @@ void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_curren
     }
 }
 
+void HistoryDialogTest::test_historydialog_save_uses_ongoing_snapshot_endtime_after_wait()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    TimeTracker tracker(settings);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(30);
+
+    HistoryDialog dialog(tracker, settings);
+    QVERIFY(dialog.ongoingSnapshot_.has_value());
+    const QDateTime snapshotEnd = dialog.ongoingSnapshot_->endTime;
+    const QDateTime snapshotStart = dialog.ongoingSnapshot_->startTime;
+
+    QTest::qWait(200);
+
+    dialog.done(QDialog::Accepted);
+    dialog.saveChanges();
+
+    const QString connName = "historydialog_t9_snapshot_endtime";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+
+        QSqlQuery ongoingQuery(db);
+        ongoingQuery.prepare(
+            "SELECT start_date, start_time, end_date, end_time, duration FROM durations WHERE is_finalized = 0"
+        );
+        QVERIFY(ongoingQuery.exec());
+        QVERIFY(ongoingQuery.next());
+
+        const QDate savedStartDate = QDate::fromString(ongoingQuery.value(0).toString(), Qt::ISODate);
+        const QTime savedStartTime = QTime::fromString(ongoingQuery.value(1).toString(), "HH:mm:ss.zzz");
+        const QDate savedEndDate = QDate::fromString(ongoingQuery.value(2).toString(), Qt::ISODate);
+        const QTime savedEndTime = QTime::fromString(ongoingQuery.value(3).toString(), "HH:mm:ss.zzz");
+        const qint64 savedDuration = ongoingQuery.value(4).toLongLong();
+
+        const QDateTime savedStartUtc(savedStartDate, savedStartTime, Qt::UTC);
+        const QDateTime savedEndUtc(savedEndDate, savedEndTime, Qt::UTC);
+
+        QCOMPARE(savedStartUtc, snapshotStart.toUTC());
+        QCOMPARE(savedEndUtc, snapshotEnd.toUTC());
+        QCOMPARE(savedDuration, snapshotStart.msecsTo(snapshotEnd));
+
+        QVERIFY(!ongoingQuery.next());
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+}
+
 void HistoryDialogTest::test_splitdialog_default_types_and_bounds()
 {
     QDateTime start = makeTime(0);

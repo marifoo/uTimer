@@ -240,7 +240,7 @@ of failures. They depend on Phase 1 being done but can overlap with Phase 2.
   - After T13, verify dedup works with perturbed start times and different
     ids — and refuses to dedup when ids differ.
 
-### T9. [M5] Freeze ongoing duration snapshot for dialog lifetime
+### T9. [DONE] [M5] Freeze ongoing duration snapshot for dialog lifetime
 - **Where:** `historydialog.cpp:111–113` (capture) and `424–427` (save).
 - **Problem:** `createPages` captures the ongoing duration with `endTime =
   now_1`. `saveChanges` recomputes it with `endTime = now_2`. The user sees

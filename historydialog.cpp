@@ -92,14 +92,14 @@ void HistoryDialog::createPages()
 {
     auto currentDurations = timetracker_.getCurrentDurations();
     auto historyDurations = timetracker_.getDurationsHistory();
-    auto ongoingDuration = timetracker_.getOngoingDuration();
+    ongoingSnapshot_ = timetracker_.getOngoingDuration();
     const QDate today = QDate::currentDate();
 
     std::vector<TimeDuration> currentComparableDurations;
-    currentComparableDurations.reserve(currentDurations.size() + (ongoingDuration.has_value() ? 1 : 0));
+    currentComparableDurations.reserve(currentDurations.size() + (ongoingSnapshot_.has_value() ? 1 : 0));
     currentComparableDurations.insert(currentComparableDurations.end(), currentDurations.begin(), currentDurations.end());
-    if (ongoingDuration.has_value()) {
-        currentComparableDurations.push_back(ongoingDuration.value());
+    if (ongoingSnapshot_.has_value()) {
+        currentComparableDurations.push_back(ongoingSnapshot_.value());
     }
 
     // Group historical durations by date
@@ -132,8 +132,8 @@ void HistoryDialog::createPages()
         currentPageOrigins.insert(currentPageOrigins.end(), todayIt->size(), RowOrigin::CurrentDatabase);
     }
 
-    if (ongoingDuration.has_value()) {
-        currentPageDurations.push_back(ongoingDuration.value());
+    if (ongoingSnapshot_.has_value()) {
+        currentPageDurations.push_back(ongoingSnapshot_.value());
         currentPageOrigins.push_back(RowOrigin::Ongoing);
     }
 
@@ -462,7 +462,7 @@ void HistoryDialog::saveChanges()
     std::deque<TimeDuration> historyDurations;
     std::deque<TimeDuration> currentMemoryDurations;
     std::deque<TimeDuration> currentSessionDurations;
-    std::optional<TimeDuration> editedOngoingDuration;
+    std::optional<TimeDuration> ongoingDurationForSave;
 
     for (size_t i = 0; i < pages_.size(); ++i) {
         if (pages_[i].isCurrent) {
@@ -475,7 +475,16 @@ void HistoryDialog::saveChanges()
                     } else if (rowOrigins_[i][row] == RowOrigin::CurrentDatabase) {
                         currentDbDurations.push_back(pages_[i].durations[row]);
                     } else if (rowOrigins_[i][row] == RowOrigin::Ongoing) {
-                        editedOngoingDuration = pages_[i].durations[row];
+                        const TimeDuration& pendingOngoing = pages_[i].durations[row];
+                        if (ongoingSnapshot_.has_value()
+                            && pendingOngoing.type == ongoingSnapshot_->type
+                            && pendingOngoing.duration == ongoingSnapshot_->duration
+                            && pendingOngoing.startTime == ongoingSnapshot_->startTime
+                            && pendingOngoing.endTime == ongoingSnapshot_->endTime) {
+                            ongoingDurationForSave = ongoingSnapshot_.value();
+                        } else {
+                            ongoingDurationForSave = pendingOngoing;
+                        }
                     }
                 }
             }
@@ -491,8 +500,12 @@ void HistoryDialog::saveChanges()
     }
 
     // Save historical + current-session durations to DB
-    if (editedOngoingDuration.has_value()) {
-        currentSessionDurations.push_back(editedOngoingDuration.value());
+    if (!ongoingDurationForSave.has_value() && ongoingSnapshot_.has_value()) {
+        ongoingDurationForSave = ongoingSnapshot_.value();
+    }
+
+    if (ongoingDurationForSave.has_value()) {
+        currentSessionDurations.push_back(ongoingDurationForSave.value());
     }
 
     if (!historyDurations.empty() || !currentSessionDurations.empty()) {
@@ -521,8 +534,8 @@ void HistoryDialog::saveChanges()
         Logger::Log("[HISTORY] Updated TimeTracker current session (in-memory)");
     }
 
-    if (editedOngoingDuration.has_value()) {
-        timetracker_.resetCheckpointTrackingForOngoing(editedOngoingDuration.value());
+    if (ongoingDurationForSave.has_value()) {
+        timetracker_.resetCheckpointTrackingForOngoing(ongoingDurationForSave.value());
         if (settings_.logToFile()) {
             Logger::Log("[HISTORY] Reset checkpoint tracking for ongoing segment");
         }
