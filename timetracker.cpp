@@ -206,7 +206,8 @@ TimeTracker::~TimeTracker()
 
 /**
  * Transitions timer to Activity mode. Behavior depends on current state:
- * - From Pause: Records pause duration, switches to Activity
+ * - From Pause: Records pause duration, persists it immediately to DB for
+ *   crash safety, then switches to Activity
  * - From None: Clears state, optionally adds boot time, starts fresh
  * - From Activity: No-op (logs debug message)
  */
@@ -229,6 +230,14 @@ void TimeTracker::startTimer()
         }
         mode_ = Mode::Activity;
         session_.beginNewSegment(now, settings_);
+
+        // Persist the completed Pause row immediately so it survives a crash.
+        // Without this, a crash before the next pauseTimer/stopTimer would lose
+        // the Pause entry, making the reloaded timeline show two Activities
+        // back-to-back with no gap. The row is written as finalized (is_finalized=1)
+        // because the Pause segment is complete the moment the user un-pauses.
+        updateDurationsInDB();
+
         if (checkpoint_interval_msec_ > 0) {
             checkpointTimer_.start(); // Resume periodic checkpoint saving
         }

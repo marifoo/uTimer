@@ -55,6 +55,9 @@ private slots:
     void test_boot_time_not_added_when_history_disabled();
     void test_boot_time_added_once_on_empty_db();
     void test_boot_time_not_added_when_db_has_entries_for_today();
+
+    // Pause persistence crash safety (T19)
+    void test_pause_row_persisted_immediately_on_resume();
 };
 
 #endif // TEST_TIMETRACKER_H

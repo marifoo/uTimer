@@ -673,3 +673,64 @@ void TimeTrackerTest::test_boot_time_not_added_when_db_has_entries_for_today()
 
     tracker.useTimerViaButton(Button::Stop);
 }
+
+// ============================================================================
+// Pause persistence crash safety (T19)
+// ============================================================================
+
+void TimeTrackerTest::test_pause_row_persisted_immediately_on_resume()
+{
+    // Verify that when the user resumes from Pause (startTimer from Pause),
+    // the completed Pause duration is immediately persisted to the DB as a
+    // finalized row. A simulated crash (skipping stopTimer) should not lose
+    // the Pause entry — the reloaded history must show the Pause row.
+
+    // Arrange
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    Settings settings(settingsPath);
+
+    {
+        TimeTracker tracker(settings);
+
+        // Start -> Activity
+        tracker.useTimerViaButton(Button::Start);
+        QTest::qWait(20);
+
+        // Pause -> records Activity segment, transitions to Pause
+        tracker.useTimerViaButton(Button::Pause);
+        QTest::qWait(50);
+
+        // Resume -> completes Pause segment and persists it immediately (T19)
+        tracker.useTimerViaButton(Button::Start);
+        QTest::qWait(20);
+
+        // Simulate crash: destroy tracker without calling stopTimer.
+        // Set mode to None to prevent destructor from saving a clean stop.
+        tracker.mode_ = TimeTracker::Mode::None;
+        tracker.session_.current_checkpoint_segment_id.clear();
+    }
+
+    // Assert: re-read the DB and verify the Pause row survived the crash.
+    DatabaseManager db(settings);
+    auto loaded = db.loadDurations();
+
+    // We expect at least one Activity row (from the finalizeActivityToPause
+    // call in pauseTimer) and one Pause row (from startTimer's immediate
+    // persist). The second Activity segment may or may not be present
+    // depending on checkpoint timing, but the Pause must be there.
+    bool hasPause = false;
+    bool hasActivity = false;
+    for (const auto& d : loaded.durations) {
+        if (d.type == DurationType::Pause) {
+            hasPause = true;
+        }
+        if (d.type == DurationType::Activity) {
+            hasActivity = true;
+        }
+    }
+    QVERIFY2(hasPause, "Pause row must survive a crash after resume (T19)");
+    QVERIFY2(hasActivity, "Activity row must be present in history after pause+resume");
+}

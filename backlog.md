@@ -812,19 +812,21 @@ Independent of the schema rework but easier to land after it.
   - History enabled + empty DB → boot time added once.
   - History enabled + DB has entries for today → boot time not added.
 
-### T19. [M4] Persist Pause rows when they start, not at the next pause/stop
-- **Where:** `timetracker.cpp:60–85` (resume-from-Pause path).
+### T19. [DONE] [M4] Persist Pause rows when they start, not at the next pause/stop
+- **Where:** `timetracker.cpp` (resume-from-Pause path in `startTimer`).
 - **Problem:** Resuming from Pause creates a Pause entry in memory only.
   A crash before the next save loses it, so the reloaded timeline shows two
   Activities back-to-back with no gap.
 - **Fix:**
-  1. On `startTimer` from `Pause`, call `appendDurationsToDB` for the new
-     Pause row immediately (marked `is_finalized = 1` once T4 lands, since
-     the Pause is complete the moment the user un-pauses).
-  2. Covered by checkpointing for the subsequent Activity.
+  1. On `startTimer` from `Pause`, call `updateDurationsInDB` for all
+     in-memory durations immediately after adding the completed Pause row.
+     The Pause row is written as `is_finalized = 1` since it is complete
+     the moment the user un-pauses.
+  2. The subsequent Activity is covered by checkpointing.
 - **Tests:**
   - `startTimer` → `pauseTimer` → advance clock → `startTimer` → crash
     (skip `stopTimer`) → reopen → verify the Pause row is in history.
+    Implemented in `test_pause_row_persisted_immediately_on_resume`.
 
 ### T20. [m] Audit `addDurationWithMidnightSplit` for timing races
 - **Where:** `timetracker.cpp:165` (called from `pauseTimer` just after
