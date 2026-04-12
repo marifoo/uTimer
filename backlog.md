@@ -907,7 +907,7 @@ Independent of the schema rework but easier to land after it.
 - **Tests:** Unit test that creates and destroys 100 DatabaseManagers and
   verifies all connection names are unique.
 
-### T26. [optional] Evaluate enabling WAL mode at `lazyOpen`
+### T26. [DONE] [optional] Evaluate enabling WAL mode at `lazyOpen`
 - **Where:** `databasemanager.cpp` open path.
 - **Problem:** `flushToDisc` uses `PRAGMA wal_checkpoint` implying WAL
   mode, but `lazyOpen` never issues `PRAGMA journal_mode=WAL`. The DB is

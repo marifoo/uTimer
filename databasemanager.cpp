@@ -84,6 +84,14 @@ DatabaseManager::~DatabaseManager()
 /**
  * Initializes the database connection and ensures schema integrity.
  *
+ * Journal mode:
+ * This app deliberately uses SQLite's default rollback journal mode, NOT WAL.
+ * WAL's primary advantage — concurrent readers during writes — is irrelevant
+ * for a single-process, single-threaded app.  Rollback journal keeps the
+ * database as a single file (no `-wal`/`-shm` sidecars), which simplifies
+ * backup (createBackup copies one file) and portability (move the .sqlite
+ * to another machine without forgetting sidecars).
+ *
  * Tasks:
  * 1. Opens the SQLite file (creates it if missing).
  * 2. Creates the 'durations' table if it doesn't exist.
@@ -1212,9 +1220,13 @@ bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durati
  *
  * This is critical during Windows shutdown to ensure data is persisted
  * before the process is terminated. SQLite may buffer writes even after
- * commit() returns - this method ensures they're flushed.
+ * commit() returns — this method ensures they're flushed by temporarily
+ * promoting to PRAGMA synchronous=FULL and issuing a dummy statement to
+ * trigger the fsync.
  *
- * Uses WAL checkpoint if WAL mode is active, otherwise uses PRAGMA synchronous.
+ * Note: This app uses rollback journal mode (the SQLite default), not WAL.
+ * See the comment in lazyOpen() for the rationale. In rollback journal mode,
+ * promoting synchronous to FULL is sufficient to guarantee durability.
  */
 void DatabaseManager::flushToDisc()
 {
@@ -1233,31 +1245,17 @@ void DatabaseManager::flushToDisc()
 
     QSqlQuery query(db);
 
-    // Check if WAL mode is being used
-    if (query.exec("PRAGMA journal_mode") && query.next()) {
-        QString mode = query.value(0).toString().toLower();
-        if (mode == "wal") {
-            // Force WAL checkpoint - this writes all pending WAL changes to the main DB file
-            if (query.exec("PRAGMA wal_checkpoint(FULL)")) {
-                if (settings_.logToFile()) {
-                    Logger::Log("[DB] WAL checkpoint completed");
-                }
-            } else if (settings_.logToFile()) {
-                Logger::Log("[DB] WAL checkpoint failed: " + query.lastError().text());
-            }
-        }
-    }
-
-    // Additionally ensure synchronous writes are fully flushed
-    // FULL mode waits for data to be physically written to disk
+    // Promote to FULL synchronous mode so the next statement's commit is
+    // guaranteed to be physically on disk before we return.  During normal
+    // operation we run at NORMAL (set in lazyOpen) for performance.
     if (!query.exec("PRAGMA synchronous=FULL")) {
         if (settings_.logToFile()) {
             Logger::Log("[DB] Failed to set synchronous mode: " + query.lastError().text());
         }
     }
 
-    // Execute a no-op write to trigger the synchronous flush
-    // This ensures the PRAGMA takes effect
+    // Execute a no-op statement to trigger the synchronous flush.
+    // This ensures the PRAGMA takes effect.
     query.exec("SELECT 1");
 
     lazyClose();
