@@ -471,20 +471,13 @@ contract.
 
   #### Remaining code gaps (T13-specific, not T14)
 
-  1. **Stale comment** at `timetracker.cpp:559`:
-     > `// Use the separate update interface that checks for existing entries by start time`
-     The method called is `updateDurationsById`, which matches by
-     `segment_id`, not `start_time`. The comment is misleading and should
-     say "by segment_id".
+  1. **[DONE] Stale comment** at `timetracker.cpp:582`:
+     Comment updated to say "by segment_id" instead of "by start time".
 
-  2. **Dead test file** `qtest/utimertest.h` (1914 lines) and
-     `qtest/utimertest.cpp` (3 lines): These reference the removed
-     `updateDurationsByStartTime()` method (10 call sites at lines 874,
-     878, 994, 1342, 1363, 1373, 1395, 1400, 1416, 1860). They also
-     reference old start-time-based query patterns. These files are NOT
-     compiled (not in `qtest/qtest.pro`) — the test suite was refactored
-     into separate `test_*.cpp` files. The dead files should be deleted to
-     avoid confusion.
+  2. **[DONE] Dead test files** `qtest/utimertest.h` and
+     `qtest/utimertest.cpp` deleted. These referenced the removed
+     `updateDurationsByStartTime()` method and old start-time-based query
+     patterns. They were not compiled (not in `qtest/qtest.pro`).
 
   #### Hidden issues (not previously documented)
 

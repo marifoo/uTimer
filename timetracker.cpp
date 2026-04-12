@@ -579,7 +579,7 @@ bool TimeTracker::updateDurationsInDB()
         Logger::Log(QString("[DB] Cleaned session durations for update: %1 -> %2").arg(original).arg(temp.size()));
     }
     
-    // Use the separate update interface that checks for existing entries by start time
+    // Use the separate update interface that matches existing entries by segment_id
     return db_.updateDurationsById(temp);
 }
 
