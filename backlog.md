@@ -491,20 +491,17 @@ contract.
     The compiler now enforces that checkpoint tracking is always reset
     when durations are replaced externally.
 
-  - **T16 "Remaining" [OPEN]:** Two sub-items:
-    1. "The flow does not use an explicit 'start new checkpoint for Pause'
-       transition method." This is a code-style/architecture concern, not
-       blocked on T13 or T14.
-    2. "Orphaned checkpoint rows from `cleanDurations` merges are not
-       cleaned up." This IS blocked on T14 (same root cause as T13 step 5).
-       Once T14 lands, `updateDurationsInDB()` — which `backpauseTimer`
-       calls at line 274 — will delete orphaned segment_ids atomically.
+  - **T16 [DONE]:** Both sub-items resolved:
+    1. Extracted `finalizeActivityToPause()` as a structured checkpoint
+       transition method, used by both `pauseTimer()` and `backpauseTimer()`.
+    2. Orphaned checkpoint rows from `cleanDurations` merges are now cleaned
+       up by T14 — `updateDurationsInDB()` passes removed segment_ids
+       atomically.
 
   **Summary:** T6's remaining work is independent of both T13 and T14.
-  T16's remaining work is partially independent (sub-item 1) and partially
-  blocked on T14 (sub-item 2). Neither has any remaining dependency on
+  T16 is fully resolved. Neither has any remaining dependency on
   T13 itself — T13's done steps (1–4, 6) already provide everything
-  T6 and T16 need from the segment_id infrastructure.
+  T6 and T16 needed from the segment_id infrastructure.
 
 ### T14. [DONE] [F2] Make `cleanDurations` honor segment identity
 - **Where:** `helpers.cpp:59–152` (full function), `helpers.h:23`.
@@ -747,7 +744,7 @@ contract.
   deleted out from under the tracker; verify the fallback re-inserts cleanly
   and the segment_id is preserved.
 
-### T16. [PARTIAL] [M2] Simplify `backpauseTimer` given stable ids
+### T16. [DONE] [M2] Simplify `backpauseTimer` given stable ids
 - **Where:** `timetracker.cpp:241–253`.
 - **Problem:** `backpauseTimer` adds two segments (truncated Activity,
   Pause) then upserts. With start-time keying, a `cleanDurations`-induced
@@ -760,11 +757,15 @@ contract.
   **Done:** Activity segment now preserves its original segment_id, and a
   new segment_id is created for the Pause segment. `updateDurationsInDB()`
   is called to persist both segments.
-  **Remaining:** The flow does not use an explicit "start new checkpoint for
-  Pause" transition method. The code relies on inline segment_id assignment
-  and a bulk `updateDurationsInDB()` call rather than a structured
-  transition. Also partially blocked by T14 — orphaned checkpoint rows from
-  `cleanDurations` merges are not cleaned up.
+  **Done:** Extracted `finalizeActivityToPause()` as a shared helper used
+  by both `pauseTimer()` and `backpauseTimer()`. This replaces the inline
+  segment_id assignment and ad-hoc DB sync with a structured transition
+  that makes the Activity→Pause checkpoint handoff explicit and self-
+  documenting.
+  **Done:** Orphaned checkpoint rows from `cleanDurations` merges are now
+  cleaned up by T14 — `updateDurationsInDB()` passes removed segment_ids
+  from `cleanDurations` to `db_.updateDurationsById()`, which deletes
+  them atomically inside the same transaction as the UPDATE/INSERT.
 - **Tests:** Backpause scenario with a mocked lock-state watcher firing at
   a known time; verify exactly one Activity row and one Pause row land in
   the DB with distinct ids.

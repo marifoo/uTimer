@@ -184,14 +184,8 @@ void TimeTracker::pauseTimer()
     QDateTime now = QDateTime::currentDateTime();
     timer_.restart();
     addDurationWithMidnightSplit(DurationType::Activity, segment_start_time_, now, current_checkpoint_segment_id_);
-    mode_ = Mode::Pause;
-    segment_start_time_ = now; // Set start time for new Pause segment
 
-    // Sync checkpoint to DB before resetting ID (ensures Activity duration is finalized)
-    updateDurationsInDB();
-
-    current_checkpoint_segment_id_ = TimeDuration::createSegmentId();
-    checkpointTimer_.stop(); // No checkpoints needed during pause
+    finalizeActivityToPause(now);
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer paused <");
     }
@@ -266,17 +260,49 @@ void TimeTracker::backpauseTimer()
     QDateTime pause_start = activity_end;
     addDurationWithMidnightSplit(DurationType::Pause, pause_start, now);
 
-    mode_ = Mode::Pause;
-    segment_start_time_ = now; // Reset for potential future resume
-    current_checkpoint_segment_id_ = TimeDuration::createSegmentId();
-
-    // Immediately sync to DB to correct the Activity checkpoint we just truncated
-    updateDurationsInDB();
-
-    checkpointTimer_.stop(); // No checkpoints needed during pause
+    finalizeActivityToPause(now);
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer retroactively paused <");
     }
+}
+
+/**
+ * Completes the transition from Activity to Pause mode.
+ *
+ * This is the shared epilogue for both pauseTimer() (explicit pause) and
+ * backpauseTimer() (retroactive auto-pause). Both callers are responsible
+ * for adding the appropriate duration segments to durations_ before calling
+ * this method.
+ *
+ * Steps performed (order matters):
+ *   1. Set mode to Pause.
+ *   2. Record the wall-clock start of the new Pause segment.
+ *   3. Sync all in-memory segments to the DB — this finalizes the Activity
+ *      segment(s) just added and also cleans up any orphaned segment_ids
+ *      left by cleanDurations merges (handled atomically by updateDurationsInDB).
+ *   4. Assign a fresh segment_id for the ongoing Pause segment so the next
+ *      resume (startTimer from Pause) can track it correctly.
+ *   5. Stop the checkpoint timer — no periodic checkpoints during Pause.
+ *
+ * @param pauseSegmentStart  Wall-clock time at which the new Pause segment
+ *                           begins. For pauseTimer this is "now"; for
+ *                           backpauseTimer it is also "now" (the retroactive
+ *                           Pause segment was already added to durations_).
+ */
+void TimeTracker::finalizeActivityToPause(const QDateTime& pauseSegmentStart)
+{
+    mode_ = Mode::Pause;
+    segment_start_time_ = pauseSegmentStart;
+
+    // Sync to DB: finalizes the Activity segment and cleans up orphaned
+    // segment_ids from any cleanDurations merges (T14).
+    updateDurationsInDB();
+
+    // Fresh segment_id for the ongoing Pause. This ensures the next
+    // checkpoint or save targets a new DB row for the Pause period.
+    current_checkpoint_segment_id_ = TimeDuration::createSegmentId();
+
+    checkpointTimer_.stop();
 }
 
 /**

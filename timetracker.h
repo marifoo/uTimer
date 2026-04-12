@@ -46,6 +46,7 @@ private:
     void stopTimer();
     void pauseTimer();
     void backpauseTimer();
+    void finalizeActivityToPause(const QDateTime& pauseSegmentStart);
     void addDurationWithMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId = QString());
     void saveCheckpointInternal();  // Internal checkpoint save (called when mutex already held)
     bool appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
