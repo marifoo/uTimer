@@ -50,7 +50,8 @@ void HistoryDialogTest::test_historydialog_createPages_includes_current_db_ongoi
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     QDateTime now = QDateTime::currentDateTime();
     tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, now.addSecs(-120), now.addSecs(-60)));
@@ -79,7 +80,8 @@ void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     const QDateTime now = QDateTime::currentDateTime();
     const QDateTime memoryStart = now.addSecs(-40).addMSecs(2);
@@ -106,7 +108,8 @@ void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midn
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     const QDate startDate = QDate::currentDate().addDays(-1);
     const QDateTime crossMidnightStart(startDate, QTime(23, 59, 50));
@@ -135,7 +138,8 @@ void HistoryDialogTest::test_historydialog_checkbox_toggle_updates_pending_and_t
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     QDateTime now = QDateTime::currentDateTime();
     tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, now.addSecs(-100), now.addSecs(-50)));
@@ -158,7 +162,8 @@ void HistoryDialogTest::test_historydialog_saveChanges_updates_timetracker_and_d
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     QDateTime now = QDateTime::currentDateTime();
     tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, now.addSecs(-200), now.addSecs(-150)));
@@ -176,8 +181,8 @@ void HistoryDialogTest::test_historydialog_saveChanges_updates_timetracker_and_d
     QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(1));
     QCOMPARE(tracker.session_.durations[0].type, DurationType::Pause);
 
-    DatabaseManager db(settings);
-    auto loaded = db.loadDurations();
+    DatabaseManager db2(settings);
+    auto loaded = db2.loadDurations();
     QVERIFY(loaded.size() >= 1);
 }
 
@@ -187,7 +192,8 @@ void HistoryDialogTest::test_historydialog_split_action_splits_row()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     QDateTime start = QDateTime::currentDateTime().addSecs(-10);
     QDateTime end = QDateTime::currentDateTime().addSecs(-4);
@@ -229,7 +235,8 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     const QDateTime now = QDateTime::currentDateTime();
     const QDateTime memStart = now.addSecs(-20);
@@ -277,8 +284,8 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
     QCOMPARE(tracker.session_.durations[1].endTime, memEnd);
     QCOMPARE(tracker.session_.durations[0].endTime, tracker.session_.durations[1].startTime);
 
-    DatabaseManager db(settings);
-    auto loaded = db.loadDurations();
+    DatabaseManager db2(settings);
+    auto loaded = db2.loadDurations();
     QCOMPARE(loaded.size(), static_cast<size_t>(1));
     QCOMPARE(loaded[0].startTime, dbStart);
     QCOMPARE(loaded[0].endTime, dbEnd);
@@ -291,7 +298,8 @@ void HistoryDialogTest::test_historydialog_split_non_today_db_row_survives_save_
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 30));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     const QDateTime start(QDate::currentDate().addDays(-1), QTime(10, 0, 0));
     const QDateTime end = start.addSecs(8);
@@ -326,8 +334,8 @@ void HistoryDialogTest::test_historydialog_split_non_today_db_row_survives_save_
     dialog.done(QDialog::Accepted);
     dialog.saveChanges();
 
-    DatabaseManager db(settings);
-    auto loaded = db.loadDurations();
+    DatabaseManager db2(settings);
+    auto loaded = db2.loadDurations();
     QCOMPARE(loaded.size(), static_cast<size_t>(2));
     QCOMPARE(loaded[0].startTime, start);
     QCOMPARE(loaded[1].endTime, end);
@@ -340,7 +348,8 @@ void HistoryDialogTest::test_historydialog_shows_load_reconciliation_banner()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     DatabaseManager manager(settings);
     QVERIFY(manager.lazyOpen());
@@ -387,7 +396,8 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
     writer.sync();
 
     Settings settings(settingsPath);
-    TimeTracker tracker(settings);
+    DatabaseManager db2(settings);
+    TimeTracker tracker(settings, db2);
 
     const QDateTime historicalStart(QDate::currentDate().addDays(-1), QTime(10, 0, 0));
     const QDateTime historicalEnd = historicalStart.addSecs(300);
@@ -463,7 +473,8 @@ void HistoryDialogTest::test_historydialog_pauses_checkpoint_timer_for_dialog_li
     writer.sync();
 
     Settings settings(settingsPath);
-    TimeTracker tracker(settings);
+    DatabaseManager db2(settings);
+    TimeTracker tracker(settings, db2);
 
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
@@ -519,7 +530,8 @@ void HistoryDialogTest::test_historydialog_save_keeps_db_rows_for_history_plus_c
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     const QDateTime historicalStart(QDate::currentDate().addDays(-1), QTime(9, 0, 0));
     const QDateTime historicalEnd = historicalStart.addSecs(60);
@@ -572,8 +584,9 @@ void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_curren
     const QString settingsPath = createSettingsFile(tempDir.path(), 7);
 
     {
-        Settings settings(settingsPath);
-        TimeTracker tracker(settings);
+    Settings settings(settingsPath);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
         const QDateTime now = QDateTime::currentDateTime();
         tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, now.addSecs(-15), now.addSecs(-5)));
@@ -598,7 +611,8 @@ void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_curren
         QCOMPARE(unfinalizedQuery.value(0).toInt(), 1);
         db.lazyClose();
 
-        TimeTracker reopened(settings);
+        DatabaseManager db3(settings);
+        TimeTracker reopened(settings, db3);
         auto loaded = db.loadDurations();
         QCOMPARE(loaded.size(), static_cast<size_t>(1));
     }
@@ -610,7 +624,8 @@ void HistoryDialogTest::test_historydialog_save_uses_ongoing_snapshot_endtime_af
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(30);
@@ -663,7 +678,8 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     const QDateTime now = QDateTime::currentDateTime();
     const QDateTime memStart = now.addSecs(-30);

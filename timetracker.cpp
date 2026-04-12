@@ -175,10 +175,10 @@ void TimeTracker::StateGuard::markTransitioned()
 // TimeTracker implementation
 // ============================================================================
 
-TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
+TimeTracker::TimeTracker(const Settings &settings, IDatabaseManager& db, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), session_(), mode_(Mode::None),
       was_active_before_autopause_(false), is_locked_(false),
-      checkpoints_paused_(false), db_(settings, parent),
+      checkpoints_paused_(false), db_(db),
       checkpoint_interval_msec_(settings.getCheckpointIntervalMsec()),
       last_history_load_skipped_(0), last_history_load_repaired_(0),
       startup_recovered_seconds_(0), startup_recovery_notification_needed_(false)
@@ -1072,7 +1072,7 @@ void TimeTracker::flushDatabaseToDisc()
 }
 
 qint64 TimeTracker::reconcileOrphanCheckpoints(
-    const std::deque<DatabaseManager::OrphanCheckpoint>& orphans,
+    const std::deque<OrphanCheckpoint>& orphans,
     const std::optional<QDateTime>& cleanShutdownMarker)
 {
     startup_recovery_notification_needed_ = false;

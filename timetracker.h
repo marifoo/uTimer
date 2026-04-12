@@ -14,7 +14,7 @@
 #include <vector>
 #include "settings.h"
 #include "types.h"
-#include "databasemanager.h"
+#include "idatabasemanager.h"
 
 /**
  * SessionState — groups the mutable per-session data that TimeTracker manages.
@@ -122,7 +122,7 @@ private:
     bool was_active_before_autopause_;
     bool is_locked_;  // Track if desktop is currently locked (to prevent checkpoints while locked)
     bool checkpoints_paused_;  // Track if checkpoints are paused (e.g., while HistoryDialog is open)
-    DatabaseManager db_;
+    IDatabaseManager& db_;
     mutable QRecursiveMutex mutex_;  // Protects state transitions from concurrent access
     QTimer checkpointTimer_;  // Timer for periodic checkpoint saving
     qint64 checkpoint_interval_msec_; // Checkpoint interval (0 = disabled)
@@ -142,7 +142,7 @@ private:
     void saveCheckpointInternal(const QDateTime& now);  // Internal checkpoint save (called when mutex already held)
     bool appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
     qint64 reconcileOrphanCheckpoints(
-        const std::deque<DatabaseManager::OrphanCheckpoint>& orphans,
+        const std::deque<OrphanCheckpoint>& orphans,
         const std::optional<QDateTime>& cleanShutdownMarker);
 
 #ifndef QT_NO_DEBUG
@@ -172,7 +172,7 @@ private:
 #endif // QT_NO_DEBUG
 
 public:
-    explicit TimeTracker(const Settings & settings, QObject *parent = nullptr);
+    explicit TimeTracker(const Settings & settings, IDatabaseManager& db, QObject *parent = nullptr);
     ~TimeTracker();
 
     qint64 getActiveTime() const;

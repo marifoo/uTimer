@@ -928,7 +928,7 @@ Independent of the schema rework but easier to land after it.
 These are not bug fixes — they are the scaffolding that keeps the bugs from
 coming back.
 
-### T27. Add a fake clock and a fake DatabaseManager to the test harness
+### T27. [DONE] Add a fake clock and a fake DatabaseManager to the test harness
 - **Problem:** Many of the bugs above are only reproducible with
   deterministic time control and a DB that can fail on demand.
 - **Fix:**

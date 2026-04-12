@@ -37,7 +37,8 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
     {
         // First session: Start timer and save checkpoint
         Settings settings(settingsPath);
-        TimeTracker tracker(settings);
+        DatabaseManager db(settings);
+        TimeTracker tracker(settings, db);
         
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
@@ -57,11 +58,12 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
     {
         // Second session: startup reconciliation finalizes orphan checkpoint
         Settings settings(settingsPath);
-        TimeTracker tracker(settings);
+        DatabaseManager db(settings);
+        TimeTracker tracker(settings, db);
         QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
 
-        DatabaseManager db(settings);
-        auto loaded = db.loadDurations();
+        DatabaseManager db2(settings);
+        auto loaded = db2.loadDurations();
         QCOMPARE(loaded.size(), (size_t)1); // Reconciled orphan recovered
         QCOMPARE(loaded[0].type, DurationType::Activity);
 
@@ -86,7 +88,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_is_idempotent()
 
     {
         Settings settings(settingsPath);
-        TimeTracker tracker(settings);
+        DatabaseManager db(settings);
+        TimeTracker tracker(settings, db);
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal(QDateTime::currentDateTime());
@@ -97,16 +100,18 @@ void IntegrationTest::test_integration_orphan_reconciliation_is_idempotent()
 
     {
         Settings settings(settingsPath);
-        TimeTracker tracker(settings);
+        DatabaseManager db(settings);
+        TimeTracker tracker(settings, db);
         QCOMPARE(tracker.getStartupRecoveredSeconds() >= 1, true);
     }
 
     {
         Settings settings(settingsPath);
-        TimeTracker tracker(settings);
-        QCOMPARE(tracker.getStartupRecoveredSeconds(), static_cast<qint64>(0));
         DatabaseManager db(settings);
-        auto loaded = db.loadDurations();
+        TimeTracker tracker(settings, db);
+        QCOMPARE(tracker.getStartupRecoveredSeconds(), static_cast<qint64>(0));
+        DatabaseManager db2(settings);
+        auto loaded = db2.loadDurations();
         QCOMPARE(loaded.size(), static_cast<size_t>(1));
     }
 }
@@ -162,7 +167,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_drops_stale_and_too
 
     db.lazyClose();
 
-    TimeTracker tracker(settings);
+    DatabaseManager db2(settings);
+    TimeTracker tracker(settings, db2);
     QCOMPARE(tracker.getStartupRecoveredSeconds(), static_cast<qint64>(0));
 
     auto loaded = db.loadDurations();
@@ -178,7 +184,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_present_is_s
 
     {
         Settings settings(settingsPath);
-        TimeTracker tracker(settings);
+        DatabaseManager db(settings);
+        TimeTracker tracker(settings, db);
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal(QDateTime::currentDateTime());
@@ -195,7 +202,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_present_is_s
 
     {
         Settings settings(settingsPath);
-        TimeTracker tracker(settings);
+        DatabaseManager db(settings);
+        TimeTracker tracker(settings, db);
         QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
         QVERIFY(!tracker.shouldShowStartupRecoveryNotification());
     }
@@ -210,7 +218,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_absent_shows
 
     {
         Settings settings(settingsPath);
-        TimeTracker tracker(settings);
+        DatabaseManager db(settings);
+        TimeTracker tracker(settings, db);
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal(QDateTime::currentDateTime());
@@ -221,7 +230,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_absent_shows
 
     {
         Settings settings(settingsPath);
-        TimeTracker tracker(settings);
+        DatabaseManager db(settings);
+        TimeTracker tracker(settings, db);
         QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
         QVERIFY(tracker.shouldShowStartupRecoveryNotification());
     }
@@ -233,7 +243,8 @@ void IntegrationTest::test_integration_memory_db_consistency()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     // Start -> Activity for 50ms
     tracker.useTimerViaButton(Button::Start);
@@ -256,8 +267,8 @@ void IntegrationTest::test_integration_memory_db_consistency()
     tracker.useTimerViaButton(Button::Stop);
     
     // Load from DB
-    DatabaseManager db(settings);
-    auto dbDurations = db.loadDurations();
+    DatabaseManager db2(settings);
+    auto dbDurations = db2.loadDurations();
     
     // Total durations should match (memory + checkpoint)
     qint64 memoryTotal = sumDurations(memoryDurations, DurationType::Activity) + 
@@ -355,7 +366,8 @@ void IntegrationTest::test_integration_backpause_db_update()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    TimeTracker tracker(settings);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
 
     // Start activity
     tracker.useTimerViaButton(Button::Start);
@@ -379,7 +391,7 @@ void IntegrationTest::test_integration_backpause_db_update()
     QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
     
     // Verify durations were updated in DB
-    DatabaseManager db(settings);
-    auto loaded = db.loadDurations();
+    DatabaseManager db2(settings);
+    auto loaded = db2.loadDurations();
     QVERIFY(loaded.size() >= 1);
 }

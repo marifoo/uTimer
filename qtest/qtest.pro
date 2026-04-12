@@ -16,6 +16,7 @@ INCLUDEPATH += $$PWD/..
 SOURCES += \
     main.cpp \
     testcommon.cpp \
+    fakedatabasemanager.cpp \
     test_settings.cpp \
     test_helpers.cpp \
     test_lockstatewatcher.cpp \
@@ -34,6 +35,8 @@ SOURCES += \
 
 HEADERS += \
     testcommon.h \
+    fakeclock.h \
+    fakedatabasemanager.h \
     test_settings.h \
     test_helpers.h \
     test_lockstatewatcher.h \
@@ -45,6 +48,7 @@ HEADERS += \
     $$PWD/../timetracker.h \
     $$PWD/../lockstatewatcher.h \
     $$PWD/../databasemanager.h \
+    $$PWD/../idatabasemanager.h \
     $$PWD/../helpers.h \
     $$PWD/../settings.h \
     $$PWD/../logger.h \

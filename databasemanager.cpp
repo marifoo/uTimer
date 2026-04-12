@@ -829,7 +829,7 @@ bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& histo
  *   - Corrupted/Invalid rows are skipped and logged.
  * - Timestamps are stored in UTC and converted to local time on load.
  */
-DatabaseManager::LoadResult DatabaseManager::loadDurations()
+LoadResult DatabaseManager::loadDurations()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1265,7 +1265,7 @@ void DatabaseManager::flushToDisc()
     }
 }
 
-std::deque<DatabaseManager::OrphanCheckpoint> DatabaseManager::loadUnfinalizedCheckpoints()
+std::deque<OrphanCheckpoint> DatabaseManager::loadUnfinalizedCheckpoints()
 {
     QMutexLocker locker(&db_mutex_);
 

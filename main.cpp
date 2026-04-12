@@ -17,6 +17,7 @@
 #include "settings.h"
 #include "mainwin.h"
 #include "timetracker.h"
+#include "databasemanager.h"
 #include "lockstatewatcher.h"
 #include "logger.h"
 #include "types.h"
@@ -101,7 +102,8 @@ int main(int argc, char *argv[])
 
 	Settings settings(QDir(QCoreApplication::applicationDirPath()).filePath("user-settings.ini"));
 	LockStateWatcher lockstate_watcher(settings);
-	TimeTracker time_tracker(settings);
+	DatabaseManager database_manager(settings);
+	TimeTracker time_tracker(settings, database_manager);
 
 	// Check database schema before starting the UI
 	if (!time_tracker.checkDatabaseSchema()) {

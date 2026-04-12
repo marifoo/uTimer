@@ -20,10 +20,10 @@
 #define protected public
 #include "timetracker.h"
 #include "lockstatewatcher.h"
+#include "databasemanager.h"
 #undef private
 #undef protected
 
-#include "databasemanager.h"
 #include "helpers.h"
 #include "settings.h"
 

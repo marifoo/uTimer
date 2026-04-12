@@ -3,6 +3,7 @@ TARGET = uTimer
 HEADERS = \
    $$PWD/contentwidget.h \
    $$PWD/databasemanager.h \
+   $$PWD/idatabasemanager.h \
    $$PWD/mainwin.h \
    $$PWD/timetracker.h \
    $$PWD/lockstatewatcher.h \
