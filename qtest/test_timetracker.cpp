@@ -55,7 +55,7 @@ void TimeTrackerTest::test_timetracker_start_pause_resume_stop_and_checkpoints()
 
     // Trigger checkpoint manually
     QTest::qWait(100); // Ensure elapsed > 0
-    tracker.saveCheckpointInternal();
+    tracker.saveCheckpointInternal(QDateTime::currentDateTime());
     QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
 
     // Stop -> move to None and durations flushed
@@ -83,7 +83,7 @@ void TimeTrackerTest::test_timetracker_backpause_resets_checkpoint_and_splits()
     tracker.timer_.invalidate();
     tracker.timer_.start();
 
-    tracker.backpauseTimer();
+    tracker.backpauseTimer(QDateTime::currentDateTime());
     QCOMPARE(tracker.mode_, TimeTracker::Mode::Pause);
     QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
     QVERIFY(tracker.session_.durations.size() >= 2);

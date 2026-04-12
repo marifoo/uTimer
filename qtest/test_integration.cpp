@@ -43,7 +43,7 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
         QTest::qWait(1200);
         
         // Manually save checkpoint
-        tracker.saveCheckpointInternal();
+        tracker.saveCheckpointInternal(QDateTime::currentDateTime());
         QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
         orphanSegmentId = tracker.session_.current_checkpoint_segment_id;
 
@@ -89,7 +89,7 @@ void IntegrationTest::test_integration_orphan_reconciliation_is_idempotent()
         TimeTracker tracker(settings);
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
-        tracker.saveCheckpointInternal();
+        tracker.saveCheckpointInternal(QDateTime::currentDateTime());
         QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
         tracker.session_.current_checkpoint_segment_id.clear();
         tracker.mode_ = TimeTracker::Mode::None;
@@ -181,7 +181,7 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_present_is_s
         TimeTracker tracker(settings);
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
-        tracker.saveCheckpointInternal();
+        tracker.saveCheckpointInternal(QDateTime::currentDateTime());
         QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
         tracker.session_.current_checkpoint_segment_id.clear();
         tracker.mode_ = TimeTracker::Mode::None;
@@ -213,7 +213,7 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_absent_shows
         TimeTracker tracker(settings);
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
-        tracker.saveCheckpointInternal();
+        tracker.saveCheckpointInternal(QDateTime::currentDateTime());
         QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
         tracker.session_.current_checkpoint_segment_id.clear();
         tracker.mode_ = TimeTracker::Mode::None;
@@ -249,7 +249,7 @@ void IntegrationTest::test_integration_memory_db_consistency()
     QTest::qWait(50);
     
     // Save checkpoint
-    tracker.saveCheckpointInternal();
+    tracker.saveCheckpointInternal(QDateTime::currentDateTime());
     QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
     
     // Stop
@@ -362,7 +362,7 @@ void IntegrationTest::test_integration_backpause_db_update()
     QTest::qWait(100);
     
     // Save checkpoint
-    tracker.saveCheckpointInternal();
+    tracker.saveCheckpointInternal(QDateTime::currentDateTime());
     QString checkpointSegmentId = tracker.session_.current_checkpoint_segment_id;
     QVERIFY(!checkpointSegmentId.isEmpty());
     

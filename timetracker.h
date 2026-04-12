@@ -131,15 +131,15 @@ private:
     qint64 startup_recovered_seconds_;
     bool startup_recovery_notification_needed_;
 
-    void startTimer();
-    void stopTimer();
-    void pauseTimer();
-    void backpauseTimer();
+    void startTimer(const QDateTime& now);
+    void stopTimer(const QDateTime& now);
+    void pauseTimer(const QDateTime& now);
+    void backpauseTimer(const QDateTime& now);
     void finalizeActivityToPause(const QDateTime& pauseSegmentStart);
     MidnightSplitResult computeMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId = QString()) const;
     void applyMidnightSplit(const MidnightSplitResult& result);
     void addDurationWithMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId = QString());
-    void saveCheckpointInternal();  // Internal checkpoint save (called when mutex already held)
+    void saveCheckpointInternal(const QDateTime& now);  // Internal checkpoint save (called when mutex already held)
     bool appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
     qint64 reconcileOrphanCheckpoints(
         const std::deque<DatabaseManager::OrphanCheckpoint>& orphans,
@@ -190,7 +190,7 @@ public:
     bool updateDurationsInDB();
     bool replaceDurationsInDB(std::deque<TimeDuration> historyDurations,
                               std::deque<TimeDuration> currentSessionDurations);
-    EntriesForDateResult hasEntriesForToday();
+    EntriesForDateResult hasEntriesForDate(const QDate& date);
     void pauseCheckpoints();
     void resumeCheckpoints();
     bool checkDatabaseSchema(); // Returns true if DB schema is valid, false if outdated

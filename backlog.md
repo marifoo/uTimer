@@ -828,7 +828,7 @@ Independent of the schema rework but easier to land after it.
     (skip `stopTimer`) → reopen → verify the Pause row is in history.
     Implemented in `test_pause_row_persisted_immediately_on_resume`.
 
-### T20. [m] Audit `addDurationWithMidnightSplit` for timing races
+### T20. [DONE] [m] Audit `addDurationWithMidnightSplit` for timing races
 - **Where:** `timetracker.cpp:165` (called from `pauseTimer` just after
   `timer_.restart()` at 164).
 - **Problem:** Between `timer_.restart()` and the `now` captured for

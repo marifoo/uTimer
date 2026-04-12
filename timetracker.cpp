@@ -201,7 +201,7 @@ TimeTracker::TimeTracker(const Settings &settings, QObject *parent)
 
 TimeTracker::~TimeTracker()
 {
-    stopTimer();
+    stopTimer(QDateTime::currentDateTime());
 }
 
 /**
@@ -210,15 +210,19 @@ TimeTracker::~TimeTracker()
  *   crash safety, then switches to Activity
  * - From None: Clears state, optionally adds boot time, starts fresh
  * - From Activity: No-op (logs debug message)
+ *
+ * @param now  Wall-clock timestamp captured once by the caller. All time
+ *             calculations within this method (and its callees) use this
+ *             single value, preventing races from thread preemption or
+ *             clock skew between successive QDateTime::currentDateTime()
+ *             calls.
  */
-void TimeTracker::startTimer()
+void TimeTracker::startTimer(const QDateTime& now)
 {
     if (mode_ == Mode::Pause) {
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Starting Timer from Pause - D=" + QString::number(session_.durations.size()));
         }
-        // Capture timestamp before restart to minimize precision loss
-        QDateTime now = QDateTime::currentDateTime();
         qint64 t_pause = timer_.restart();
         if (t_pause > 0) {
             if (session_.durations.empty() || session_.durations.back().type != DurationType::Pause) {
@@ -277,7 +281,7 @@ void TimeTracker::startTimer()
         unsigned int boot_time_sec = settings_.getBootTimeSec();
         bool shouldAddBootTime = false;
         if (boot_time_sec > 0) {
-            QDate today = QDate::currentDate();
+            QDate today = now.date();
             bool hasEntriesInMemory = false;
             for (const auto &d : session_.durations) {
                 if (d.endTime.date() == today) {
@@ -289,7 +293,7 @@ void TimeTracker::startTimer()
             // confirms zero entries for today. When the result is Unknown
             // (history disabled or DB inaccessible), we err on the side of
             // caution and skip boot time to avoid double-counting.
-            EntriesForDateResult dbResult = hasEntriesForToday();
+            EntriesForDateResult dbResult = hasEntriesForDate(today);
             shouldAddBootTime = !hasEntriesInMemory && (dbResult == EntriesForDateResult::No);
             if (settings_.logToFile()) {
                 Logger::Log(shouldAddBootTime
@@ -301,13 +305,12 @@ void TimeTracker::startTimer()
             session_.resetForNewSession(settings_);
         }
         if (shouldAddBootTime) {
-            QDateTime now = QDateTime::currentDateTime();
             QDateTime bootStart = now.addMSecs(-static_cast<qint64>(boot_time_sec) * 1000);
             addDurationWithMidnightSplit(DurationType::Activity, bootStart, now);
         }
         timer_.start();
         mode_ = Mode::Activity;
-        session_.beginNewSegment(QDateTime::currentDateTime(), settings_);
+        session_.beginNewSegment(now, settings_);
         if (checkpoint_interval_msec_ > 0) {
             checkpointTimer_.start(); // Start periodic checkpoint saving
         }
@@ -321,7 +324,7 @@ void TimeTracker::startTimer()
     }
 }
 
-void TimeTracker::pauseTimer()
+void TimeTracker::pauseTimer(const QDateTime& now)
 {
     if (mode_ != Mode::Activity) {
         if (settings_.logToFile()) {
@@ -332,8 +335,6 @@ void TimeTracker::pauseTimer()
     if (settings_.logToFile()) {
         Logger::Log("[DEBUG] Pausing Timer from Activity - D=" + QString::number(session_.durations.size()));
     }
-    // Capture timestamp before restart to minimize precision loss
-    QDateTime now = QDateTime::currentDateTime();
     timer_.restart();
     addDurationWithMidnightSplit(DurationType::Activity, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
 
@@ -355,7 +356,7 @@ void TimeTracker::pauseTimer()
  * since checkpoints are suspended while locked but the time before lock detection
  * may have been saved as Activity.
  */
-void TimeTracker::backpauseTimer()
+void TimeTracker::backpauseTimer(const QDateTime& now)
 {
     if (mode_ != Mode::Activity) {
         if (settings_.logToFile()) {
@@ -391,8 +392,6 @@ void TimeTracker::backpauseTimer()
         backpause_msec = MAX_BACKPAUSE_MS;
     }
 
-    // Capture timestamp before restart to minimize precision loss
-    QDateTime now = QDateTime::currentDateTime();
     timer_.restart();
 
     // Calculate Activity end time (backpause boundary)
@@ -467,7 +466,7 @@ void TimeTracker::finalizeActivityToPause(const QDateTime& pauseSegmentStart)
  * 4. Persists the Session to the Database using updateDurationsInDB().
  *    (This updates the existing rows rather than creating new ones, preserving IDs).
  */
-void TimeTracker::stopTimer()
+void TimeTracker::stopTimer(const QDateTime& now)
 {
     if (mode_ == Mode::None) {
         if (settings_.logToFile()) {
@@ -475,7 +474,6 @@ void TimeTracker::stopTimer()
         }
         return;
     }
-    QDateTime now = QDateTime::currentDateTime();
     if (mode_ == Mode::Pause) {
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Stopping from Pause - D=" + QString::number(session_.durations.size()));
@@ -498,7 +496,9 @@ void TimeTracker::stopTimer()
     // Use update interface to check for existing entries by start time and update them instead of creating duplicates
     if (updateDurationsInDB()) {
         session_.resetForNewSession(settings_);
-        db_.setLastCleanShutdownMarker(QDateTime::currentDateTime());
+        // Use the same `now` for the shutdown marker to maintain a single
+        // consistent timestamp across the entire stop operation.
+        db_.setLastCleanShutdownMarker(now);
         if (settings_.logToFile()) {
             Logger::Log("[DB] Session durations updated");
         }
@@ -518,10 +518,14 @@ void TimeTracker::useTimerViaButton(Button button)
     StateGuard guard(*this, "useTimerViaButton");
     guard.markTransitioned(); // All branches intentionally mutate state
 #endif
+    // Capture wall-clock time once for the entire operation. All helpers
+    // receive this single timestamp, preventing races from preemption or
+    // clock skew between successive QDateTime::currentDateTime() calls.
+    const QDateTime now = QDateTime::currentDateTime();
     switch (button) {
-        case Button::Start: startTimer(); break;
-        case Button::Pause: pauseTimer(); break;
-        case Button::Stop:  stopTimer();  break;
+        case Button::Start: startTimer(now); break;
+        case Button::Pause: pauseTimer(now); break;
+        case Button::Stop:  stopTimer(now);  break;
     }
 }
 
@@ -543,11 +547,15 @@ void TimeTracker::useTimerViaLockEvent(LockEvent event)
     StateGuard guard(*this, "useTimerViaLockEvent");
     guard.markTransitioned(); // Lock events may trigger backpause/resume
 #endif
+    // Capture wall-clock time once for the entire operation. All helpers
+    // receive this single timestamp, preventing races from preemption or
+    // clock skew between successive QDateTime::currentDateTime() calls.
+    const QDateTime now = QDateTime::currentDateTime();
     if (event == LockEvent::Lock) {
         is_locked_ = true;
         // Save a checkpoint when lock is detected (only if actively tracking time)
         if (mode_ == Mode::Activity) {
-            saveCheckpointInternal();
+            saveCheckpointInternal(now);
             if (settings_.logToFile()) {
                 Logger::Log("[LOCK] Desktop locked - checkpoint saved, further checkpoints suspended");
             }
@@ -571,11 +579,11 @@ void TimeTracker::useTimerViaLockEvent(LockEvent event)
     if (event == LockEvent::LongOngoingLock) {
         was_active_before_autopause_ = (mode_ == Mode::Activity);
         if (was_active_before_autopause_) {
-            backpauseTimer();
+            backpauseTimer(now);
         }
     } else if (event == LockEvent::Unlock) {
         if (was_active_before_autopause_) {
-            startTimer();
+            startTimer(now);
         }
         was_active_before_autopause_ = false;
     }
@@ -795,9 +803,9 @@ bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> historyDurations
     return db_.replaceDurationsInDB(historyDurations, currentSessionDurations);
 }
 
-EntriesForDateResult TimeTracker::hasEntriesForToday()
+EntriesForDateResult TimeTracker::hasEntriesForDate(const QDate& date)
 {
-    return db_.hasEntriesForDate(QDate::currentDate());
+    return db_.hasEntriesForDate(date);
 }
 
 /**
@@ -984,10 +992,12 @@ void TimeTracker::saveCheckpoint()
         return;
     }
 
-    saveCheckpointInternal();
+    // Capture wall-clock time once for the entire checkpoint operation.
+    const QDateTime now = QDateTime::currentDateTime();
+    saveCheckpointInternal(now);
 }
 
-void TimeTracker::saveCheckpointInternal()
+void TimeTracker::saveCheckpointInternal(const QDateTime& now)
 {
     // NOTE: This function assumes the mutex is already held by the caller
 
@@ -1010,10 +1020,7 @@ void TimeTracker::saveCheckpointInternal()
     // Always Activity - we return early above if mode_ != Mode::Activity
     DurationType type = DurationType::Activity;
 
-    // Get current end time
-    QDateTime now = QDateTime::currentDateTime();
-
-    // Save checkpoint to database
+    // Save checkpoint to database using the caller-provided timestamp.
     // Pass session_.segment_start_time and session_.current_checkpoint_segment_id to update the specific row for this segment
     if (session_.current_checkpoint_segment_id.isEmpty()) {
         session_.beginNewSegment(session_.segment_start_time, settings_);
