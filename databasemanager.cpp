@@ -36,19 +36,28 @@
 #include <QVariant>
 #include <QFile>
 #include <QTextStream>
+#include <atomic>
 #include "logger.h"
 #include "settings.h"
 
 namespace {
 constexpr qint64 kDurationReconciliationToleranceMs = 100;
 const char* kLastCleanShutdownKey = "last_clean_shutdown";
+
+// Monotonically increasing counter used to mint unique SQLite connection names.
+// Using a counter instead of the object address (reinterpret_cast<quintptr>(this))
+// avoids name collisions when a DatabaseManager is destroyed and a new one is
+// allocated at the same address — which is perfectly legal and surprisingly common
+// in loops or test harnesses.
+std::atomic<uint64_t> s_connection_seq{0};
 }
 
 DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
     : QObject(parent), history_days_to_keep_(std::max(settings.getHistoryDays(), 0)), settings_(settings)
 {
-    // Use unique connection name to avoid conflicts with multiple instances
-    QString connectionName = QString("uTimer_connection_%1").arg(reinterpret_cast<quintptr>(this));
+    // Mint a unique connection name using a monotonic counter.
+    // See s_connection_seq declaration for rationale (avoids address-reuse collisions).
+    QString connectionName = QString("uTimer_connection_%1").arg(s_connection_seq.fetch_add(1, std::memory_order_relaxed));
     db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     
     // Use executable directory for portability

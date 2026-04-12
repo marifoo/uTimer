@@ -1259,3 +1259,36 @@ void DatabaseTest::test_retention_cleanup_retries_after_failure()
     auto loaded = manager.loadDurations();
     QCOMPARE(static_cast<int>(loaded.size()), 1);
 }
+
+/**
+ * T25: Verifies that connection names are unique even when DatabaseManagers
+ * are repeatedly created and destroyed in a loop.
+ *
+ * The old implementation used reinterpret_cast<quintptr>(this) for connection
+ * names, which collides when the allocator reuses the same address after
+ * destruction. The atomic counter guarantees uniqueness regardless of address
+ * reuse.
+ */
+void DatabaseTest::test_connection_names_unique_across_100_instances()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 0)); // history disabled — avoids DB I/O
+
+    QSet<QString> connectionNames;
+
+    // Act: create and destroy 100 DatabaseManagers, collecting connection names.
+    // With reinterpret_cast<quintptr>(this), the allocator frequently reuses the
+    // same address, causing name collisions. With an atomic counter, every name
+    // is guaranteed unique.
+    for (int i = 0; i < 100; ++i) {
+        auto* mgr = new DatabaseManager(settings);
+        QString name = mgr->db.connectionName();
+        connectionNames.insert(name);
+        delete mgr;
+    }
+
+    // Assert: all 100 names were distinct.
+    QCOMPARE(connectionNames.size(), 100);
+}

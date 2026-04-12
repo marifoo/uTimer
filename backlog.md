@@ -898,7 +898,7 @@ Independent of the schema rework but easier to land after it.
      shutdown flush, ensuring maximum durability on exit.
 - **Tests:** All 139 existing tests pass.
 
-### T25. [m] Stop using `reinterpret_cast<quintptr>(this)` for connection names
+### T25. [DONE] [m] Stop using `reinterpret_cast<quintptr>(this)` for connection names
 - **Where:** `databasemanager.cpp:37`.
 - **Problem:** After object destruction and reallocation at the same
   address, the connection name collides. Harmless today but surprising.

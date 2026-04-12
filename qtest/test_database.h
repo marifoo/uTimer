@@ -70,6 +70,9 @@ private slots:
     // Retention cleanup once-per-session tests (T22)
     void test_retention_cleanup_runs_once_across_multiple_opens();
     void test_retention_cleanup_retries_after_failure();
+
+    // Connection name uniqueness (T25)
+    void test_connection_names_unique_across_100_instances();
 };
 
 #endif // TEST_DATABASE_H
