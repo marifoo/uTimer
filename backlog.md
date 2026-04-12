@@ -878,7 +878,7 @@ Independent of the schema rework but easier to land after it.
   - Open the DB ten times in a row; verify the `DELETE` runs once.
   - Simulate a cleanup failure; verify it retries on the next startup.
 
-### T23. [m] Use `db.rollback()` for read-only transactions in `loadDurations`
+### T23. [DONE] [m] Use `db.rollback()` for read-only transactions in `loadDurations`
 - **Where:** `databasemanager.cpp:543`.
 - **Problem:** Calls `db.commit()` at the end of a read-only `SELECT` path.
   Qt accepts this but it is idiomatically wrong.

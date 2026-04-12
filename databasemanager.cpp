@@ -895,7 +895,10 @@ DatabaseManager::LoadResult DatabaseManager::loadDurations()
         result.durations.emplace_back(TimeDuration(type, startDateTime, endDateTime, segmentId));
     }
 
-    db.commit();  // Commit read transaction
+    // Rollback is idiomatic for read-only transactions: no writes were made,
+    // so there is nothing to commit. Both commit() and rollback() release the
+    // transaction lock, but rollback() signals the intent more clearly.
+    db.rollback();
     lazyClose();
 
     if ((result.skipped > 0 || result.repaired > 0) && settings_.logToFile()) {
