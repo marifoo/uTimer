@@ -430,8 +430,8 @@ void HistoryDialog::onNewer()
  *
  * Strategy:
  * 1. Applies in-memory changes to the page models.
- * 2. Updates TimeTracker's current session (if Page 0 was edited).
- * 3. Aggregates historical + current-session rows and rewrites DB atomically.
+ * 2. Aggregates historical + current-session rows and rewrites DB atomically.
+ * 3. Updates TimeTracker runtime state only after persistence succeeds.
  *
  * Note: replaceDurationsInDB() rewrites the full durations table. Historical
  * rows are written as finalized, while current-session rows keep DB backing as
@@ -504,6 +504,7 @@ void HistoryDialog::saveChanges()
         currentSessionDurations.push_back(ongoingDurationForSave.value());
     }
 
+    bool dbSaveSucceeded = true;
     if (!historyDurations.empty() || !currentSessionDurations.empty()) {
         if (settings_.logToFile()) {
             Logger::Log(QString("[HISTORY] Saving %1 historical + %2 current-session durations to DB")
@@ -511,8 +512,8 @@ void HistoryDialog::saveChanges()
                 .arg(currentSessionDurations.size()));
         }
 
-        bool success = timetracker_.replaceDurationsInDB(historyDurations, currentSessionDurations);
-        if (!success) {
+        dbSaveSucceeded = timetracker_.replaceDurationsInDB(historyDurations, currentSessionDurations);
+        if (!dbSaveSucceeded) {
             if (settings_.logToFile()) {
                 Logger::Log("[HISTORY] CRITICAL: Failed to save durations to DB");
             }
@@ -523,6 +524,12 @@ void HistoryDialog::saveChanges()
         }
     } else if (settings_.logToFile()) {
         Logger::Log("[HISTORY] No historical durations to save");
+    }
+
+    // Keep runtime state unchanged when persistence fails. This prevents in-memory
+    // edits from diverging from the database and avoids checkpoint tracking drift.
+    if (!dbSaveSucceeded) {
+        return;
     }
 
     timetracker_.setCurrentDurations(currentMemoryDurations);

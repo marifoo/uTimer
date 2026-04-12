@@ -4,6 +4,7 @@
 #include <QTableWidget>
 #include <QCheckBox>
 #include <QLabel>
+#include <QMessageBox>
 
 // Expose private members for testing
 #define private public
@@ -654,6 +655,101 @@ void HistoryDialogTest::test_historydialog_save_uses_ongoing_snapshot_endtime_af
         db.close();
     }
     QSqlDatabase::removeDatabase(connName);
+}
+
+void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_state_unchanged()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    TimeTracker tracker(settings);
+
+    const QDateTime now = QDateTime::currentDateTime();
+    const QDateTime memStart = now.addSecs(-30);
+    const QDateTime memEnd = now.addSecs(-20);
+    const QDateTime dbStart = now.addSecs(-19);
+    const QDateTime dbEnd = now.addSecs(-10);
+
+    tracker.durations_.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    const QString checkpointSegmentBeforeSave = "checkpoint-before-save";
+    const QDateTime checkpointStartBeforeSave = now.addSecs(-5);
+    tracker.current_checkpoint_segment_id_ = checkpointSegmentBeforeSave;
+    tracker.segment_start_time_ = checkpointStartBeforeSave;
+
+    std::deque<TimeDuration> dbDurations;
+    dbDurations.emplace_back(DurationType::Pause, dbStart, dbEnd);
+    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
+
+    HistoryDialog dialog(tracker, settings);
+    QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.rowOrigins_[0][0], HistoryDialog::RowOrigin::CurrentMemory);
+    QCOMPARE(dialog.rowOrigins_[0][1], HistoryDialog::RowOrigin::CurrentDatabase);
+
+    dialog.pendingChanges_[0][0].type = DurationType::Pause;
+
+    const QString lockConnName = "historydialog_save_failure_lock";
+    {
+        QSqlDatabase lockDb = QSqlDatabase::addDatabase("QSQLITE", lockConnName);
+        lockDb.setDatabaseName(db_path_);
+        QVERIFY(lockDb.open());
+
+        QSqlQuery lockQuery(lockDb);
+        QVERIFY(lockQuery.exec("BEGIN EXCLUSIVE TRANSACTION"));
+
+        QTimer::singleShot(0, []() {
+            for (QWidget* widget : QApplication::topLevelWidgets()) {
+                auto* messageBox = qobject_cast<QMessageBox*>(widget);
+                if (!messageBox) {
+                    continue;
+                }
+                if (messageBox->windowTitle() == "Database Error") {
+                    messageBox->accept();
+                    return;
+                }
+            }
+        });
+
+        dialog.done(QDialog::Accepted);
+        dialog.saveChanges();
+
+        QVERIFY(lockQuery.exec("ROLLBACK"));
+        lockDb.close();
+    }
+    QSqlDatabase::removeDatabase(lockConnName);
+
+    QCOMPARE(tracker.durations_.size(), static_cast<size_t>(1));
+    QCOMPARE(tracker.durations_[0].type, DurationType::Activity);
+    QCOMPARE(tracker.durations_[0].startTime, memStart);
+    QCOMPARE(tracker.durations_[0].endTime, memEnd);
+    QCOMPARE(tracker.current_checkpoint_segment_id_, checkpointSegmentBeforeSave);
+    QCOMPARE(tracker.segment_start_time_, checkpointStartBeforeSave);
+
+    const QString verifyConnName = "historydialog_save_failure_verify";
+    {
+        QSqlDatabase verifyDb = QSqlDatabase::addDatabase("QSQLITE", verifyConnName);
+        verifyDb.setDatabaseName(db_path_);
+        QVERIFY(verifyDb.open());
+
+        QSqlQuery verifyQuery(verifyDb);
+        QVERIFY(verifyQuery.exec("SELECT type, start_date, start_time, end_date, end_time FROM durations ORDER BY id"));
+        QVERIFY(verifyQuery.next());
+        QCOMPARE(verifyQuery.value(0).toInt(), static_cast<int>(DurationType::Pause));
+
+        const QDate savedStartDate = QDate::fromString(verifyQuery.value(1).toString(), Qt::ISODate);
+        const QTime savedStartTime = QTime::fromString(verifyQuery.value(2).toString(), "HH:mm:ss.zzz");
+        const QDate savedEndDate = QDate::fromString(verifyQuery.value(3).toString(), Qt::ISODate);
+        const QTime savedEndTime = QTime::fromString(verifyQuery.value(4).toString(), "HH:mm:ss.zzz");
+        const QDateTime savedStartUtc(savedStartDate, savedStartTime, Qt::UTC);
+        const QDateTime savedEndUtc(savedEndDate, savedEndTime, Qt::UTC);
+
+        QCOMPARE(savedStartUtc, dbStart.toUTC());
+        QCOMPARE(savedEndUtc, dbEnd.toUTC());
+        QVERIFY(!verifyQuery.next());
+
+        verifyDb.close();
+    }
+    QSqlDatabase::removeDatabase(verifyConnName);
 }
 
 void HistoryDialogTest::test_splitdialog_default_types_and_bounds()
