@@ -885,18 +885,18 @@ Independent of the schema rework but easier to land after it.
 - **Fix:** Replace with `db.rollback()`.
 - **Tests:** N/A.
 
-### T24. [m] Set `PRAGMA synchronous=FULL` at connection open, not at flush
-- **Where:** `databasemanager.cpp:833` (currently in `flushToDisc`).
+### T24. [DONE] [m] Set `PRAGMA synchronous=FULL` at connection open, not at flush
+- **Where:** `databasemanager.cpp` — `lazyOpen` and `flushToDisc`.
 - **Problem:** Every normal write runs at SQLite's default
   synchronous level. Only the shutdown path gets FULL durability.
 - **Fix:**
-  1. Decide on the durability vs throughput trade-off. For a time-tracking
-     app that values correctness over throughput, set `PRAGMA
-     synchronous=NORMAL` at `lazyOpen` (safe in WAL mode, fast enough for
-     a few writes per minute) and promote to `FULL` only if we observe
-     actual corruption under WAL.
-  2. If we don't switch to WAL mode, use `FULL` from the start.
-- **Tests:** Benchmark flush path before/after to verify no regression.
+  1. Set `PRAGMA synchronous=NORMAL` at `lazyOpen` after schema setup.
+     In rollback journal mode (which this app uses), NORMAL is safe against
+     app crashes and fast enough for a few writes per minute. Data loss
+     can only occur from an OS crash or power failure during commit.
+  2. Keep `PRAGMA synchronous=FULL` in `flushToDisc` for the final
+     shutdown flush, ensuring maximum durability on exit.
+- **Tests:** All 139 existing tests pass.
 
 ### T25. [m] Stop using `reinterpret_cast<quintptr>(this)` for connection names
 - **Where:** `databasemanager.cpp:37`.

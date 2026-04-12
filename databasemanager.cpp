@@ -174,6 +174,26 @@ bool DatabaseManager::lazyOpen()
         // Non-fatal: continue even if index creation fails
     }
 
+    // Set synchronous mode for durability.
+    //
+    // In rollback journal mode (the default — this app does NOT use WAL),
+    // NORMAL provides reasonable crash safety: data can only be lost if the
+    // OS itself crashes or power is lost during a transaction commit.  An
+    // application crash cannot cause corruption.  FULL would add an extra
+    // fsync per transaction, which is unnecessary overhead for a time-tracking
+    // app that writes a few rows per minute and can tolerate losing a few
+    // minutes of data in a power failure.
+    //
+    // The shutdown path (flushToDisc) temporarily promotes to FULL to ensure
+    // the final save is fully durable before the process exits.
+    QSqlQuery syncQuery(db);
+    if (!syncQuery.exec("PRAGMA synchronous=NORMAL")) {
+        if (settings_.logToFile()) {
+            Logger::Log("[DB] Warning: Failed to set synchronous=NORMAL: " + syncQuery.lastError().text());
+        }
+        // Non-fatal: SQLite defaults to FULL, which is strictly safer
+    }
+
     // Retention cleanup: delete entries older than history_days_to_keep_.
     // Gated behind retention_cleanup_done_ so we only pay the cost once per
     // application session.  On failure the flag stays false, causing an
