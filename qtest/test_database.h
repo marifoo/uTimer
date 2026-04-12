@@ -61,6 +61,11 @@ private slots:
     void test_checkpointPreservesStartTimeOnUpdateBySegmentId();
     void test_clockDriftResilience_durationStoredFromElapsed();
     void test_loadDurations_skipsNegativeDurationRows();
+
+    // hasEntriesForDate tri-state result tests (T18)
+    void test_hasEntriesForDate_returns_unknown_when_history_disabled();
+    void test_hasEntriesForDate_returns_no_on_empty_database();
+    void test_hasEntriesForDate_returns_yes_when_entries_exist();
 };
 
 #endif // TEST_DATABASE_H

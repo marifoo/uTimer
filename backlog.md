@@ -796,7 +796,7 @@ Independent of the schema rework but easier to land after it.
 - **Tests:** State transition tests for every public `TimeTracker` method,
   asserting the expected `SessionState` after each call.
 
-### T18. [M3] Make `hasEntriesForDate` distinguish "no" from "unknown"
+### T18. [DONE] [M3] Make `hasEntriesForDate` distinguish "no" from "unknown"
 - **Where:** `databasemanager.cpp:549–575`; `timetracker.cpp:119–120`.
 - **Problem:** Returns `false` when history is disabled or `lazyOpen` fails,
   causing `startTimer` to think this is the first session of the day and add

@@ -1058,3 +1058,64 @@ void DatabaseTest::test_database_backup_preserves_data()
     auto loaded = manager.loadDurations();
     QCOMPARE(loaded.size(), (size_t)2); // Original had 2 entries
 }
+
+// ============================================================================
+// hasEntriesForDate tri-state result tests (T18)
+// ============================================================================
+
+void DatabaseTest::test_hasEntriesForDate_returns_unknown_when_history_disabled()
+{
+    // Arrange: history_days_to_keep = 0 disables the database entirely.
+    // hasEntriesForDate must return Unknown (not No) so the caller
+    // never assumes "no entries exist" when it simply can't check.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 0));
+    DatabaseManager manager(settings);
+
+    // Act
+    EntriesForDateResult result = manager.hasEntriesForDate(QDate::currentDate());
+
+    // Assert
+    QCOMPARE(result, EntriesForDateResult::Unknown);
+}
+
+void DatabaseTest::test_hasEntriesForDate_returns_no_on_empty_database()
+{
+    // Arrange: history enabled, fresh empty database.
+    // hasEntriesForDate must return No (not Unknown) to confirm that
+    // zero entries exist, allowing the caller to add boot time.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    DatabaseManager manager(settings);
+
+    // Act
+    EntriesForDateResult result = manager.hasEntriesForDate(QDate::currentDate());
+
+    // Assert
+    QCOMPARE(result, EntriesForDateResult::No);
+}
+
+void DatabaseTest::test_hasEntriesForDate_returns_yes_when_entries_exist()
+{
+    // Arrange: history enabled, database has finalized entries for today.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    DatabaseManager manager(settings);
+
+    QDateTime now = QDateTime::currentDateTimeUtc();
+    std::deque<TimeDuration> durations;
+    durations.emplace_back(DurationType::Activity, now.addSecs(-60), now);
+    QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
+
+    // Act
+    EntriesForDateResult result = manager.hasEntriesForDate(QDate::currentDate());
+
+    // Assert
+    QCOMPARE(result, EntriesForDateResult::Yes);
+}

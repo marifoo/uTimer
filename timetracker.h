@@ -190,7 +190,7 @@ public:
     bool updateDurationsInDB();
     bool replaceDurationsInDB(std::deque<TimeDuration> historyDurations,
                               std::deque<TimeDuration> currentSessionDurations);
-    bool hasEntriesForToday();
+    EntriesForDateResult hasEntriesForToday();
     void pauseCheckpoints();
     void resumeCheckpoints();
     bool checkDatabaseSchema(); // Returns true if DB schema is valid, false if outdated

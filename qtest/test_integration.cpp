@@ -343,7 +343,7 @@ void IntegrationTest::test_integration_empty_database_operations()
     auto loaded = manager.loadDurations();
     QCOMPARE(loaded.size(), (size_t)0);
     
-    QVERIFY(!manager.hasEntriesForDate(QDate::currentDate()));
+    QCOMPARE(manager.hasEntriesForDate(QDate::currentDate()), EntriesForDateResult::No);
     
     std::deque<TimeDuration> empty;
     QVERIFY(manager.updateDurationsById(empty));

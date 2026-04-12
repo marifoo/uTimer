@@ -874,24 +874,34 @@ DatabaseManager::LoadResult DatabaseManager::loadDurations()
     return result;
 }
 
-bool DatabaseManager::hasEntriesForDate(const QDate& date)
+/**
+ * Checks whether finalized entries exist for a given date.
+ *
+ * Returns a tri-state result:
+ * - Yes:     At least one finalized entry exists for the date.
+ * - No:      The DB was queried successfully and zero entries were found.
+ * - Unknown: The DB could not be opened (history disabled or open failure).
+ *            Callers should treat Unknown conservatively — e.g. do NOT assume
+ *            "no entries exist" when the answer is actually unknowable.
+ */
+EntriesForDateResult DatabaseManager::hasEntriesForDate(const QDate& date)
 {
     if (!lazyOpen()) {
         if (settings_.logToFile()) {
             Logger::Log("[DB] Could not lazy open DB to check entries for date");
         }
-        return false;
+        return EntriesForDateResult::Unknown;
     }
 
     // Check if any entries exist for the specified date
     QSqlQuery query(db);
     query.prepare("SELECT COUNT(*) FROM durations WHERE end_date = :date AND is_finalized = 1");
     query.bindValue(":date", date.toString(Qt::ISODate));
-    
-    bool hasEntries = false;
+
+    EntriesForDateResult result = EntriesForDateResult::Unknown;
     if (query.exec() && query.next()) {
         int count = query.value(0).toInt();
-        hasEntries = (count > 0);
+        result = (count > 0) ? EntriesForDateResult::Yes : EntriesForDateResult::No;
     } else {
         if (settings_.logToFile()) {
             Logger::Log("[DB] Error checking entries for date: " + query.lastError().text());
@@ -899,7 +909,7 @@ bool DatabaseManager::hasEntriesForDate(const QDate& date)
     }
 
     lazyClose();
-    return hasEntries;
+    return result;
 }
 
 /**

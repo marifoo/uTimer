@@ -32,4 +32,17 @@ struct TimeDuration {
 
 enum class TransactionMode { Append, Replace };
 
+/**
+ * Tri-state result for hasEntriesForDate.
+ *
+ * Distinguishes between "definitely no entries" (safe to add boot time)
+ * and "we don't know" (history disabled or DB inaccessible — never add
+ * boot time to avoid double-counting).
+ *
+ * - Yes:     Finalized entries exist for the given date.
+ * - No:      The DB was queried successfully and zero entries were found.
+ * - Unknown: The DB could not be queried (history disabled or open failed).
+ */
+enum class EntriesForDateResult { Yes, No, Unknown };
+
 #endif // TYPES_H

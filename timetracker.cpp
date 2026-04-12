@@ -276,8 +276,12 @@ void TimeTracker::startTimer()
                     break;
                 }
             }
-            bool hasEntriesInDB = hasEntriesForToday();
-            shouldAddBootTime = !hasEntriesInMemory && !hasEntriesInDB;
+            // Use tri-state result: only add boot time when the DB positively
+            // confirms zero entries for today. When the result is Unknown
+            // (history disabled or DB inaccessible), we err on the side of
+            // caution and skip boot time to avoid double-counting.
+            EntriesForDateResult dbResult = hasEntriesForToday();
+            shouldAddBootTime = !hasEntriesInMemory && (dbResult == EntriesForDateResult::No);
             if (settings_.logToFile()) {
                 Logger::Log(shouldAddBootTime
                             ? "[TIMER] Will add boot time: " + QString::number(boot_time_sec) + " seconds (first session today)"
@@ -782,7 +786,7 @@ bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> historyDurations
     return db_.replaceDurationsInDB(historyDurations, currentSessionDurations);
 }
 
-bool TimeTracker::hasEntriesForToday()
+EntriesForDateResult TimeTracker::hasEntriesForToday()
 {
     return db_.hasEntriesForDate(QDate::currentDate());
 }

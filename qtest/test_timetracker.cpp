@@ -111,7 +111,7 @@ void TimeTrackerTest::test_timetracker_midnight_split_and_checkpoint_reset()
     QVERIFY(tracker.session_.durations.size() >= 1);
     
     // Pre-midnight part should be in DB
-    QVERIFY(tracker.db_.hasEntriesForDate(QDate::currentDate().addDays(-1)));
+    QCOMPARE(tracker.db_.hasEntriesForDate(QDate::currentDate().addDays(-1)), EntriesForDateResult::Yes);
 }
 
 void TimeTrackerTest::test_timetracker_lock_events_checkpoint_and_resume()
@@ -559,4 +559,117 @@ void TimeTrackerTest::test_compute_midnight_split_zero_duration()
     QVERIFY(!result.crossed_midnight);
     QVERIFY(result.new_entries.empty());
     QVERIFY(result.previous_day_entries.empty());
+}
+
+// ============================================================================
+// Boot time + hasEntriesForDate tri-state tests (T18)
+// ============================================================================
+
+void TimeTrackerTest::test_boot_time_not_added_when_history_disabled()
+{
+    // When history is disabled (history_days_to_keep = 0), hasEntriesForDate
+    // returns Unknown. startTimer must NOT add boot time in this case,
+    // because we can't confirm whether entries already exist for today.
+    // Adding boot time unconditionally would cause double-counting on every
+    // subsequent start of the day.
+
+    // Arrange
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 0);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/boot_time_seconds", 30);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    TimeTracker tracker(settings);
+
+    // Act: start timer twice (simulating a second start on the same day)
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    tracker.useTimerViaButton(Button::Stop);
+    QTest::qWait(10);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // Assert: no boot time was added on either start, because history is
+    // disabled and hasEntriesForDate returns Unknown.
+    // The only durations should be from actual timer running, not boot time.
+    qint64 totalActivity = sumDurations(tracker.session_.durations, DurationType::Activity);
+    // Boot time would be 30000ms. If it were added, total would be >= 30000.
+    // Since we only ran for ~10ms, it should be much less.
+    QVERIFY2(totalActivity < 5000,
+             "Boot time should not be added when history is disabled (DB returns Unknown)");
+
+    tracker.useTimerViaButton(Button::Stop);
+}
+
+void TimeTrackerTest::test_boot_time_added_once_on_empty_db()
+{
+    // When history is enabled and the DB is empty for today, boot time
+    // should be added on the first startTimer of the day.
+
+    // Arrange
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/boot_time_seconds", 30);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    TimeTracker tracker(settings);
+
+    // Act: start the timer (first session today, empty DB)
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // Assert: boot time (30s = 30000ms) was added as an Activity segment
+    qint64 totalActivity = sumDurations(tracker.session_.durations, DurationType::Activity);
+    QVERIFY2(totalActivity >= 29000,
+             "Boot time should be added when DB is empty for today");
+
+    tracker.useTimerViaButton(Button::Stop);
+}
+
+void TimeTrackerTest::test_boot_time_not_added_when_db_has_entries_for_today()
+{
+    // When history is enabled and the DB already has entries for today,
+    // boot time must NOT be added (to avoid double-counting).
+
+    // Arrange: seed the DB with an entry for today
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/boot_time_seconds", 30);
+    writer.sync();
+
+    Settings settings(settingsPath);
+
+    // Use a separate DatabaseManager to seed an entry for today
+    {
+        DatabaseManager seeder(settings);
+        QDateTime now = QDateTime::currentDateTimeUtc();
+        std::deque<TimeDuration> durations;
+        durations.emplace_back(DurationType::Activity, now.addSecs(-3600), now.addSecs(-3540));
+        QVERIFY(seeder.saveDurations(durations, TransactionMode::Append));
+    }
+
+    TimeTracker tracker(settings);
+
+    // Act: start the timer (DB already has entries for today)
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // Assert: no boot time added. Only the in-progress segment should exist.
+    qint64 totalActivity = sumDurations(tracker.session_.durations, DurationType::Activity);
+    QVERIFY2(totalActivity < 5000,
+             "Boot time should not be added when DB already has entries for today");
+
+    tracker.useTimerViaButton(Button::Stop);
 }
