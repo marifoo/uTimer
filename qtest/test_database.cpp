@@ -1119,3 +1119,143 @@ void DatabaseTest::test_hasEntriesForDate_returns_yes_when_entries_exist()
     // Assert
     QCOMPARE(result, EntriesForDateResult::Yes);
 }
+
+// ============================================================================
+// Retention cleanup once-per-session tests (T22)
+// ============================================================================
+
+void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
+{
+    // The retention DELETE in lazyOpen() should execute at most once per
+    // DatabaseManager lifetime.  We verify this by seeding the DB with an
+    // old entry via direct SQL (bypassing lazyOpen's cleanup), then using
+    // a fresh DatabaseManager whose first lazyOpen runs the cleanup.
+    // After that, ten more open/close cycles must not re-run the DELETE.
+
+    // Arrange: create the database and seed entries via a raw connection
+    // so that no cleanup has run yet.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 2)); // keep 2 days
+
+    // Use a first manager just to create the schema.
+    {
+        DatabaseManager bootstrap(settings);
+        std::deque<TimeDuration> empty;
+        QVERIFY(bootstrap.saveDurations(empty, TransactionMode::Append));
+    }
+
+    // Insert entries directly so that the old one survives (no cleanup yet).
+    QDateTime now = QDateTime::currentDateTimeUtc();
+    const QString connName = "seed_retention_test";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+
+        // Old entry: 10 days ago (should be pruned by 2-day retention)
+        QDateTime oldStart = now.addDays(-10);
+        QDateTime oldEnd = oldStart.addSecs(60);
+        query.prepare(
+            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:sid, 0, :dur, :sd, :st, :ed, :et, 1)"
+        );
+        query.bindValue(":sid", TimeDuration::createSegmentId());
+        query.bindValue(":dur", oldStart.msecsTo(oldEnd));
+        query.bindValue(":sd", oldStart.date().toString(Qt::ISODate));
+        query.bindValue(":st", oldStart.time().toString("HH:mm:ss.zzz"));
+        query.bindValue(":ed", oldEnd.date().toString(Qt::ISODate));
+        query.bindValue(":et", oldEnd.time().toString("HH:mm:ss.zzz"));
+        QVERIFY(query.exec());
+
+        // Recent entry: today (should survive cleanup)
+        QDateTime recentStart = now.addSecs(-60);
+        QDateTime recentEnd = now;
+        query.bindValue(":sid", TimeDuration::createSegmentId());
+        query.bindValue(":dur", recentStart.msecsTo(recentEnd));
+        query.bindValue(":sd", recentStart.date().toString(Qt::ISODate));
+        query.bindValue(":st", recentStart.time().toString("HH:mm:ss.zzz"));
+        query.bindValue(":ed", recentEnd.date().toString(Qt::ISODate));
+        query.bindValue(":et", recentEnd.time().toString("HH:mm:ss.zzz"));
+        QVERIFY(query.exec());
+
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    // Act: create a fresh manager.  Its first lazyOpen should run cleanup.
+    DatabaseManager manager(settings);
+    QVERIFY(!manager.retention_cleanup_done_); // flag starts false
+
+    QVERIFY(manager.lazyOpen());
+    manager.lazyClose();
+
+    // Assert: cleanup ran once.
+    QVERIFY(manager.retention_cleanup_done_);
+
+    // Open ten more times; cleanup must not re-execute.
+    for (int i = 0; i < 10; ++i) {
+        QVERIFY(manager.lazyOpen());
+        manager.lazyClose();
+    }
+
+    // Flag still true, no re-run.
+    QVERIFY(manager.retention_cleanup_done_);
+
+    // The old entry was removed; the recent one survives.
+    auto loaded = manager.loadDurations();
+    QCOMPARE(static_cast<int>(loaded.size()), 1);
+}
+
+void DatabaseTest::test_retention_cleanup_retries_after_failure()
+{
+    // If the cleanup transaction fails (e.g. because the DB file is
+    // read-only), retention_cleanup_done_ must remain false so the next
+    // lazyOpen() retries automatically.  Once the obstacle is removed,
+    // the retry should succeed and set the flag.
+
+    // Arrange
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 2));
+    DatabaseManager manager(settings);
+
+    // Create the database and seed an old entry.
+    QDateTime now = QDateTime::currentDateTimeUtc();
+    std::deque<TimeDuration> durations;
+    durations.emplace_back(DurationType::Activity, now.addDays(-10), now.addDays(-10).addSecs(60));
+    durations.emplace_back(DurationType::Activity, now.addSecs(-60), now);
+    QVERIFY(manager.saveDurations(durations, TransactionMode::Replace));
+
+    // The first lazyOpen (inside saveDurations) already ran cleanup
+    // successfully.  Reset the flag to simulate a fresh session where the
+    // first cleanup attempt will fail.
+    manager.retention_cleanup_done_ = false;
+
+    // Make the DB read-only so the retention DELETE fails.
+    QFile dbFile(db_path_);
+    QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::ReadUser));
+
+    // Act: lazyOpen should fail because the cleanup transaction cannot write.
+    QVERIFY(!manager.lazyOpen());
+
+    // Assert: flag must still be false (cleanup was not successful).
+    QVERIFY(!manager.retention_cleanup_done_);
+
+    // Restore write permissions.
+    QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser));
+
+    // Act: the next lazyOpen should retry cleanup and succeed.
+    QVERIFY(manager.lazyOpen());
+    manager.lazyClose();
+
+    // Assert: flag is now true.
+    QVERIFY(manager.retention_cleanup_done_);
+
+    // Verify the old entry was removed.
+    auto loaded = manager.loadDurations();
+    QCOMPARE(static_cast<int>(loaded.size()), 1);
+}

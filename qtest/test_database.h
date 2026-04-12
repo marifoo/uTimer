@@ -66,6 +66,10 @@ private slots:
     void test_hasEntriesForDate_returns_unknown_when_history_disabled();
     void test_hasEntriesForDate_returns_no_on_empty_database();
     void test_hasEntriesForDate_returns_yes_when_entries_exist();
+
+    // Retention cleanup once-per-session tests (T22)
+    void test_retention_cleanup_runs_once_across_multiple_opens();
+    void test_retention_cleanup_retries_after_failure();
 };
 
 #endif // TEST_DATABASE_H

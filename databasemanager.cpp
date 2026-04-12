@@ -24,7 +24,7 @@
  *
  * Configuration:
  * - history_days_to_keep_ = 0 disables database entirely (all methods return early)
- * - Old entries automatically purged on lazyOpen() based on retention setting
+ * - Old entries automatically purged once per session on the first successful lazyOpen()
  */
 
 #include "databasemanager.h"
@@ -80,6 +80,9 @@ DatabaseManager::~DatabaseManager()
  * 2. Creates the 'durations' table if it doesn't exist.
  * 3. Creates necessary indices for performance.
  * 4. Performs auto-maintenance: Deletes entries older than history_days_to_keep_.
+ *    This cleanup runs at most once per application session (gated by
+ *    retention_cleanup_done_).  On failure the flag stays false so the next
+ *    lazyOpen() retries automatically.
  *
  * Returns true if the database is ready for use.
  */
@@ -171,32 +174,39 @@ bool DatabaseManager::lazyOpen()
         // Non-fatal: continue even if index creation fails
     }
 
-    // Cleanup old entries
-    if (db.transaction()) {
-        QSqlQuery query(db);
-        bool querySuccessful = false;
-        
-        query.prepare("DELETE FROM durations WHERE end_date < date('now', '-' || :days || ' days')");
-        query.bindValue(":days", static_cast<int>(history_days_to_keep_));
-        querySuccessful = query.exec();
+    // Retention cleanup: delete entries older than history_days_to_keep_.
+    // Gated behind retention_cleanup_done_ so we only pay the cost once per
+    // application session.  On failure the flag stays false, causing an
+    // automatic retry on the next lazyOpen() call.
+    if (!retention_cleanup_done_) {
+        if (db.transaction()) {
+            QSqlQuery query(db);
 
-        if (!querySuccessful) {
-            db.rollback();
-            if (settings_.logToFile())
-                Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
-            db.close();
-            return false;
-        }
-        else {
+            query.prepare("DELETE FROM durations WHERE end_date < date('now', '-' || :days || ' days')");
+            query.bindValue(":days", static_cast<int>(history_days_to_keep_));
+
+            if (!query.exec()) {
+                db.rollback();
+                if (settings_.logToFile())
+                    Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
+                // Leave retention_cleanup_done_ = false so we retry next time.
+                db.close();
+                return false;
+            }
+
             if (!db.commit()) {
                 if (settings_.logToFile())
                     Logger::Log("[DB] Error committing cleanup transaction: " + db.lastError().text());
+                // Commit failed — leave flag false for retry.
+            } else {
+                retention_cleanup_done_ = true;
             }
         }
-    }
-    else {
-        if (settings_.logToFile())
-            Logger::Log("[DB] Error starting cleanup transaction: " + db.lastError().text());
+        else {
+            if (settings_.logToFile())
+                Logger::Log("[DB] Error starting cleanup transaction: " + db.lastError().text());
+            // Transaction start failed — leave flag false for retry.
+        }
     }
     
     return true;

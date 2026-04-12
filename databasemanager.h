@@ -80,6 +80,11 @@ private:
     bool ensureSegmentIdColumn();
     bool ensureSettingsTable();
     bool createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
+
+    // Ensures retention cleanup (DELETE of entries older than history_days_to_keep_)
+    // runs at most once per application session.  Set to true after a successful
+    // cleanup; left false on failure so the next lazyOpen() retries automatically.
+    bool retention_cleanup_done_ = false;
 };
 
 #endif // DATABASEMANAGER_H

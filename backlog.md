@@ -863,7 +863,7 @@ Independent of the schema rework but easier to land after it.
     (`test_database_backup_file_creation`, `test_database_backup_preserves_data`)
     exercise the close/copy/reopen path under the new mutex.
 
-### T22. [M9] Run retention cleanup at most once per session (and not on every `lazyOpen`)
+### T22. [DONE] [M9] Run retention cleanup at most once per session (and not on every `lazyOpen`)
 - **Where:** `databasemanager.cpp:140–165`.
 - **Problem:** Retention `DELETE` runs on every DB operation, including every
   checkpoint tick (~every 5 minutes). Pointless overhead and a failed
