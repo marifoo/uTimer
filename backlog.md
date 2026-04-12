@@ -68,19 +68,23 @@ architectural issues.
   - Unit test that a failed retry leaves `has_unsaved_data_ == true` and
     `durations_` non-empty.
 
-### T3. [DONE] [M7] Surface `loadDurations` skip/repair decisions to the user
+### T3. [PARTIAL] [M7] Surface `loadDurations` skip/repair decisions to the user
 - **Where:** `databasemanager.cpp:492–540`.
 - **Problem:** Rows with invalid type/timestamps are silently skipped with only
   a log line. Rows whose stored duration disagrees with the computed duration
   by more than 5 ms have the computed value silently substituted. The user
   sees "wrong" history without knowing why.
 - **Fix:**
-  1. Return a `LoadResult` struct from `loadDurations`: `{ durations, skipped,
+  1. [DONE] Return a `LoadResult` struct from `loadDurations`: `{ durations, skipped,
      repaired }` counts, plus optionally a list of row ids that were touched.
-  2. Propagate the counts up to HistoryDialog / mainwin and show a one-line
+  2. [PARTIAL] Propagate the counts up to HistoryDialog / mainwin and show a one-line
      banner at the top of the history dialog: "N rows skipped due to corrupt
      data, M rows auto-repaired." with a link to the log file.
-  3. Raise the 5 ms tolerance to 100 ms (one UI frame at 60 Hz is ~16 ms, but
+     **Remaining:** Banner text is displayed via a plain `QLabel` but there is
+     no clickable link to the log file. Needs either `QLabel` with
+     `setOpenExternalLinks(true)` and an HTML anchor, or a button that calls
+     `QDesktopServices::openUrl()`.
+  3. [DONE] Raise the 5 ms tolerance to 100 ms (one UI frame at 60 Hz is ~16 ms, but
      wall-clock drift under load can exceed that) and document the number as
      a named constant `kDurationReconciliationToleranceMs`.
 - **Tests:**
@@ -166,7 +170,7 @@ These items decouple the dialog from the checkpoint subsystem and stop the
 "dialog saved this row but the next checkpoint silently overwrites it" class
 of failures. They depend on Phase 1 being done but can overlap with Phase 2.
 
-### T6. [DONE] [C3 / F4] Reset TimeTracker checkpoint tracking when HistoryDialog saves
+### T6. [PARTIAL] [C3 / F4] Reset TimeTracker checkpoint tracking when HistoryDialog saves
 - **Where:** `historydialog.cpp:408, 434`; `timetracker.cpp:420–424`
   (`setCurrentDurations`).
 - **Problem:** `HistoryDialog::saveChanges` calls `replaceDurationsInDB`
@@ -176,16 +180,21 @@ of failures. They depend on Phase 1 being done but can overlap with Phase 2.
   INSERT path → collides with the row HistoryDialog just wrote → `ON CONFLICT
   REPLACE` silently clobbers the user's confirmed state.
 - **Fix:**
-  1. Add a new public method `TimeTracker::resetCheckpointTrackingForOngoing(
+  1. [DONE] Add a new public method `TimeTracker::resetCheckpointTrackingForOngoing(
      const Duration& ongoing)`. It sets `current_checkpoint_id_ = -1`,
      refreshes `segment_start_time_ = ongoing.startTime`, and re-issues one
      `saveCheckpoint` call immediately so the DB row representing the ongoing
      segment is rebuilt with a fresh, valid id.
-  2. Extend `setCurrentDurations` signature so callers must pass the new
+  2. [OPEN] Extend `setCurrentDurations` signature so callers must pass the new
      ongoing duration explicitly (or make `resetCheckpointTrackingForOngoing`
      the *only* way to set current durations from outside the class) and
      route `HistoryDialog::saveChanges` through it.
-  3. While the dialog is open and the timer is running, pause checkpointing
+     **Remaining:** `setCurrentDurations` still has its original loose
+     signature. Callers must remember to call `resetCheckpointTrackingForOngoing`
+     separately — this is convention-enforced, not compiler-enforced. Either
+     tighten the signature or make `resetCheckpointTrackingForOngoing` the sole
+     external entry point.
+  3. [DONE] While the dialog is open and the timer is running, pause checkpointing
      (`checkpoint_timer_->stop()`) and resume on close; this prevents a
      checkpoint from firing against the pre-replace state.
 - **Dependencies:** T13 makes this even simpler because id-based updates will
@@ -298,7 +307,7 @@ Addresses **F1**, **F2**, and the upsert-by-start-time class of bugs
 stable before starting this phase because it rewrites the persistence
 contract.
 
-### T13. [DONE] [F1] Introduce stable `segment_id` as the row identity
+### T13. [PARTIAL] [F1] Introduce stable `segment_id` as the row identity
 - **Where:** `databasemanager.cpp:101` (schema), all write paths, all upsert
   sites, `TimeTracker::durations_` container, `Duration` struct.
 - **Problem:** The `UNIQUE(start_date, start_time, type) ON CONFLICT REPLACE`
@@ -306,16 +315,16 @@ contract.
   Every `INSERT OR REPLACE` path silently destroys rows under clock drift or
   `cleanDurations` perturbation.
 - **Fix:**
-  1. **Schema change:** add `segment_id TEXT NOT NULL` (UUIDv4 or equivalent
+  1. [DONE] **Schema change:** add `segment_id TEXT NOT NULL` (UUIDv4 or equivalent
      monotonic id) with a `UNIQUE` index. Remove the
      `UNIQUE(start_date, start_time, type)` constraint.
-  2. **Migration:** on schema upgrade, assign a fresh UUID to every existing
+  2. [DONE] **Migration:** on schema upgrade, assign a fresh UUID to every existing
      row. Log count.
-  3. **In-memory `Duration`:** add `QString segment_id` field. Assign at
+  3. [DONE] **In-memory `Duration`:** add `QString segment_id` field. Assign at
      creation time in `TimeTracker` (the single place where segments are
      born). Never re-create: subsequent edits / merges / splits preserve (or
      for splits, assign a new one to the second half).
-  4. **All write paths:**
+  4. [DONE] **All write paths:**
      - `appendDurationsToDB`: plain `INSERT` of rows with their assigned
        `segment_id`. No ON CONFLICT behavior needed; a conflict is a bug.
      - `updateDurationsByStartTime`: rename to `updateDurationsById`. Match
@@ -325,11 +334,15 @@ contract.
        the id) and `INSERT` a fresh row. Never silently `REPLACE`.
      - `replaceDurationsInDB`: still wipes and rewrites, but preserves
        `segment_id` from each input row.
-  5. **`cleanDurations`:** now free to merge/reassign start times; merges
+  5. [OPEN] **`cleanDurations`:** now free to merge/reassign start times; merges
      must choose one surviving `segment_id` (the earlier one) and the
      caller is responsible for DELETE-ing rows for any `segment_id` that
      disappeared (pass a `removed_ids` out-param).
-  6. Delete `current_checkpoint_id_` entirely — replace with
+     **Remaining:** `cleanDurations` still silently erases merged entries
+     without tracking which segment_ids were removed. Callers do not issue
+     `DELETE FROM durations WHERE segment_id IN (...)` for merged-away rows.
+     This is the same gap as T14 — blocked on T14 being implemented.
+  6. [DONE] Delete `current_checkpoint_id_` entirely — replace with
      `current_checkpoint_segment_id_`.
 - **Dependencies:** T4 (is_finalized) should land first so we only migrate
   the schema once.
@@ -343,14 +356,196 @@ contract.
   - Split test: split a row, verify the original id is kept by one half and
     a fresh id is assigned to the other.
 
+- **Deep code scan results** (2026-04-12):
+
+  #### Verified complete
+
+  1. **Schema** (`databasemanager.cpp:96–110`): The `durations` table uses
+     `UNIQUE(segment_id)` as the sole uniqueness constraint. The old
+     `UNIQUE(start_date, start_time, type) ON CONFLICT REPLACE` is gone from
+     all production code. The only remaining reference is in
+     `qtest/test_database.cpp:945`, which deliberately creates the old schema
+     to test the migration path — this is correct.
+
+  2. **`TimeDuration` struct** (`types.h:14–31`): Has `QString segment_id` as
+     the first field. The sole constructor auto-generates a UUID via
+     `createSegmentId()` when no `segmentId` argument is provided (or when
+     it's empty). Every `TimeDuration` object is guaranteed to have a
+     non-empty `segment_id` at construction time.
+
+  3. **`saveCheckpoint`** (`databasemanager.cpp:898–984`): Updates by
+     `segment_id` (line 933). Falls back to INSERT with the same `segment_id`
+     if 0 rows affected (line 957–960). No `ON CONFLICT REPLACE`. Correct.
+
+  4. **`updateDurationsById`** (`databasemanager.cpp:994–1091`): Matches
+     on `segment_id` (line 1023, 1044). Falls back to INSERT with the same
+     `segment_id` on miss (line 1062). No `ON CONFLICT REPLACE`. Correct.
+
+  5. **`saveDurations`** (`databasemanager.cpp:548–625`): Plain `INSERT`
+     with `segment_id` (line 592–600). In `Replace` mode, does
+     `DELETE FROM durations` first (line 581), then INSERT. No `ON CONFLICT`.
+     Correct.
+
+  6. **`replaceDurationsInDB`** (`databasemanager.cpp:627–732`): Full
+     `DELETE FROM durations` (line 660), then inserts history rows as
+     finalized (line 671–679) and current-session rows as unfinalized
+     (line 699–707). All inserts use `d.segment_id`. Preserves segment_ids
+     from input. Correct.
+
+  7. **`loadDurations`** (`databasemanager.cpp:746–857`): Reads `segment_id`
+     from column 0 (line 780) and passes it to the `TimeDuration` constructor
+     (line 844). Loaded objects retain their DB identity. Correct.
+
+  8. **`loadUnfinalizedCheckpoints`** (`databasemanager.cpp:1151–1196`):
+     Reads `segment_id` from column 1 (line 1186) into `OrphanCheckpoint`.
+     Correct.
+
+  9. **Migration** (`databasemanager.cpp:337–436`): Creates `durations_new`
+     with `UNIQUE(segment_id)`, copies all rows assigning fresh UUIDs,
+     drops old table, renames. Transactional. Correct.
+
+  10. **`addDurationWithMidnightSplit`** (`timetracker.cpp:600–694`):
+      - Normal path (line 680): passes `segmentId` through.
+      - Midnight split, before-midnight half (line 624): passes `segmentId`.
+      - Midnight split, after-midnight half (line 659): no segmentId passed,
+        so constructor auto-generates a fresh UUID. This is correct — the
+        after-midnight portion is a new segment on a new day.
+
+  11. **`startTimer` from Pause** (`timetracker.cpp:71–95`):
+      - New Pause segment (line 80): passes `current_checkpoint_segment_id_`.
+      - Existing Pause extension (lines 82-83): only updates `endTime` and
+        `duration`, preserving `segment_id`. Correct.
+      - New Activity segment (line 88): creates fresh `segment_id`. Correct.
+
+  12. **`pauseTimer`** (`timetracker.cpp:172–198`): passes
+      `current_checkpoint_segment_id_` to `addDurationWithMidnightSplit`
+      (line 186), then creates a new `segment_id` for the Pause (line 193).
+      Correct.
+
+  13. **`stopTimer`** (`timetracker.cpp:292–337`): passes
+      `current_checkpoint_segment_id_` for the final segment (lines 305,
+      310). Correct.
+
+  14. **`backpauseTimer`** (`timetracker.cpp:212–280`): passes
+      `current_checkpoint_segment_id_` for truncated Activity (line 262).
+      Creates Pause without explicit ID (line 267) → auto-generated. Then
+      creates new `segment_id` for future use (line 271). Correct.
+
+  15. **HistoryDialog dedup** (`historydialog.cpp:104–114`): Uses
+      `isSameSegmentId()` (line 108) for deduplication between DB-loaded
+      and in-memory rows. This replaces the old start-time-based dedup key.
+      Correct.
+
+  16. **HistoryDialog split** (`historydialog.cpp:653–668`): First half
+      inherits `duration.segment_id` (line 654). Second half gets auto-
+      generated UUID (line 655, no segmentId arg). `rowOrigins_` is updated
+      in sync (lines 666–668). Correct.
+
+  17. **HistoryDialog type toggle** (`historydialog.cpp:379`): Only modifies
+      `type` field; `segment_id` is untouched. Correct.
+
+  18. **HistoryDialog saveChanges** (`historydialog.cpp:440–545`): Preserves
+      `segment_id` through all paths — CurrentMemory, CurrentDatabase,
+      HistoricalDatabase, and Ongoing rows retain their segment_ids when
+      passed to `replaceDurationsInDB`. Correct.
+
+  19. **`resetCheckpointTrackingForOngoing`** (`timetracker.cpp:450–472`):
+      Adopts `ongoing.segment_id` if non-empty, otherwise creates fresh
+      (lines 454–456). Then calls `db_.saveCheckpoint()` with it (lines
+      467–471). Correct.
+
+  20. **`getOngoingDuration`** (`timetracker.cpp:489–504`): Returns a
+      `TimeDuration` using `current_checkpoint_segment_id_` (lines 500–503).
+      Correct.
+
+  21. **`INSERT OR REPLACE`** (`databasemanager.cpp:1263`): Only used for
+      `app_settings` table (key-value store), not for `durations`. This is
+      correct behavior for a settings table with `key TEXT PRIMARY KEY`.
+
+  22. **`cleanDurations` segment_id handling** (`helpers.cpp:102, 112`):
+      In merge branches 2 and 3, the surviving entry's `segment_id` is
+      replaced with the current entry's `segment_id`. In branches 1, 4–7,
+      the surviving entry keeps its `segment_id`. The logic of which ID
+      survives is sound. The missing piece is tracking which IDs were
+      orphaned — that's T14's scope.
+
+  #### Remaining code gaps (T13-specific, not T14)
+
+  1. **Stale comment** at `timetracker.cpp:559`:
+     > `// Use the separate update interface that checks for existing entries by start time`
+     The method called is `updateDurationsById`, which matches by
+     `segment_id`, not `start_time`. The comment is misleading and should
+     say "by segment_id".
+
+  2. **Dead test file** `qtest/utimertest.h` (1914 lines) and
+     `qtest/utimertest.cpp` (3 lines): These reference the removed
+     `updateDurationsByStartTime()` method (10 call sites at lines 874,
+     878, 994, 1342, 1363, 1373, 1395, 1400, 1416, 1860). They also
+     reference old start-time-based query patterns. These files are NOT
+     compiled (not in `qtest/qtest.pro`) — the test suite was refactored
+     into separate `test_*.cpp` files. The dead files should be deleted to
+     avoid confusion.
+
+  #### Hidden issues (not previously documented)
+
+  None found. The T13 implementation is thorough. The only genuine open
+  item is step 5 (`cleanDurations` orphan tracking), which is correctly
+  identified as blocked on T14.
+
+  #### T6/T16 dependency status
+
+  - **T6 step 2 [OPEN]:** "Extend `setCurrentDurations` signature…" This
+    is a pure API design item (tightening the calling convention). It is
+    NOT blocked on T13 or T14. It can be done independently.
+
+  - **T16 "Remaining" [OPEN]:** Two sub-items:
+    1. "The flow does not use an explicit 'start new checkpoint for Pause'
+       transition method." This is a code-style/architecture concern, not
+       blocked on T13 or T14.
+    2. "Orphaned checkpoint rows from `cleanDurations` merges are not
+       cleaned up." This IS blocked on T14 (same root cause as T13 step 5).
+       Once T14 lands, `updateDurationsInDB()` — which `backpauseTimer`
+       calls at line 274 — will delete orphaned segment_ids atomically.
+
+  **Summary:** T6's remaining work is independent of both T13 and T14.
+  T16's remaining work is partially independent (sub-item 1) and partially
+  blocked on T14 (sub-item 2). Neither has any remaining dependency on
+  T13 itself — T13's done steps (1–4, 6) already provide everything
+  T6 and T16 need from the segment_id infrastructure.
+
 ### T14. [F2] Make `cleanDurations` honor segment identity
-- **Where:** `helpers.cpp:102–104, 111, 143`.
+- **Where:** `helpers.cpp:59–152` (full function), `helpers.h:23`.
 - **Problem:** `cleanDurations` mutates `prevIt->startTime` in merge branches.
   That was safe when there were no DB rows keyed by startTime; after T13 it
   is also safe, but the function must now return information about which
   in-memory entries correspond to which DB rows so the caller can clean up.
+
+- **Current state** (analysis of every erase/merge branch in `cleanDurations`):
+
+  The function operates on a `std::deque<TimeDuration>*`. It sorts by
+  `startTime` (line 69-78), then iterates pairwise (lines 80-151).
+  Every merge path calls `durations.erase(it)` on the current entry, but
+  **none of the seven branches track the erased segment_id**. The erased
+  entry's `segment_id` is silently lost, creating an orphan row in the DB.
+
+  | # | Branch (condition)                                  | Lines     | What is erased | segment_id fate |
+  |---|-----------------------------------------------------|-----------|----------------|-----------------|
+  | 1 | Near-duplicate (`abs(diff_end)<50 && abs(diff_dur)<50`) | 95–98  | `it`           | `it->segment_id` lost silently |
+  | 2 | Current starts before prev (shorter prev) (`it_start < prev_start && prev_end <= it_end`) | 101–107 | `it`, but first `prevIt->segment_id` is **overwritten** with `it->segment_id` | **Both** involved: `prevIt`'s original `segment_id` is orphaned in DB (overwritten at line 102); `it` is erased |
+  | 3 | Current starts before prev (longer prev, overlapping) (`it_start < prev_start && it_end < prev_end && it_start < prev_end`) | 111–116 | `it`, but first `prevIt->segment_id` is **overwritten** with `it->segment_id` | **Both** involved: `prevIt`'s original `segment_id` is orphaned in DB (overwritten at line 112); `it` is erased |
+  | 4 | Current overlaps into prev (`prev_start <= it_start && it_start <= prev_end && prev_end <= it_end`) | 120–124 | `it` | `it->segment_id` lost silently; `prevIt` keeps its original id |
+  | 5 | Current is subset of prev (`prev_start <= it_start && it_start <= prev_end && it_end <= prev_end`) | 128–131 | `it` | `it->segment_id` lost silently; `prevIt` keeps its original id |
+  | 6 | Adjacent disjoint, gap < 500ms (`gap >= 0 && gap < 500`) | 134–139 | `it` | `it->segment_id` lost silently; `prevIt` keeps its original id |
+  | 7 | Slightly overlapping, overlap < 100ms (`gap < 0 && abs(gap) < 100`) | 143–147 | `it` | `it->segment_id` lost silently; `prevIt` keeps its original id |
+
+  **Key subtlety for branches 2 and 3:** The surviving entry (`prevIt`) has
+  its `segment_id` replaced with `it->segment_id`. This means the
+  **original** `prevIt->segment_id` becomes the orphan — the one that
+  should be deleted from the DB. In all other branches (1, 4–7), `prevIt`
+  keeps its original `segment_id`, and `it->segment_id` is the orphan.
+
 - **Fix:**
-  1. After T13, `cleanDurations` takes `std::vector<Duration>&` and returns
+  1. After T13, `cleanDurations` takes `std::deque<TimeDuration>*` and returns
      `std::vector<QString> removed_segment_ids` — the ids of entries that
      were merged away.
   2. All three callers (`appendDurationsToDB`, `updateDurationsInDB`,
@@ -363,7 +558,190 @@ contract.
     verify the returned removed list contains the second's id and that the
     DB no longer has that row after the write.
 
-### T15. [C6] Remove the silent-REPLACE fallback from `saveCheckpoint`
+- **Callers analysis** (four call sites in `timetracker.cpp`, zero elsewhere):
+
+  | # | Caller | File:Line | DB method called after clean | Has DB access? | Notes |
+  |---|--------|-----------|------------------------------|----------------|-------|
+  | 1 | `appendDurationsChunkToDB` | `timetracker.cpp:540` | `db_.saveDurations(temp, TransactionMode::Append)` | Yes (`db_`) | Appends new segments. Merged-away IDs may already exist in DB from prior checkpoints — must DELETE them before INSERT to avoid UNIQUE constraint violation on segment_id. |
+  | 2 | `updateDurationsInDB` | `timetracker.cpp:554` | `db_.updateDurationsById(temp)` | Yes (`db_`) | Upserts by segment_id. Merged-away IDs become orphan rows in DB because the surviving entry's segment_id is the only one upserted — the erased segment_id is never touched. Must DELETE orphans. |
+  | 3 | `replaceDurationsInDB` (history arg) | `timetracker.cpp:567` | `db_.replaceDurationsInDB(historyDurations, currentSessionDurations)` | Yes (`db_`) | **DELETE FROM durations** is already issued as the first step of `replaceDurationsInDB` (line 660). The full table wipe means orphan segment_ids are implicitly cleaned up. **No action needed** for this caller — the removed_ids list can be ignored. |
+  | 4 | `replaceDurationsInDB` (current-session arg) | `timetracker.cpp:575` | Same as #3 | Yes (`db_`) | Same reasoning as #3 — the full table wipe handles cleanup. |
+
+  **Conclusion:** Only callers #1 and #2 need to issue DELETE for removed
+  segment_ids. Callers #3 and #4 are safe because `replaceDurationsInDB`
+  already wipes the entire `durations` table before re-inserting.
+
+- **Required DatabaseManager changes:**
+
+  No "delete by segment_id" method currently exists in `DatabaseManager`.
+  The current public API (`databasemanager.h:46–58`) has no batch-delete
+  by segment_id method. A new method is needed:
+
+  ```cpp
+  bool deleteSegmentsByIds(const std::vector<QString>& segmentIds);
+  ```
+
+  Implementation: open a transaction, execute
+  `DELETE FROM durations WHERE segment_id = :id` for each ID (or build a
+  single `WHERE segment_id IN (...)` query), commit. This method must be
+  callable within the same lazy-open/close cycle as the subsequent
+  `saveDurations` or `updateDurationsById` call to avoid TOCTOU issues.
+
+  **Alternative (preferred):** Instead of a separate public method, extend
+  `saveDurations` and `updateDurationsById` to accept an optional
+  `const std::vector<QString>& removedIds` parameter. The DELETE is issued
+  inside the same transaction as the INSERT/UPDATE, making the operation
+  atomic. This avoids a race where the app crashes between DELETE and
+  INSERT.
+
+  **Recommended signatures:**
+  ```cpp
+  // databasemanager.h
+  bool saveDurations(const std::deque<TimeDuration>& durations,
+                     TransactionMode mode,
+                     const std::vector<QString>& removedSegmentIds = {});
+  bool updateDurationsById(const std::deque<TimeDuration>& durations,
+                           const std::vector<QString>& removedSegmentIds = {});
+  ```
+
+  Inside each method, after starting the transaction (and after the
+  `DELETE FROM durations` in Replace mode), loop over `removedSegmentIds`
+  and execute `DELETE FROM durations WHERE segment_id = :id` before the
+  INSERT/UPDATE loop.
+
+- **Implementation sequence:**
+
+  1. **Change `cleanDurations` return type** (`helpers.h:23`, `helpers.cpp:59`):
+     Change `void cleanDurations(std::deque<TimeDuration>* pDurations)` to
+     `std::vector<QString> cleanDurations(std::deque<TimeDuration>* pDurations)`.
+     Add a local `std::vector<QString> removedIds;` at the top of the
+     function body.
+
+  2. **Instrument every erase branch** (`helpers.cpp:95–148`):
+     - **Branch 1** (line 96): Before `durations.erase(it)`, push
+       `it->segment_id` to `removedIds`.
+     - **Branch 2** (line 102–106): The original `prevIt->segment_id` is
+       overwritten with `it->segment_id` at line 102. Push the **original**
+       `prevIt->segment_id` before the overwrite. Then push `it->segment_id`?
+       No — `it` is erased but its segment_id was moved to `prevIt`. The
+       orphan is the **old** `prevIt->segment_id`. Capture it before line 102:
+       `removedIds.push_back(prevIt->segment_id);`
+       Then the erase of `it` at line 106 does not orphan `it->segment_id`
+       because it was transferred to `prevIt`. So only one ID is orphaned.
+     - **Branch 3** (line 112–116): Same pattern as branch 2.
+       `removedIds.push_back(prevIt->segment_id);` before line 112.
+     - **Branch 4** (line 123): Push `it->segment_id` before erase.
+     - **Branch 5** (line 129): Push `it->segment_id` before erase.
+     - **Branch 6** (line 138): Push `it->segment_id` before erase.
+     - **Branch 7** (line 146): Push `it->segment_id` before erase.
+
+  3. **Return `removedIds`** at the end of the function (after the for loop).
+
+  4. **Extend `DatabaseManager` write methods** (`databasemanager.h:46,52`,
+     `databasemanager.cpp:549,994`): Add `const std::vector<QString>&
+     removedSegmentIds = {}` parameter to `saveDurations` and
+     `updateDurationsById`. Inside each, after starting the transaction,
+     execute `DELETE FROM durations WHERE segment_id = :id` for each entry
+     in `removedSegmentIds`.
+
+  5. **Update caller #1 — `appendDurationsChunkToDB`**
+     (`timetracker.cpp:534–546`): Capture the return value of
+     `cleanDurations(&temp)` and pass it to `db_.saveDurations(temp,
+     TransactionMode::Append, removedIds)`.
+
+  6. **Update caller #2 — `updateDurationsInDB`**
+     (`timetracker.cpp:548–561`): Capture the return value and pass it to
+     `db_.updateDurationsById(temp, removedIds)`.
+
+  7. **Update callers #3 and #4 — `replaceDurationsInDB`**
+     (`timetracker.cpp:563–583`): Capture the return values but ignore
+     them (assign to a local variable marked `[[maybe_unused]]` or simply
+     discard). The full table wipe handles orphans. Alternatively, just
+     assign and let the vector be destroyed.
+
+  8. **Update tests** (`qtest/utimertest.h`, `qtest/test_cleanduration.cpp`,
+     `qtest/test_database.cpp`): All existing `cleanDurations(&d)` calls
+     now return a `std::vector<QString>`. Existing tests that don't check
+     the return value will get a compiler warning — capture and either
+     assert or discard.
+
+  9. **Add new tests for removed-ID tracking** covering each branch:
+     - Near-duplicate removal returns the erased entry's segment_id.
+     - Branch 2 (current-starts-before-prev, shorter prev) returns the
+       **original** prevIt's segment_id (the one that was overwritten).
+     - Branch 3 (left-overlap join) returns the original prevIt's
+       segment_id.
+     - Branches 4–7 return the erased `it`'s segment_id.
+     - Chain merge (3 entries merged to 1) returns 2 IDs.
+     - No-merge case returns empty vector.
+
+- **Edge cases and risks:**
+
+  1. **Empty segment_ids in legacy data:** If `cleanDurations` processes
+     entries loaded from a pre-migration database where `segment_id` was
+     auto-generated during migration, the IDs are valid UUIDs and the
+     DELETE will work correctly. No special handling needed.
+
+  2. **Branch 2 and 3 subtlety — transferred vs orphaned ID:** In branches
+     2 and 3, `prevIt->segment_id` is overwritten with `it->segment_id`.
+     This means the surviving entry adopts `it`'s identity, and the orphan
+     is `prevIt`'s **original** identity. If the implementation accidentally
+     pushes `it->segment_id` instead of `prevIt->segment_id`, the DELETE
+     would remove the row that the surviving entry now refers to, causing
+     data loss. **This is the highest-risk implementation detail.**
+
+  3. **Chain merges:** When three entries A, B, C are merged in sequence
+     (A absorbs B, then the merged A absorbs C), the function may produce
+     two removed IDs. If the first merge is branch 2/3 (overwriting
+     prevIt->segment_id) and the second merge is branch 4–7, the surviving
+     entry's segment_id has already been changed once. The second merge
+     correctly pushes the (already-changed) `it->segment_id`. This works
+     because each merge step operates on the current state of prevIt.
+
+  4. **Transaction atomicity for callers #1 and #2:** If the DELETE
+     succeeds but the subsequent INSERT/UPDATE fails (or vice versa), the
+     transaction rollback ensures consistency. This is why the DELETE must
+     be inside the same transaction as the write — not a separate call.
+
+  5. **`replaceDurationsInDB` safety:** Callers #3/#4 do a full table wipe.
+     Even if `cleanDurations` returns removed IDs, they are a subset of
+     what gets wiped anyway. Passing them to the DB method would cause
+     harmless no-op DELETEs before the wipe. Ignoring them is cleaner.
+
+  6. **Test compilation:** All ~30 existing `cleanDurations` test functions
+     in `qtest/test_cleanduration.cpp` and `qtest/utimertest.h` call
+     `cleanDurations(&d)` as a void expression. After changing the return
+     type to `std::vector<QString>`, these will compile without error (C++
+     allows discarding return values), but `-Wunused-result` may fire if
+     `[[nodiscard]]` is added to the declaration. Decision: do NOT add
+     `[[nodiscard]]` — callers #3/#4 legitimately ignore the return value.
+
+  7. **Performance:** The DELETE loop iterates over `removedIds.size()`
+     entries, which in practice is 0–3 per `cleanDurations` call. The
+     overhead is negligible.
+
+- **Interaction with T13 step 5:**
+
+  T13 step 5 is currently marked `[OPEN]` with the note: "`cleanDurations`
+  still silently erases merged entries without tracking which segment_ids
+  were removed. Callers do not issue `DELETE FROM durations WHERE
+  segment_id IN (...)` for merged-away rows. This is the same gap as T14."
+
+  Completing T14 directly resolves T13 step 5. Once T14 is implemented:
+  - `cleanDurations` returns the list of orphaned segment_ids.
+  - Callers #1 and #2 pass them into the DB write methods.
+  - The DB methods delete them in the same transaction as the write.
+
+  After T14 lands, T13 step 5 should be marked `[DONE]` and T13's overall
+  status can be changed from `[PARTIAL]` to `[DONE]`.
+
+  T16 (backpauseTimer simplification) is also partially blocked by T14.
+  The backlog note at line 434 says "orphaned checkpoint rows from
+  `cleanDurations` merges are not cleaned up." T14 resolves this by
+  ensuring the `updateDurationsInDB` path (which `backpauseTimer` uses
+  indirectly) deletes orphaned segment_ids.
+
+### T15. [DONE] [C6] Remove the silent-REPLACE fallback from `saveCheckpoint`
 - **Where:** `databasemanager.cpp:640–667`.
 - **Problem:** When `UPDATE` by id returns 0 rows (row deleted by retention
   cleanup or REPLACE from an earlier bug), the fallback `INSERT` can collide
@@ -376,7 +754,7 @@ contract.
   deleted out from under the tracker; verify the fallback re-inserts cleanly
   and the segment_id is preserved.
 
-### T16. [M2] Simplify `backpauseTimer` given stable ids
+### T16. [PARTIAL] [M2] Simplify `backpauseTimer` given stable ids
 - **Where:** `timetracker.cpp:241–253`.
 - **Problem:** `backpauseTimer` adds two segments (truncated Activity,
   Pause) then upserts. With start-time keying, a `cleanDurations`-induced
@@ -386,6 +764,14 @@ contract.
   new Pause segment is inserted with a fresh id. No silent REPLACE path.
   Remove the `current_checkpoint_id_ = -1` line and replace with an
   explicit "start new checkpoint for Pause" call.
+  **Done:** Activity segment now preserves its original segment_id, and a
+  new segment_id is created for the Pause segment. `updateDurationsInDB()`
+  is called to persist both segments.
+  **Remaining:** The flow does not use an explicit "start new checkpoint for
+  Pause" transition method. The code relies on inline segment_id assignment
+  and a bulk `updateDurationsInDB()` call rather than a structured
+  transition. Also partially blocked by T14 — orphaned checkpoint rows from
+  `cleanDurations` merges are not cleaned up.
 - **Tests:** Backpause scenario with a mocked lock-state watcher firing at
   a known time; verify exactly one Activity row and one Pause row land in
   the DB with distinct ids.
