@@ -776,7 +776,7 @@ contract.
 
 Independent of the schema rework but easier to land after it.
 
-### T17. [F4 / M1] Move session state into a dedicated struct
+### T17. [DONE] [F4 / M1] Move session state into a dedicated struct
 - **Where:** `timetracker.cpp` / `timetracker.h`.
 - **Problem:** `current_checkpoint_id_`, `segment_start_time_`,
   `has_unsaved_data_`, `durations_`, and timer objects are all raw fields

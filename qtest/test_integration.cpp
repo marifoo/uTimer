@@ -44,12 +44,12 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
         
         // Manually save checkpoint
         tracker.saveCheckpointInternal();
-        QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
-        orphanSegmentId = tracker.current_checkpoint_segment_id_;
+        QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+        orphanSegmentId = tracker.session_.current_checkpoint_segment_id;
 
         // Simulate an unclean shutdown: keep checkpoint row, skip graceful stop.
         tracker.mode_ = TimeTracker::Mode::None;
-        tracker.current_checkpoint_segment_id_.clear();
+        tracker.session_.current_checkpoint_segment_id.clear();
 
         // Simulate crash (tracker destroyed without stopping)
     }
@@ -90,8 +90,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_is_idempotent()
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal();
-        QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
-        tracker.current_checkpoint_segment_id_.clear();
+        QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+        tracker.session_.current_checkpoint_segment_id.clear();
         tracker.mode_ = TimeTracker::Mode::None;
     }
 
@@ -182,8 +182,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_present_is_s
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal();
-        QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
-        tracker.current_checkpoint_segment_id_.clear();
+        QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+        tracker.session_.current_checkpoint_segment_id.clear();
         tracker.mode_ = TimeTracker::Mode::None;
     }
 
@@ -214,8 +214,8 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_absent_shows
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal();
-        QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
-        tracker.current_checkpoint_segment_id_.clear();
+        QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+        tracker.session_.current_checkpoint_segment_id.clear();
         tracker.mode_ = TimeTracker::Mode::None;
     }
 
@@ -250,7 +250,7 @@ void IntegrationTest::test_integration_memory_db_consistency()
     
     // Save checkpoint
     tracker.saveCheckpointInternal();
-    QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
+    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
     
     // Stop
     tracker.useTimerViaButton(Button::Stop);
@@ -363,20 +363,20 @@ void IntegrationTest::test_integration_backpause_db_update()
     
     // Save checkpoint
     tracker.saveCheckpointInternal();
-    QString checkpointSegmentId = tracker.current_checkpoint_segment_id_;
+    QString checkpointSegmentId = tracker.session_.current_checkpoint_segment_id;
     QVERIFY(!checkpointSegmentId.isEmpty());
     
     // Simulate lock
     tracker.useTimerViaLockEvent(LockEvent::Lock);
     
     // Checkpoint ID should still be valid (lock doesn't reset it)
-    QCOMPARE(tracker.current_checkpoint_segment_id_, checkpointSegmentId);
+    QCOMPARE(tracker.session_.current_checkpoint_segment_id, checkpointSegmentId);
     
     // Simulate long ongoing lock (triggers backpause)
     tracker.useTimerViaLockEvent(LockEvent::LongOngoingLock);
     
     // Backpause transitions to Pause and starts a fresh segment identity.
-    QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
+    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
     
     // Verify durations were updated in DB
     DatabaseManager db(settings);

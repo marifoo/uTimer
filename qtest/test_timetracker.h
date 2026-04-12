@@ -23,6 +23,7 @@ private slots:
     void initTestCase();
     void cleanupTestCase();
     
+    // Existing TimeTracker tests
     void test_timetracker_start_pause_resume_stop_and_checkpoints();
     void test_timetracker_backpause_resets_checkpoint_and_splits();
     void test_timetracker_midnight_split_and_checkpoint_reset();
@@ -32,6 +33,23 @@ private slots:
     void test_timetracker_checkpoints_paused();
     void test_timetracker_retry_append_failure_then_success_preserves_segments();
     void test_timetracker_retry_failure_keeps_unsaved_state_and_durations();
+
+    // SessionState transition tests
+    void test_session_state_begin_new_segment();
+    void test_session_state_clear_segment();
+    void test_session_state_mark_and_clear_unsaved();
+    void test_session_state_reset_for_new_session();
+    void test_session_state_adopt_ongoing_segment();
+
+    // State transition tests for public TimeTracker methods
+    void test_session_state_start_to_pause_transition();
+    void test_session_state_pause_to_activity_transition();
+    void test_session_state_stop_clears_segment();
+
+    // computeMidnightSplit pure function tests
+    void test_compute_midnight_split_no_crossing();
+    void test_compute_midnight_split_crossing();
+    void test_compute_midnight_split_zero_duration();
 };
 
 #endif // TEST_TIMETRACKER_H

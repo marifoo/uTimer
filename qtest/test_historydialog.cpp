@@ -53,7 +53,7 @@ void HistoryDialogTest::test_historydialog_createPages_includes_current_db_ongoi
     TimeTracker tracker(settings);
 
     QDateTime now = QDateTime::currentDateTime();
-    tracker.durations_.push_back(TimeDuration(DurationType::Activity, now.addSecs(-120), now.addSecs(-60)));
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, now.addSecs(-120), now.addSecs(-60)));
 
     // Save a DB entry for today
     std::deque<TimeDuration> dbDurations;
@@ -85,7 +85,7 @@ void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_
     const QDateTime memoryStart = now.addSecs(-40).addMSecs(2);
     const QDateTime memoryEnd = now.addSecs(-10);
     const QString segmentId = TimeDuration::createSegmentId();
-    tracker.durations_.push_back(TimeDuration(DurationType::Activity, memoryStart, memoryEnd, segmentId));
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memoryStart, memoryEnd, segmentId));
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Activity, memoryStart.addMSecs(-2), memoryEnd, segmentId);
@@ -138,7 +138,7 @@ void HistoryDialogTest::test_historydialog_checkbox_toggle_updates_pending_and_t
     TimeTracker tracker(settings);
 
     QDateTime now = QDateTime::currentDateTime();
-    tracker.durations_.push_back(TimeDuration(DurationType::Activity, now.addSecs(-100), now.addSecs(-50)));
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, now.addSecs(-100), now.addSecs(-50)));
 
     HistoryDialog dialog(tracker, settings);
     dialog.show();
@@ -161,7 +161,7 @@ void HistoryDialogTest::test_historydialog_saveChanges_updates_timetracker_and_d
     TimeTracker tracker(settings);
 
     QDateTime now = QDateTime::currentDateTime();
-    tracker.durations_.push_back(TimeDuration(DurationType::Activity, now.addSecs(-200), now.addSecs(-150)));
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, now.addSecs(-200), now.addSecs(-150)));
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, now.addSecs(-140), now.addSecs(-120));
@@ -173,8 +173,8 @@ void HistoryDialogTest::test_historydialog_saveChanges_updates_timetracker_and_d
     dialog.done(QDialog::Accepted);
     dialog.saveChanges();
 
-    QCOMPARE(tracker.durations_.size(), static_cast<size_t>(1));
-    QCOMPARE(tracker.durations_[0].type, DurationType::Pause);
+    QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(1));
+    QCOMPARE(tracker.session_.durations[0].type, DurationType::Pause);
 
     DatabaseManager db(settings);
     auto loaded = db.loadDurations();
@@ -191,8 +191,8 @@ void HistoryDialogTest::test_historydialog_split_action_splits_row()
 
     QDateTime start = QDateTime::currentDateTime().addSecs(-10);
     QDateTime end = QDateTime::currentDateTime().addSecs(-4);
-    tracker.durations_.push_back(TimeDuration(DurationType::Activity, start, end));
-    const QString originalSegmentId = tracker.durations_.back().segment_id;
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, start, end));
+    const QString originalSegmentId = tracker.session_.durations.back().segment_id;
 
     HistoryDialog dialog(tracker, settings);
     dialog.contextMenuRow_ = 0;
@@ -237,7 +237,7 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
     const QDateTime dbStart = now.addSecs(-11);
     const QDateTime dbEnd = now.addSecs(-6);
 
-    tracker.durations_.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, dbStart, dbEnd);
@@ -272,10 +272,10 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
     dialog.done(QDialog::Accepted);
     dialog.saveChanges();
 
-    QCOMPARE(tracker.durations_.size(), static_cast<size_t>(2));
-    QCOMPARE(tracker.durations_[0].startTime, memStart);
-    QCOMPARE(tracker.durations_[1].endTime, memEnd);
-    QCOMPARE(tracker.durations_[0].endTime, tracker.durations_[1].startTime);
+    QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(2));
+    QCOMPARE(tracker.session_.durations[0].startTime, memStart);
+    QCOMPARE(tracker.session_.durations[1].endTime, memEnd);
+    QCOMPARE(tracker.session_.durations[0].endTime, tracker.session_.durations[1].startTime);
 
     DatabaseManager db(settings);
     auto loaded = db.loadDurations();
@@ -399,7 +399,7 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
     tracker.saveCheckpoint();
-    const QString oldCheckpointSegmentId = tracker.current_checkpoint_segment_id_;
+    const QString oldCheckpointSegmentId = tracker.session_.current_checkpoint_segment_id;
     QVERIFY(!oldCheckpointSegmentId.isEmpty());
 
     {
@@ -410,8 +410,8 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
         dialog.saveChanges();
     }
 
-    QVERIFY(!tracker.current_checkpoint_segment_id_.isEmpty());
-    QCOMPARE(tracker.current_checkpoint_segment_id_, oldCheckpointSegmentId);
+    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QCOMPARE(tracker.session_.current_checkpoint_segment_id, oldCheckpointSegmentId);
 
     QTest::qWait(20);
     tracker.saveCheckpoint();
@@ -528,8 +528,8 @@ void HistoryDialogTest::test_historydialog_save_keeps_db_rows_for_history_plus_c
     QVERIFY(tracker.replaceDurationsInDB(historicalRows, {}));
 
     const QDateTime now = QDateTime::currentDateTime();
-    tracker.durations_.push_back(TimeDuration(DurationType::Activity, now.addSecs(-30), now.addSecs(-20)));
-    tracker.durations_.push_back(TimeDuration(DurationType::Pause, now.addSecs(-20), now.addSecs(-10)));
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, now.addSecs(-30), now.addSecs(-20)));
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Pause, now.addSecs(-20), now.addSecs(-10)));
 
     const int expectedHistoryRows = 1;
     const int expectedCurrentSessionRows = 2;
@@ -576,7 +576,7 @@ void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_curren
         TimeTracker tracker(settings);
 
         const QDateTime now = QDateTime::currentDateTime();
-        tracker.durations_.push_back(TimeDuration(DurationType::Activity, now.addSecs(-15), now.addSecs(-5)));
+        tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, now.addSecs(-15), now.addSecs(-5)));
 
         HistoryDialog dialog(tracker, settings);
         dialog.done(QDialog::Accepted);
@@ -584,7 +584,7 @@ void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_curren
 
         // Simulate crash: skip graceful stop/finalize.
         tracker.mode_ = TimeTracker::Mode::None;
-        tracker.current_checkpoint_segment_id_.clear();
+        tracker.session_.current_checkpoint_segment_id.clear();
     }
 
     {
@@ -671,11 +671,11 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
     const QDateTime dbStart = now.addSecs(-19);
     const QDateTime dbEnd = now.addSecs(-10);
 
-    tracker.durations_.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
     const QString checkpointSegmentBeforeSave = "checkpoint-before-save";
     const QDateTime checkpointStartBeforeSave = now.addSecs(-5);
-    tracker.current_checkpoint_segment_id_ = checkpointSegmentBeforeSave;
-    tracker.segment_start_time_ = checkpointStartBeforeSave;
+    tracker.session_.current_checkpoint_segment_id = checkpointSegmentBeforeSave;
+    tracker.session_.segment_start_time = checkpointStartBeforeSave;
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, dbStart, dbEnd);
@@ -718,12 +718,12 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
     }
     QSqlDatabase::removeDatabase(lockConnName);
 
-    QCOMPARE(tracker.durations_.size(), static_cast<size_t>(1));
-    QCOMPARE(tracker.durations_[0].type, DurationType::Activity);
-    QCOMPARE(tracker.durations_[0].startTime, memStart);
-    QCOMPARE(tracker.durations_[0].endTime, memEnd);
-    QCOMPARE(tracker.current_checkpoint_segment_id_, checkpointSegmentBeforeSave);
-    QCOMPARE(tracker.segment_start_time_, checkpointStartBeforeSave);
+    QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(1));
+    QCOMPARE(tracker.session_.durations[0].type, DurationType::Activity);
+    QCOMPARE(tracker.session_.durations[0].startTime, memStart);
+    QCOMPARE(tracker.session_.durations[0].endTime, memEnd);
+    QCOMPARE(tracker.session_.current_checkpoint_segment_id, checkpointSegmentBeforeSave);
+    QCOMPARE(tracker.session_.segment_start_time, checkpointStartBeforeSave);
 
     const QString verifyConnName = "historydialog_save_failure_verify";
     {
