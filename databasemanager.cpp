@@ -546,7 +546,8 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
  * - Creates a file-level backup before starting.
  * - Rolls back the transaction on any error.
  */
-bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode)
+bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
+                                    const std::vector<QString>& removedSegmentIds)
 {
     // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
@@ -586,6 +587,23 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
             return false;
         }
 	}
+
+    // Delete orphaned segment_ids that were merged away by cleanDurations.
+    // This must happen inside the same transaction as the INSERT for atomicity.
+    if (!removedSegmentIds.empty()) {
+        QSqlQuery deleteOrphanQuery(db);
+        deleteOrphanQuery.prepare("DELETE FROM durations WHERE segment_id = :segment_id");
+        for (const auto& orphanId : removedSegmentIds) {
+            deleteOrphanQuery.bindValue(":segment_id", orphanId);
+            if (!deleteOrphanQuery.exec()) {
+                db.rollback();
+                if (settings_.logToFile())
+                    Logger::Log("[DB] Error deleting orphaned segment_id: " + deleteOrphanQuery.lastError().text());
+                lazyClose();
+                return false;
+            }
+        }
+    }
 
     // Prepare insert statement for batch insertion (storing times in UTC)
     QSqlQuery query(db);
@@ -991,7 +1009,8 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
  * - When the timer stops or pauses, we update existing segment rows by segment_id.
  * - If a segment row is missing, it is inserted with the same segment_id.
  */
-bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durations)
+bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durations,
+                                          const std::vector<QString>& removedSegmentIds)
 {
     if (durations.empty()) {
         return true;
@@ -1015,6 +1034,23 @@ bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durati
         }
         lazyClose();
         return false;
+    }
+
+    // Delete orphaned segment_ids that were merged away by cleanDurations.
+    // This must happen inside the same transaction as the UPDATE/INSERT for atomicity.
+    if (!removedSegmentIds.empty()) {
+        QSqlQuery deleteOrphanQuery(db);
+        deleteOrphanQuery.prepare("DELETE FROM durations WHERE segment_id = :segment_id");
+        for (const auto& orphanId : removedSegmentIds) {
+            deleteOrphanQuery.bindValue(":segment_id", orphanId);
+            if (!deleteOrphanQuery.exec()) {
+                db.rollback();
+                if (settings_.logToFile())
+                    Logger::Log("[DB] Error deleting orphaned segment_id: " + deleteOrphanQuery.lastError().text());
+                lazyClose();
+                return false;
+            }
+        }
     }
 
     QSqlQuery updateQuery(db);

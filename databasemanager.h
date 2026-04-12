@@ -43,13 +43,15 @@ public:
     explicit DatabaseManager(const Settings& settings, QObject *parent = nullptr);
     ~DatabaseManager();
 
-    bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode);
+    bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
+                       const std::vector<QString>& removedSegmentIds = {});
     bool replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
                               const std::deque<TimeDuration>& currentSessionDurations);
     LoadResult loadDurations();
     bool hasEntriesForDate(const QDate& date);
     bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId);
-    bool updateDurationsById(const std::deque<TimeDuration>& durations);
+    bool updateDurationsById(const std::deque<TimeDuration>& durations,
+                             const std::vector<QString>& removedSegmentIds = {});
     bool checkSchemaOnStartup(); // Returns true if schema is valid, false if outdated
     void flushToDisc(); // Force pending writes to disk (for shutdown safety)
     std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints();

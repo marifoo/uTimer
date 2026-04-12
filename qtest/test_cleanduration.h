@@ -30,6 +30,18 @@ private slots:
     void test_cleanDurations_presorted_mixedTypes_smallGaps_noChange();
     void test_cleanDurations_presorted_identicalTimes_differentTypes_keepBoth();
     void test_cleanDurations_differentTypesNotMerged();
+
+    // Tests for removed segment_id tracking (T14)
+    void test_cleanDurations_removedIds_empty_when_no_merge();
+    void test_cleanDurations_removedIds_branch1_nearDuplicate();
+    void test_cleanDurations_removedIds_branch2_currentStartsBeforePrevShorter();
+    void test_cleanDurations_removedIds_branch3_leftOverlapJoin();
+    void test_cleanDurations_removedIds_branch4_overlapExtendForward();
+    void test_cleanDurations_removedIds_branch5_subsetRemoval();
+    void test_cleanDurations_removedIds_branch6_smallGapMerge();
+    void test_cleanDurations_removedIds_branch7_slightOverlapMerge();
+    void test_cleanDurations_removedIds_chainMerge_returns_two_ids();
+    void test_cleanDurations_removedIds_single_entry_returns_empty();
 };
 
 #endif // TEST_CLEANDURATION_H

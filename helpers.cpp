@@ -1,6 +1,7 @@
 #include "helpers.h"
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 
 qint64 convMinToMsec(const int &minutes)
@@ -56,13 +57,15 @@ QString convTimeStrToDurationStr(const QString &time_str)
  * Note: After any merge, all three fields (startTime, endTime, duration) are updated
  * to maintain consistency.
  */
-void cleanDurations(std::deque<TimeDuration>* pDurations)
+std::vector<QString> cleanDurations(std::deque<TimeDuration>* pDurations)
 {
-	// Clean up duration entries by removing near-duplicates and merging adjacent entries of the same type
-	// This prevents database bloat from frequent timer operations
+	// Clean up duration entries by removing near-duplicates and merging adjacent entries of the same type.
+	// This prevents database bloat from frequent timer operations.
+	// Returns the segment_ids of entries that were merged away (orphaned from DB perspective).
+	std::vector<QString> removedIds;
 	auto& durations = *pDurations;
 	if (durations.size() < 2) {
-		return;
+		return removedIds;
 	}
 
 	// Ensure chronological order by start time, then end time. This makes merges deterministic.
@@ -91,14 +94,19 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 			const qint64 diff_dur = prevIt->duration - it->duration;
 			const qint64 gap = it_start - prev_end;
 
-			// Remove near-duplicate entries (within 50ms difference)
+			// Branch 1: Remove near-duplicate entries (within 50ms difference).
+			// The erased entry (it) is the orphan; prevIt keeps its segment_id.
 			if (std::abs(diff_end) < 50 && std::abs(diff_dur) < 50) {
+				removedIds.push_back(it->segment_id);
 				it = durations.erase(it);
 				continue;
 			}
 
-			// Current entry starts before previous (shorter) entry -> keep current's fields
+			// Branch 2: Current entry starts before previous (shorter) entry -> keep current's fields.
+			// The surviving entry (prevIt) adopts it->segment_id, so prevIt's ORIGINAL
+			// segment_id becomes the orphan. Capture it before the overwrite.
 			if (it_start < prev_start && prev_end <= it_end) {
+				removedIds.push_back(prevIt->segment_id);
 				prevIt->segment_id = it->segment_id;
 				prevIt->startTime = it->startTime;
 				prevIt->endTime = it->endTime;
@@ -107,8 +115,10 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 				continue;
 			}
 
-			// Current entry starts before previous (longer) entry -> join
+			// Branch 3: Current entry starts before previous (longer) entry -> join.
+			// Same pattern as branch 2: prevIt's ORIGINAL segment_id is the orphan.
 			if (it_start < prev_start && it_end < prev_end && it_start < prev_end) {
+				removedIds.push_back(prevIt->segment_id);
 				prevIt->segment_id = it->segment_id;
 				prevIt->startTime = it->startTime;
 				prevIt->duration = prev_end - it_start;
@@ -116,22 +126,28 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 				continue;
 			}
 
-			// Current entry start overlaps into previous entry -> join (includes touching)
+			// Branch 4: Current entry start overlaps into previous entry -> join (includes touching).
+			// The erased entry (it) is the orphan; prevIt keeps its segment_id.
 			if (prev_start <= it_start && it_start <= prev_end && prev_end <= it_end) {
+				removedIds.push_back(it->segment_id);
 				prevIt->endTime = it->endTime;
 				prevIt->duration = it_end - prev_start;
 				it = durations.erase(it);
 				continue;
 			}
 
-			// Current entry start is subset of previous entry -> delete
+			// Branch 5: Current entry start is subset of previous entry -> delete.
+			// The erased entry (it) is the orphan; prevIt keeps its segment_id.
 			if (prev_start <= it_start && it_start <= prev_end && it_end <= prev_end) {
+				removedIds.push_back(it->segment_id);
 				it = durations.erase(it);
 				continue;
 			}
 
-			// Merge adjacent (but disjoint) entries of same type with small gaps (less than 500ms)
+			// Branch 6: Merge adjacent (but disjoint) entries of same type with small gaps (less than 500ms).
+			// The erased entry (it) is the orphan; prevIt keeps its segment_id.
 			if (gap >= 0 && gap < 500) {
+				removedIds.push_back(it->segment_id);
 				// Keep prev's startTime, use it's endTime, recompute duration
 				prevIt->endTime = it->endTime;
 				prevIt->duration = prevIt->startTime.msecsTo(prevIt->endTime);
@@ -139,8 +155,10 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 				continue;
 			}
 
-			// Slightly overlapping entries shall be merged as well (less than 100ms overlap)
+			// Branch 7: Slightly overlapping entries shall be merged as well (less than 100ms overlap).
+			// The erased entry (it) is the orphan; prevIt keeps its segment_id.
 			if (gap < 0 && std::abs(gap) < 100) {
+				removedIds.push_back(it->segment_id);
 				prevIt->endTime = it->endTime;
 				prevIt->duration = prevIt->startTime.msecsTo(prevIt->endTime);
 				it = durations.erase(it);
@@ -149,4 +167,5 @@ void cleanDurations(std::deque<TimeDuration>* pDurations)
 		}
 		++it;
 	}
+	return removedIds;
 }

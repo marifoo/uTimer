@@ -7,6 +7,7 @@
 #include <QPushButton>
 #include <QColor>
 #include <deque>
+#include <vector>
 #include "types.h"
 
 
@@ -20,6 +21,6 @@ QString convMinAndSecToHourPctString(const int min, const int sec);
 
 QString convTimeStrToDurationStr(const QString &time_str);
 
-void cleanDurations(std::deque<TimeDuration>* pDurations);
+std::vector<QString> cleanDurations(std::deque<TimeDuration>* pDurations);
 
 #endif // HELPERS

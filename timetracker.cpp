@@ -560,12 +560,12 @@ bool TimeTracker::appendDurationsChunkToDB(const std::deque<TimeDuration>& durat
         return true;
     auto temp = durations;
     size_t original = temp.size();
-    cleanDurations(&temp);
+    auto removedIds = cleanDurations(&temp);
     if (settings_.logToFile() && original != temp.size()) {
         Logger::Log(QString("[DB] Cleaned session durations: %1 -> %2").arg(original).arg(temp.size()));
     }
     
-    return db_.saveDurations(temp, TransactionMode::Append);
+    return db_.saveDurations(temp, TransactionMode::Append, removedIds);
 }
 
 bool TimeTracker::updateDurationsInDB()
@@ -574,19 +574,21 @@ bool TimeTracker::updateDurationsInDB()
         return true;
     auto temp = durations_;
     size_t original = temp.size();
-    cleanDurations(&temp);
+    auto removedIds = cleanDurations(&temp);
     if (settings_.logToFile() && original != temp.size()) {
         Logger::Log(QString("[DB] Cleaned session durations for update: %1 -> %2").arg(original).arg(temp.size()));
     }
     
     // Use the separate update interface that matches existing entries by segment_id
-    return db_.updateDurationsById(temp);
+    return db_.updateDurationsById(temp, removedIds);
 }
 
 bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> historyDurations,
                                        std::deque<TimeDuration> currentSessionDurations)
 {
     size_t originalHistory = historyDurations.size();
+    // Return value ignored: replaceDurationsInDB wipes the entire table,
+    // so orphaned segment_ids are implicitly cleaned up by the DELETE FROM.
     cleanDurations(&historyDurations);
     if (settings_.logToFile() && originalHistory != historyDurations.size()) {
         Logger::Log(QString("[DB] Cleaned history durations for replace: %1 -> %2")
@@ -595,6 +597,7 @@ bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> historyDurations
     }
 
     size_t originalCurrent = currentSessionDurations.size();
+    // Return value ignored: same reasoning as above.
     cleanDurations(&currentSessionDurations);
     if (settings_.logToFile() && originalCurrent != currentSessionDurations.size()) {
         Logger::Log(QString("[DB] Cleaned current-session durations for replace: %1 -> %2")

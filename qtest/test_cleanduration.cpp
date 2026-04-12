@@ -1,7 +1,16 @@
 #include "test_cleanduration.h"
 #include <QtTest>
+#include <algorithm>
 
 using TestCommon::mk;
+
+// Helper: create a TimeDuration with a specific segment_id for ID-tracking tests
+static TimeDuration mkId(DurationType type, qint64 startMs, qint64 endMs, const QString& id)
+{
+    QDateTime start = QDateTime::fromMSecsSinceEpoch(startMs, Qt::UTC);
+    QDateTime end = QDateTime::fromMSecsSinceEpoch(endMs, Qt::UTC);
+    return TimeDuration(type, start, end, id);
+}
 
 void CleanDurationsTest::test_cleanDurations_duplicateRemoval()
 {
@@ -437,4 +446,233 @@ void CleanDurationsTest::test_cleanDurations_differentTypesNotMerged()
     QCOMPARE((int)d.size(), 2);
     QCOMPARE(d[0].type, DurationType::Activity);
     QCOMPARE(d[1].type, DurationType::Pause);
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Tests for removed segment_id tracking (T14)
+// ──────────────────────────────────────────────────────────────────
+
+void CleanDurationsTest::test_cleanDurations_removedIds_empty_when_no_merge()
+{
+    // Description: Two disjoint same-type entries with large gap -> no merge, empty removedIds
+
+    // Arrange
+    std::deque<TimeDuration> d;
+    d.push_back(mkId(DurationType::Activity, 0, 1000, "id-A"));
+    d.push_back(mkId(DurationType::Activity, 5000, 6000, "id-B"));
+
+    // Act
+    auto removed = cleanDurations(&d);
+
+    // Assert
+    QCOMPARE((int)d.size(), 2);
+    QVERIFY(removed.empty());
+}
+
+void CleanDurationsTest::test_cleanDurations_removedIds_branch1_nearDuplicate()
+{
+    // Description: Branch 1 — near-duplicate (<=50ms diff). The erased entry (it) is the orphan.
+
+    // Arrange
+    std::deque<TimeDuration> d;
+    d.push_back(mkId(DurationType::Activity, 0, 1000, "id-keep"));
+    d.push_back(mkId(DurationType::Activity, 10, 1020, "id-dup"));  // diff_end=20, diff_dur~=20
+    QCOMPARE((int)d.size(), 2);
+
+    // Act
+    auto removed = cleanDurations(&d);
+
+    // Assert
+    QCOMPARE((int)d.size(), 1);
+    QCOMPARE(d[0].segment_id, QString("id-keep"));
+    QCOMPARE((int)removed.size(), 1);
+    QCOMPARE(removed[0], QString("id-dup"));
+}
+
+void CleanDurationsTest::test_cleanDurations_removedIds_branch2_currentStartsBeforePrevShorter()
+{
+    // Description: Branches 2 and 3 require it_start < prev_start, which is unreachable
+    // after the ascending sort — no merge branch increases prevIt->startTime.
+    // These branches are defensive safety nets. This test exercises branch 5 (subset
+    // removal) instead, verifying that it->segment_id is correctly reported as removed
+    // when a shorter entry is fully contained in a longer one.
+
+    // Arrange: [100,500] fully contains [200,400] -> branch 5 fires
+    std::deque<TimeDuration> d;
+    d.push_back(mkId(DurationType::Activity, 100, 500, "id-big"));
+    d.push_back(mkId(DurationType::Activity, 200, 400, "id-subset"));
+    QCOMPARE((int)d.size(), 2);
+
+    // Act
+    auto removed = cleanDurations(&d);
+
+    // Assert: subset removed, big kept
+    QCOMPARE((int)d.size(), 1);
+    QCOMPARE(d[0].segment_id, QString("id-big"));
+    QCOMPARE((int)removed.size(), 1);
+    QCOMPARE(removed[0], QString("id-subset"));
+}
+
+void CleanDurationsTest::test_cleanDurations_removedIds_branch3_leftOverlapJoin()
+{
+    // Description: Branches 2 and 3 require it_start < prev_start, which is unreachable
+    // after the ascending sort — no merge branch increases prevIt->startTime.
+    // This test exercises branch 4 (overlap-extend-forward) instead, verifying that
+    // it->segment_id is correctly reported as removed when overlapping entries are joined.
+
+    // Arrange: [1000,1500] overlaps with [1400,1700] -> branch 4 fires (extend forward)
+    std::deque<TimeDuration> d;
+    d.push_back(mkId(DurationType::Activity, 1000, 1500, "id-prev"));
+    d.push_back(mkId(DurationType::Activity, 1400, 1700, "id-overlap"));
+    QCOMPARE((int)d.size(), 2);
+
+    // Act
+    auto removed = cleanDurations(&d);
+
+    // Assert: prevIt keeps its ID, it's ID is orphaned
+    QCOMPARE((int)d.size(), 1);
+    QCOMPARE(d[0].segment_id, QString("id-prev"));
+    QCOMPARE(d[0].endTime.toMSecsSinceEpoch(), (qint64)1700);
+    QCOMPARE(d[0].duration, (qint64)700);
+    QCOMPARE((int)removed.size(), 1);
+    QCOMPARE(removed[0], QString("id-overlap"));
+}
+
+void CleanDurationsTest::test_cleanDurations_removedIds_branch4_overlapExtendForward()
+{
+    // Description: Branch 4 — current overlaps into prev and extends beyond (includes touching).
+    // The erased entry (it) is the orphan; prevIt keeps its segment_id.
+
+    // Arrange: [0,1000] touching [1000,1500] -> branch 4 fires
+    std::deque<TimeDuration> d;
+    d.push_back(mkId(DurationType::Activity, 0, 1000, "id-first"));
+    d.push_back(mkId(DurationType::Activity, 1000, 1500, "id-second"));
+    QCOMPARE((int)d.size(), 2);
+
+    // Act
+    auto removed = cleanDurations(&d);
+
+    // Assert
+    QCOMPARE((int)d.size(), 1);
+    QCOMPARE(d[0].segment_id, QString("id-first"));
+    QCOMPARE(d[0].endTime.toMSecsSinceEpoch(), (qint64)1500);
+    QCOMPARE(d[0].duration, (qint64)1500);
+    QCOMPARE((int)removed.size(), 1);
+    QCOMPARE(removed[0], QString("id-second"));
+}
+
+void CleanDurationsTest::test_cleanDurations_removedIds_branch5_subsetRemoval()
+{
+    // Description: Branch 5 — current is a subset of previous -> erase current.
+    // The erased entry (it) is the orphan; prevIt keeps its segment_id.
+
+    // Arrange: [1000,3000] contains [1500,2500]
+    std::deque<TimeDuration> d;
+    d.push_back(mkId(DurationType::Activity, 1000, 3000, "id-outer"));
+    d.push_back(mkId(DurationType::Activity, 1500, 2500, "id-inner"));
+    QCOMPARE((int)d.size(), 2);
+
+    // Act
+    auto removed = cleanDurations(&d);
+
+    // Assert
+    QCOMPARE((int)d.size(), 1);
+    QCOMPARE(d[0].segment_id, QString("id-outer"));
+    QCOMPARE(d[0].duration, (qint64)2000);
+    QCOMPARE((int)removed.size(), 1);
+    QCOMPARE(removed[0], QString("id-inner"));
+}
+
+void CleanDurationsTest::test_cleanDurations_removedIds_branch6_smallGapMerge()
+{
+    // Description: Branch 6 — adjacent disjoint entries with gap < 500ms -> merge.
+    // The erased entry (it) is the orphan; prevIt keeps its segment_id.
+
+    // Arrange: [0,1000] and [1200,2000] -> gap=200 < 500 -> merge
+    std::deque<TimeDuration> d;
+    d.push_back(mkId(DurationType::Activity, 0, 1000, "id-left"));
+    d.push_back(mkId(DurationType::Activity, 1200, 2000, "id-right"));
+    QCOMPARE((int)d.size(), 2);
+
+    // Act
+    auto removed = cleanDurations(&d);
+
+    // Assert
+    QCOMPARE((int)d.size(), 1);
+    QCOMPARE(d[0].segment_id, QString("id-left"));
+    QCOMPARE(d[0].endTime.toMSecsSinceEpoch(), (qint64)2000);
+    QCOMPARE(d[0].duration, (qint64)2000);
+    QCOMPARE((int)removed.size(), 1);
+    QCOMPARE(removed[0], QString("id-right"));
+}
+
+void CleanDurationsTest::test_cleanDurations_removedIds_branch7_slightOverlapMerge()
+{
+    // Description: Branch 7 handles slight overlaps (gap < 0, abs < 100ms), but branches 4
+    // and 5 catch all cases where it_start <= prev_end first, making branch 7 unreachable
+    // after the ascending sort. This test exercises branch 4 with a slight overlap scenario,
+    // verifying correct ID tracking when entries overlap by a small amount.
+
+    // Arrange: [0,1000] and [950,1800] -> branch 4 fires (it_start 950 <= prev_end 1000,
+    // prev_end 1000 <= it_end 1800)
+    std::deque<TimeDuration> d;
+    d.push_back(mkId(DurationType::Activity, 0, 1000, "id-first"));
+    d.push_back(mkId(DurationType::Activity, 950, 1800, "id-second"));
+    QCOMPARE((int)d.size(), 2);
+
+    // Act
+    auto removed = cleanDurations(&d);
+
+    // Assert
+    QCOMPARE((int)d.size(), 1);
+    QCOMPARE(d[0].segment_id, QString("id-first"));
+    QCOMPARE(d[0].endTime.toMSecsSinceEpoch(), (qint64)1800);
+    QCOMPARE(d[0].duration, (qint64)1800);
+    QCOMPARE((int)removed.size(), 1);
+    QCOMPARE(removed[0], QString("id-second"));
+}
+
+void CleanDurationsTest::test_cleanDurations_removedIds_chainMerge_returns_two_ids()
+{
+    // Description: Three entries merged into one via chain merge -> two IDs returned.
+    // [0,1000] + [1050,2000] (gap=50 < 500, branch 6) + [2100,3000] (gap=100 < 500, branch 6)
+    // First merge: id-B removed, prevIt=[0,2000,id-A]. Second merge: id-C removed.
+
+    // Arrange
+    std::deque<TimeDuration> d;
+    d.push_back(mkId(DurationType::Activity, 0, 1000, "id-A"));
+    d.push_back(mkId(DurationType::Activity, 1050, 2000, "id-B"));
+    d.push_back(mkId(DurationType::Activity, 2100, 3000, "id-C"));
+    QCOMPARE((int)d.size(), 3);
+
+    // Act
+    auto removed = cleanDurations(&d);
+
+    // Assert: one surviving entry with id-A, two removed
+    QCOMPARE((int)d.size(), 1);
+    QCOMPARE(d[0].segment_id, QString("id-A"));
+    QCOMPARE(d[0].endTime.toMSecsSinceEpoch(), (qint64)3000);
+    QCOMPARE(d[0].duration, (qint64)3000);
+    QCOMPARE((int)removed.size(), 2);
+    // Both id-B and id-C should be in removed (order matches iteration order)
+    QVERIFY(std::find(removed.begin(), removed.end(), QString("id-B")) != removed.end());
+    QVERIFY(std::find(removed.begin(), removed.end(), QString("id-C")) != removed.end());
+}
+
+void CleanDurationsTest::test_cleanDurations_removedIds_single_entry_returns_empty()
+{
+    // Description: Single entry -> nothing to merge, removedIds is empty
+
+    // Arrange
+    std::deque<TimeDuration> d;
+    d.push_back(mkId(DurationType::Activity, 0, 1000, "id-only"));
+    QCOMPARE((int)d.size(), 1);
+
+    // Act
+    auto removed = cleanDurations(&d);
+
+    // Assert
+    QCOMPARE((int)d.size(), 1);
+    QCOMPARE(d[0].segment_id, QString("id-only"));
+    QVERIFY(removed.empty());
 }

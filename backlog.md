@@ -307,7 +307,7 @@ Addresses **F1**, **F2**, and the upsert-by-start-time class of bugs
 stable before starting this phase because it rewrites the persistence
 contract.
 
-### T13. [PARTIAL] [F1] Introduce stable `segment_id` as the row identity
+### T13. [DONE] [F1] Introduce stable `segment_id` as the row identity
 - **Where:** `databasemanager.cpp:101` (schema), all write paths, all upsert
   sites, `TimeTracker::durations_` container, `Duration` struct.
 - **Problem:** The `UNIQUE(start_date, start_time, type) ON CONFLICT REPLACE`
@@ -334,14 +334,13 @@ contract.
        the id) and `INSERT` a fresh row. Never silently `REPLACE`.
      - `replaceDurationsInDB`: still wipes and rewrites, but preserves
        `segment_id` from each input row.
-  5. [OPEN] **`cleanDurations`:** now free to merge/reassign start times; merges
+  5. [DONE] **`cleanDurations`:** now free to merge/reassign start times; merges
      must choose one surviving `segment_id` (the earlier one) and the
      caller is responsible for DELETE-ing rows for any `segment_id` that
      disappeared (pass a `removed_ids` out-param).
-     **Remaining:** `cleanDurations` still silently erases merged entries
-     without tracking which segment_ids were removed. Callers do not issue
-     `DELETE FROM durations WHERE segment_id IN (...)` for merged-away rows.
-     This is the same gap as T14 — blocked on T14 being implemented.
+     Implemented in T14: `cleanDurations` returns `std::vector<QString>` of
+     removed segment_ids; callers #1 and #2 pass them to DB methods which
+     delete them atomically inside the same transaction.
   6. [DONE] Delete `current_checkpoint_id_` entirely — replace with
      `current_checkpoint_segment_id_`.
 - **Dependencies:** T4 (is_finalized) should land first so we only migrate
@@ -507,7 +506,7 @@ contract.
   T13 itself — T13's done steps (1–4, 6) already provide everything
   T6 and T16 need from the segment_id infrastructure.
 
-### T14. [F2] Make `cleanDurations` honor segment identity
+### T14. [DONE] [F2] Make `cleanDurations` honor segment identity
 - **Where:** `helpers.cpp:59–152` (full function), `helpers.h:23`.
 - **Problem:** `cleanDurations` mutates `prevIt->startTime` in merge branches.
   That was safe when there were no DB rows keyed by startTime; after T13 it
