@@ -22,6 +22,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QApplication>
+#include <QFileInfo>
 #include "helpers.h"
 #include "logger.h"
 #include <QSlider>
@@ -179,6 +180,11 @@ void HistoryDialog::setupUI()
     loadReconciliationLabel_ = new QLabel(this);
     loadReconciliationLabel_->setWordWrap(true);
     loadReconciliationLabel_->setStyleSheet("QLabel { color: #9A6B00; }");
+    // Rich text enables the clickable log-file link embedded by buildLoadReconciliationMessage().
+    // setOpenExternalLinks delegates the click to QDesktopServices::openUrl(), which
+    // hands "file:///" URLs to the OS file manager without extra plumbing.
+    loadReconciliationLabel_->setTextFormat(Qt::RichText);
+    loadReconciliationLabel_->setOpenExternalLinks(true);
     const QString reconciliationMessage = buildLoadReconciliationMessage();
     loadReconciliationLabel_->setText(reconciliationMessage);
     loadReconciliationLabel_->setVisible(!reconciliationMessage.isEmpty());
@@ -223,6 +229,14 @@ void HistoryDialog::setupUI()
     resize(400, 400);
 }
 
+/**
+ * Builds the banner message shown when loadDurations encountered corrupt rows.
+ *
+ * If debug logging is enabled and the log file exists on disk, appends an HTML
+ * anchor so the user can click through to the log for details. The label is
+ * configured for Rich Text and external-link handling in setupUI(), so the
+ * anchor is opened by the OS file manager / text editor automatically.
+ */
 QString HistoryDialog::buildLoadReconciliationMessage() const
 {
     const auto [skipped, repaired] = timetracker_.getLastHistoryLoadStats();
@@ -230,9 +244,22 @@ QString HistoryDialog::buildLoadReconciliationMessage() const
         return QString();
     }
 
-    return QString("%1 rows skipped due to corrupt data, %2 rows auto-repaired.")
+    QString message = QString("%1 rows skipped due to corrupt data, %2 rows auto-repaired.")
         .arg(skipped)
         .arg(repaired);
+
+    // Append a clickable link to the log file when logging is active and
+    // the file actually exists. This lets the user inspect skip/repair
+    // details without hunting for the file manually.
+    if (settings_.logToFile()) {
+        const QString logPath = Logger::logFilePath();
+        if (QFileInfo::exists(logPath)) {
+            message += QString("<br><a href=\"file:///%1\">Open log file</a>")
+                .arg(logPath);
+        }
+    }
+
+    return message;
 }
 
 QString HistoryDialog::getLoadReconciliationMessage() const

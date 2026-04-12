@@ -19,6 +19,11 @@ void Logger::Log(const QString &text)
     L.log(text);
 }
 
+QString Logger::logFilePath()
+{
+    return QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.log");
+}
+
 void Logger::log(const QString &text)
 {
     const QString msg = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz: ") + text + "\n";

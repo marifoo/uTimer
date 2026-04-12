@@ -14,6 +14,9 @@ class Logger
 
 public:
 	static void Log(const QString & text);
+	/// Returns the absolute path to the log file (applicationDir/uTimer.log).
+	/// This is a pure path computation — does not check if the file exists.
+	static QString logFilePath();
 	~Logger();
 };
 
