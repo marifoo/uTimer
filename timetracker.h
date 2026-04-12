@@ -169,6 +169,14 @@ private:
         StateSnapshot entry_;
         bool transitioned_ = false;
     };
+
+    /// Checks structural invariants on session_.durations:
+    ///   - Segment ordering: startTimes are non-decreasing
+    ///   - No overlapping segments of the same type on the same day
+    ///   - All segment_ids are non-empty
+    /// Violations are logged via qWarning (not fatal) so they are visible
+    /// in test output and debug runs without crashing the application.
+    void checkDurationInvariants() const;
 #endif // QT_NO_DEBUG
 
 public:

@@ -1,6 +1,6 @@
 TARGET = qtest
 TEMPLATE = app
-CONFIG += qt console c++17
+CONFIG += qt console c++17 debug
 QT += testlib widgets sql
 
 # Platform-specific configuration

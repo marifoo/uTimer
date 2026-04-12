@@ -256,6 +256,47 @@ void DatabaseManager::lazyClose()
     }
 }
 
+// ============================================================================
+// Debug-build database invariant checking
+// ============================================================================
+
+#ifndef QT_NO_DEBUG
+
+/**
+ * Verifies that no segment_id appears more than once in the durations table.
+ *
+ * Called after every successful write operation in debug builds. The
+ * UNIQUE(segment_id) constraint should prevent duplicates at the schema
+ * level, but this check catches bugs where a write path accidentally
+ * inserts a row without going through the constraint (e.g. using a
+ * different table name, or a migration path that bypasses the constraint).
+ *
+ * The database must be open when this is called.  Violations are logged
+ * via qWarning (not fatal) so they surface in test output.
+ */
+void DatabaseManager::checkSegmentIdUniqueness()
+{
+    if (!db.isOpen()) {
+        return;
+    }
+
+    QSqlQuery query(db);
+    if (!query.exec("SELECT segment_id, COUNT(*) as cnt FROM durations GROUP BY segment_id HAVING COUNT(*) > 1")) {
+        qWarning("[INVARIANT-DB] Failed to run segment_id uniqueness check: %s",
+                 qPrintable(query.lastError().text()));
+        return;
+    }
+
+    while (query.next()) {
+        QString segId = query.value(0).toString();
+        int count = query.value(1).toInt();
+        qWarning("[INVARIANT-DB] Duplicate segment_id detected: '%s' appears %d times",
+                 qPrintable(segId), count);
+    }
+}
+
+#endif // QT_NO_DEBUG
+
 /**
  * Public method to check schema validity on application startup.
  *
@@ -703,6 +744,12 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
         Logger::Log("[DB] Error committing save transaction: " + db.lastError().text());
     }
 
+#ifndef QT_NO_DEBUG
+    if (commitSuccessful) {
+        checkSegmentIdUniqueness();
+    }
+#endif
+
     lazyClose();
 
     return commitSuccessful;
@@ -812,6 +859,12 @@ bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& histo
     if (!success && settings_.logToFile()) {
         Logger::Log("[DB] Error committing replace transaction: " + db.lastError().text());
     }
+
+#ifndef QT_NO_DEBUG
+    if (success) {
+        checkSegmentIdUniqueness();
+    }
+#endif
 
     lazyClose();
     return success;
@@ -1085,6 +1138,12 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
         }
     }
 
+#ifndef QT_NO_DEBUG
+    if (success) {
+        checkSegmentIdUniqueness();
+    }
+#endif
+
     lazyClose();
     return success;
 }
@@ -1210,6 +1269,12 @@ bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durati
     } else if (!success && settings_.logToFile()) {
         Logger::Log("[DB] Error committing update transaction: " + db.lastError().text());
     }
+
+#ifndef QT_NO_DEBUG
+    if (success) {
+        checkSegmentIdUniqueness();
+    }
+#endif
 
     lazyClose();
     return success;

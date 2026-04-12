@@ -56,6 +56,14 @@ private:
     bool ensureSettingsTable();
     bool createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
 
+#ifndef QT_NO_DEBUG
+    /// Debug-build verification: checks that no segment_id appears more than
+    /// once in the durations table.  Called after every successful write
+    /// operation.  Violations are logged via qWarning (not fatal).
+    /// The database must be open when this is called.
+    void checkSegmentIdUniqueness();
+#endif
+
     // Ensures retention cleanup (DELETE of entries older than history_days_to_keep_)
     // runs at most once per application session.  Set to true after a successful
     // cleanup; left false on failure so the next lazyOpen() retries automatically.

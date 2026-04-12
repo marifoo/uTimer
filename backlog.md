@@ -941,7 +941,7 @@ coming back.
 - **Tests:** This *is* the test infrastructure. Cover under every Phase
   1–6 item above.
 
-### T28. Add invariant checks in debug builds
+### T28. [DONE] Add invariant checks in debug builds
 - **Fix:**
   1. `TimeTracker`: after every public method, assert `durations_.size()
      >= 0`, segment ordering is non-decreasing, no overlapping segments

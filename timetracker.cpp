@@ -169,6 +169,67 @@ void TimeTracker::StateGuard::markTransitioned()
     transitioned_ = true;
 }
 
+/**
+ * Checks structural invariants on the in-memory duration segments.
+ *
+ * This runs after every public method in debug builds. It catches
+ * data-structure corruption early — before it propagates to the DB
+ * or produces confusing UI behavior. Violations are logged as warnings
+ * (not fatal) so tests surface them as QWARN output.
+ *
+ * Invariants checked:
+ *   1. Segment ordering: startTimes must be non-decreasing.
+ *   2. No overlapping segments of the same type on the same day.
+ *   3. All segment_ids must be non-empty.
+ */
+void TimeTracker::checkDurationInvariants() const
+{
+    const auto& durations = session_.durations;
+    if (durations.empty()) {
+        return;
+    }
+
+    for (size_t i = 0; i < durations.size(); ++i) {
+        // Invariant 3: All segment_ids must be non-empty
+        if (durations[i].segment_id.isEmpty()) {
+            qWarning("[INVARIANT] Duration at index %zu has empty segment_id "
+                     "(type=%d, start=%s, end=%s)",
+                     i,
+                     static_cast<int>(durations[i].type),
+                     qPrintable(durations[i].startTime.toString(Qt::ISODate)),
+                     qPrintable(durations[i].endTime.toString(Qt::ISODate)));
+        }
+
+        if (i == 0) {
+            continue;
+        }
+
+        // Invariant 1: startTimes must be non-decreasing
+        if (durations[i].startTime < durations[i - 1].startTime) {
+            qWarning("[INVARIANT] Segment ordering violation at index %zu: "
+                     "startTime %s < previous startTime %s",
+                     i,
+                     qPrintable(durations[i].startTime.toString(Qt::ISODate)),
+                     qPrintable(durations[i - 1].startTime.toString(Qt::ISODate)));
+        }
+
+        // Invariant 2: No overlapping segments of the same type on the same day
+        if (durations[i].type == durations[i - 1].type
+            && durations[i].startTime.date() == durations[i - 1].startTime.date()
+            && durations[i].startTime < durations[i - 1].endTime) {
+            qWarning("[INVARIANT] Overlapping same-type segments on %s at indices %zu and %zu: "
+                     "prev=[%s..%s], curr=[%s..%s], type=%s",
+                     qPrintable(durations[i].startTime.date().toString(Qt::ISODate)),
+                     i - 1, i,
+                     qPrintable(durations[i - 1].startTime.toString(Qt::ISODateWithMs)),
+                     qPrintable(durations[i - 1].endTime.toString(Qt::ISODateWithMs)),
+                     qPrintable(durations[i].startTime.toString(Qt::ISODateWithMs)),
+                     qPrintable(durations[i].endTime.toString(Qt::ISODateWithMs)),
+                     durations[i].type == DurationType::Activity ? "Activity" : "Pause");
+        }
+    }
+}
+
 #endif // QT_NO_DEBUG
 
 // ============================================================================
@@ -527,6 +588,9 @@ void TimeTracker::useTimerViaButton(Button button)
         case Button::Pause: pauseTimer(now); break;
         case Button::Stop:  stopTimer(now);  break;
     }
+#ifndef QT_NO_DEBUG
+    checkDurationInvariants();
+#endif
 }
 
 /**
@@ -587,6 +651,9 @@ void TimeTracker::useTimerViaLockEvent(LockEvent event)
         }
         was_active_before_autopause_ = false;
     }
+#ifndef QT_NO_DEBUG
+    checkDurationInvariants();
+#endif
 }
 
 qint64 TimeTracker::getActiveTime() const
@@ -634,6 +701,9 @@ void TimeTracker::setDurationType(size_t idx, DurationType type)
     } else if (settings_.logToFile()) {
         Logger::Log(QString("[TIMER] Invalid index %1 for setDurationType (size %2)").arg(idx).arg(session_.durations.size()));
     }
+#ifndef QT_NO_DEBUG
+    checkDurationInvariants();
+#endif
 }
 
 /**
@@ -668,6 +738,9 @@ void TimeTracker::replaceCurrentDurations(const std::deque<TimeDuration>& newDur
     session_.durations = newDurations;
 
     if (!ongoing.has_value()) {
+#ifndef QT_NO_DEBUG
+        checkDurationInvariants();
+#endif
         return;
     }
 
@@ -675,10 +748,16 @@ void TimeTracker::replaceCurrentDurations(const std::deque<TimeDuration>& newDur
     session_.adoptOngoingSegment(seg, settings_);
 
     if (checkpoint_interval_msec_ == 0 || mode_ != Mode::Activity || seg.type != DurationType::Activity) {
+#ifndef QT_NO_DEBUG
+        checkDurationInvariants();
+#endif
         return;
     }
 
     if (seg.duration <= 0 || !seg.startTime.isValid() || !seg.endTime.isValid()) {
+#ifndef QT_NO_DEBUG
+        checkDurationInvariants();
+#endif
         return;
     }
 
@@ -687,6 +766,9 @@ void TimeTracker::replaceCurrentDurations(const std::deque<TimeDuration>& newDur
                        seg.startTime,
                        seg.endTime,
                        session_.current_checkpoint_segment_id);
+#ifndef QT_NO_DEBUG
+    checkDurationInvariants();
+#endif
 }
 
 std::deque<TimeDuration> TimeTracker::getDurationsHistory()
