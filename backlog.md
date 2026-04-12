@@ -185,10 +185,10 @@ of failures. They depend on Phase 1 being done but can overlap with Phase 2.
      refreshes `segment_start_time_ = ongoing.startTime`, and re-issues one
      `saveCheckpoint` call immediately so the DB row representing the ongoing
      segment is rebuilt with a fresh, valid id.
-  2. [OPEN] Extend `setCurrentDurations` signature so callers must pass the new
-     ongoing duration explicitly (or make `resetCheckpointTrackingForOngoing`
-     the *only* way to set current durations from outside the class) and
-     route `HistoryDialog::saveChanges` through it.
+  2. [DONE] Merged `setCurrentDurations` and `resetCheckpointTrackingForOngoing`
+     into a single public method `replaceCurrentDurations(durations, ongoing)`.
+     The old `setCurrentDurations` was removed entirely. Callers can no longer
+     forget to reset checkpoint tracking — the compiler enforces it.
      **Remaining:** `setCurrentDurations` still has its original loose
      signature. Callers must remember to call `resetCheckpointTrackingForOngoing`
      separately — this is convention-enforced, not compiler-enforced. Either
@@ -494,9 +494,10 @@ contract.
 
   #### T6/T16 dependency status
 
-  - **T6 step 2 [OPEN]:** "Extend `setCurrentDurations` signature…" This
-    is a pure API design item (tightening the calling convention). It is
-    NOT blocked on T13 or T14. It can be done independently.
+  - **T6 step 2 [DONE]:** Merged `setCurrentDurations` and
+    `resetCheckpointTrackingForOngoing` into `replaceCurrentDurations`.
+    The compiler now enforces that checkpoint tracking is always reset
+    when durations are replaced externally.
 
   - **T16 "Remaining" [OPEN]:** Two sub-items:
     1. "The flow does not use an explicit 'start new checkpoint for Pause'

@@ -441,33 +441,56 @@ void TimeTracker::setDurationType(size_t idx, DurationType type)
     }
 }
 
-void TimeTracker::setCurrentDurations(const std::deque<TimeDuration>& newDurations)
+/**
+ * Atomically replaces the in-memory durations and resets checkpoint tracking.
+ *
+ * This is the sole external entry point for overwriting durations_ from outside
+ * TimeTracker (e.g., when HistoryDialog saves edits). It couples the two operations
+ * that must always happen together:
+ *   1. Replace the completed-segment deque.
+ *   2. Re-anchor checkpoint tracking so the next checkpoint targets the correct
+ *      DB row and wall-clock range for the ongoing segment.
+ *
+ * Without the coupling, a caller could replace durations_ but forget to reset
+ * checkpoint tracking, causing stale segment IDs or start times to persist — a
+ * bug that the compiler cannot catch if the operations are separate public methods.
+ *
+ * @param newDurations  Completed segments to replace durations_ with.
+ * @param ongoing       The currently running segment (if any). When provided,
+ *                      checkpoint tracking (segment ID, start time, DB row) is
+ *                      re-anchored to this segment. When std::nullopt, checkpoint
+ *                      tracking state is left unchanged (appropriate when the timer
+ *                      is stopped and there is no ongoing segment).
+ */
+void TimeTracker::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
+                                          const std::optional<TimeDuration>& ongoing)
 {
     QMutexLocker locker(&mutex_);
     durations_ = newDurations;
-}
 
-void TimeTracker::resetCheckpointTrackingForOngoing(const TimeDuration& ongoing)
-{
-    QMutexLocker locker(&mutex_);
+    if (!ongoing.has_value()) {
+        return;
+    }
 
-    current_checkpoint_segment_id_ = ongoing.segment_id.isEmpty()
+    const TimeDuration& seg = ongoing.value();
+
+    current_checkpoint_segment_id_ = seg.segment_id.isEmpty()
         ? TimeDuration::createSegmentId()
-        : ongoing.segment_id;
-    segment_start_time_ = ongoing.startTime;
+        : seg.segment_id;
+    segment_start_time_ = seg.startTime;
 
-    if (checkpoint_interval_msec_ == 0 || mode_ != Mode::Activity || ongoing.type != DurationType::Activity) {
+    if (checkpoint_interval_msec_ == 0 || mode_ != Mode::Activity || seg.type != DurationType::Activity) {
         return;
     }
 
-    if (ongoing.duration <= 0 || !ongoing.startTime.isValid() || !ongoing.endTime.isValid()) {
+    if (seg.duration <= 0 || !seg.startTime.isValid() || !seg.endTime.isValid()) {
         return;
     }
 
-    db_.saveCheckpoint(ongoing.type,
-                       ongoing.duration,
-                       ongoing.startTime,
-                       ongoing.endTime,
+    db_.saveCheckpoint(seg.type,
+                       seg.duration,
+                       seg.startTime,
+                       seg.endTime,
                        current_checkpoint_segment_id_);
 }
 

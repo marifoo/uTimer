@@ -559,16 +559,12 @@ void HistoryDialog::saveChanges()
         return;
     }
 
-    timetracker_.setCurrentDurations(currentMemoryDurations);
+    // Atomically update TimeTracker's in-memory durations and checkpoint tracking.
+    // replaceCurrentDurations couples both operations so callers cannot forget to
+    // reset checkpoint tracking after replacing durations — the compiler enforces it.
+    timetracker_.replaceCurrentDurations(currentMemoryDurations, ongoingDurationForSave);
     if (settings_.logToFile()) {
-        Logger::Log("[HISTORY] Updated TimeTracker current session (in-memory)");
-    }
-
-    if (ongoingDurationForSave.has_value()) {
-        timetracker_.resetCheckpointTrackingForOngoing(ongoingDurationForSave.value());
-        if (settings_.logToFile()) {
-            Logger::Log("[HISTORY] Reset checkpoint tracking for ongoing segment");
-        }
+        Logger::Log("[HISTORY] Updated TimeTracker current session and checkpoint tracking");
     }
 }
 

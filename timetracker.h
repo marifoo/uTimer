@@ -60,8 +60,8 @@ public:
     qint64 getActiveTime() const;
     qint64 getPauseTime() const;
     const std::deque<TimeDuration>& getCurrentDurations() const;
-    void setCurrentDurations(const std::deque<TimeDuration>& newDurations);
-    void resetCheckpointTrackingForOngoing(const TimeDuration& ongoing);
+    void replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
+                                 const std::optional<TimeDuration>& ongoing = std::nullopt);
     std::deque<TimeDuration> getDurationsHistory();
     std::pair<int, int> getLastHistoryLoadStats() const;
     std::optional<TimeDuration> getOngoingDuration() const;
