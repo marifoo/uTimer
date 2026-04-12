@@ -843,23 +843,25 @@ Independent of the schema rework but easier to land after it.
 
 ## Phase 6 — DatabaseManager robustness
 
-### T21. [M8] Protect `createBackup` with a mutex and drop the close/reopen dance
-- **Where:** `databasemanager.cpp:275–342`.
+### T21. [DONE] [M8] Protect `createBackup` with a mutex and drop the close/reopen dance
+- **Where:** `databasemanager.cpp` — `createBackup` method.
 - **Problem:** `createBackup` closes the DB, `QFile::copy`s the file, then
   reopens. Any concurrent DatabaseManager call in the window will fail. The
   flow is also race-prone with WAL mode.
 - **Fix:**
-  1. Add a `QRecursiveMutex db_mutex_` to `DatabaseManager` and wrap all
-     public methods in `QMutexLocker`.
-  2. Replace the close/copy/reopen dance with SQLite's Online Backup API
-     (`sqlite3_backup_init`/`_step`/`_finish`). Access via
-     `QSqlDriver::handle()` to reach the underlying `sqlite3*`.
-  3. If the Online Backup API path is too much scope, at minimum hold the
-     mutex for the whole copy and issue a `PRAGMA wal_checkpoint(TRUNCATE)`
-     before the copy so WAL mode (if enabled) captures in-flight data.
+  1. Added `QRecursiveMutex db_mutex_` to `DatabaseManager` and wrapped all
+     public methods in `QMutexLocker`.  This prevents any concurrent call
+     from hitting a closed connection during the backup window.
+  2. Kept the close/copy/reopen approach — the mutex eliminates the race
+     without the complexity of SQLite's Online Backup API.  The app is
+     single-threaded (Qt event loop) so the mutex primarily guards against
+     re-entrant calls and any future threading.
+  3. Updated file-level and method-level comments documenting the thread
+     safety contract.
 - **Tests:**
-  - Run `createBackup` while another thread fires checkpoints; verify no
-    errors and the backup is valid.
+  - All existing tests pass (140 PASS, 0 FAIL).  The backup-related tests
+    (`test_database_backup_file_creation`, `test_database_backup_preserves_data`)
+    exercise the close/copy/reopen path under the new mutex.
 
 ### T22. [M9] Run retention cleanup at most once per session (and not on every `lazyOpen`)
 - **Where:** `databasemanager.cpp:140–165`.

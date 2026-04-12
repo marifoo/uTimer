@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QSqlDatabase>
 #include <QDateTime>
+#include <QMutex>
 #include <deque>
 #include <vector>
 #include <optional>
@@ -63,6 +64,15 @@ private:
     QSqlDatabase db;
     uint history_days_to_keep_;
     const Settings& settings_;
+
+    // Guards all public entry points so that no two operations can interleave.
+    // This is particularly important for createBackup(), which closes and
+    // reopens the database file: the mutex prevents any concurrent call from
+    // hitting a closed connection during that window.  QRecursiveMutex is used
+    // because public methods may call each other (e.g. saveDurations →
+    // createBackup) and we must not deadlock on re-entry.
+    mutable QRecursiveMutex db_mutex_;
+
     bool lazyOpen();
     void lazyClose();
     bool validateSchema();

@@ -5,6 +5,14 @@
  * - Lazy-open: Database opened on first operation, closed after each operation
  * - This prevents file locking issues and allows external backup tools to work
  *
+ * Thread safety:
+ * - A QRecursiveMutex (db_mutex_) guards every public entry point, preventing
+ *   concurrent operations from interleaving.  This is essential because
+ *   createBackup() temporarily closes and reopens the database connection;
+ *   without the mutex, a concurrent call could hit a closed connection.
+ *   QRecursiveMutex (rather than QMutex) is used because public methods
+ *   call private helpers that are also called from other public methods.
+ *
  * Save methods:
  * - saveDurations(): Full save with backup creation, used for stopTimer/HistoryDialog
  * - saveCheckpoint(): Lightweight update without backup, used for periodic checkpoints
@@ -22,6 +30,7 @@
 #include "databasemanager.h"
 #include <QCoreApplication>
 #include <QDir>
+#include <QMutexLocker>
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QVariant>
@@ -218,6 +227,8 @@ void DatabaseManager::lazyClose()
  */
 bool DatabaseManager::checkSchemaOnStartup()
 {
+    QMutexLocker locker(&db_mutex_);
+
     // If history storage is disabled, no need to check
     if (history_days_to_keep_ == 0) {
         return true;
@@ -464,6 +475,12 @@ bool DatabaseManager::ensureSettingsTable()
  * - Copies the .sqlite file to a timestamped .backup file.
  * - Writes a human-readable text dump (.durations.txt) for verification.
  * - This runs before 'saveDurations' (major save) but not 'saveCheckpoint' (frequent).
+ *
+ * Concurrency:
+ * - This method closes and reopens the database to ensure a clean file copy.
+ *   The caller (a public method) must already hold db_mutex_, which prevents
+ *   any other DatabaseManager operation from seeing the closed connection.
+ *   QRecursiveMutex allows re-entrant calls within the same thread.
  */
 bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
@@ -547,8 +564,10 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
  * - Rolls back the transaction on any error.
  */
 bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
-                                    const std::vector<QString>& removedSegmentIds)
+                                     const std::vector<QString>& removedSegmentIds)
 {
+    QMutexLocker locker(&db_mutex_);
+
     // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
         return true;
@@ -643,8 +662,10 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
 }
 
 bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
-                                           const std::deque<TimeDuration>& currentSessionDurations)
+                                            const std::deque<TimeDuration>& currentSessionDurations)
 {
+    QMutexLocker locker(&db_mutex_);
+
     if (history_days_to_keep_ == 0) {
         return true;
     }
@@ -763,6 +784,8 @@ bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& histo
  */
 DatabaseManager::LoadResult DatabaseManager::loadDurations()
 {
+    QMutexLocker locker(&db_mutex_);
+
     LoadResult result;
 
     if (!lazyOpen()) {
@@ -886,6 +909,8 @@ DatabaseManager::LoadResult DatabaseManager::loadDurations()
  */
 EntriesForDateResult DatabaseManager::hasEntriesForDate(const QDate& date)
 {
+    QMutexLocker locker(&db_mutex_);
+
     if (!lazyOpen()) {
         if (settings_.logToFile()) {
             Logger::Log("[DB] Could not lazy open DB to check entries for date");
@@ -925,6 +950,8 @@ EntriesForDateResult DatabaseManager::hasEntriesForDate(const QDate& date)
  */
 bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId)
 {
+    QMutexLocker locker(&db_mutex_);
+
     // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
         return true;
@@ -1020,8 +1047,10 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
  * - If a segment row is missing, it is inserted with the same segment_id.
  */
 bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durations,
-                                          const std::vector<QString>& removedSegmentIds)
+                                           const std::vector<QString>& removedSegmentIds)
 {
+    QMutexLocker locker(&db_mutex_);
+
     if (durations.empty()) {
         return true;
     }
@@ -1147,6 +1176,8 @@ bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durati
  */
 void DatabaseManager::flushToDisc()
 {
+    QMutexLocker locker(&db_mutex_);
+
     if (history_days_to_keep_ == 0) {
         return;
     }
@@ -1196,6 +1227,8 @@ void DatabaseManager::flushToDisc()
 
 std::deque<DatabaseManager::OrphanCheckpoint> DatabaseManager::loadUnfinalizedCheckpoints()
 {
+    QMutexLocker locker(&db_mutex_);
+
     std::deque<OrphanCheckpoint> orphans;
 
     if (!lazyOpen()) {
@@ -1243,6 +1276,8 @@ std::deque<DatabaseManager::OrphanCheckpoint> DatabaseManager::loadUnfinalizedCh
 
 bool DatabaseManager::reconcileUnfinalizedCheckpoints(const std::vector<long long>& finalizeIds, const std::vector<long long>& dropIds)
 {
+    QMutexLocker locker(&db_mutex_);
+
     if (finalizeIds.empty() && dropIds.empty()) {
         return true;
     }
@@ -1291,6 +1326,8 @@ bool DatabaseManager::reconcileUnfinalizedCheckpoints(const std::vector<long lon
 
 bool DatabaseManager::setLastCleanShutdownMarker(const QDateTime& timestamp)
 {
+    QMutexLocker locker(&db_mutex_);
+
     if (history_days_to_keep_ == 0) {
         return true;
     }
@@ -1327,6 +1364,8 @@ bool DatabaseManager::setLastCleanShutdownMarker(const QDateTime& timestamp)
 
 std::optional<QDateTime> DatabaseManager::consumeLastCleanShutdownMarker()
 {
+    QMutexLocker locker(&db_mutex_);
+
     if (history_days_to_keep_ == 0) {
         return std::nullopt;
     }
