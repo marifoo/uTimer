@@ -107,7 +107,7 @@ int main(int argc, char *argv[])
 	TimeTracker time_tracker(settings, database_manager);
 
 	// Check database schema before starting the UI
-	if (!time_tracker.checkDatabaseSchema()) {
+	if (!database_manager.checkSchemaOnStartup()) {
 		QMessageBox::critical(nullptr, "Database Error",
 			"The database schema is outdated and incompatible with this version.\n\n"
 			"Please delete or rename the following file and restart:\n"

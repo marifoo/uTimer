@@ -190,7 +190,6 @@ public:
     EntriesForDateResult hasEntriesForDate(const QDate& date);
     void pauseCheckpoints();
     void resumeCheckpoints();
-    bool checkDatabaseSchema(); // Returns true if DB schema is valid, false if outdated
     void flushDatabaseToDisc(); // Force pending writes to disk (for shutdown safety)
     bool markCleanShutdown();
     bool canMarkCleanShutdown() const;
