@@ -8,9 +8,9 @@
 
 const Settings* Logger::s_settings_ = nullptr;
 
-void Logger::registerSettings(const Settings& s)
+void Logger::registerSettings(const Settings* s)
 {
-    s_settings_ = &s;
+    s_settings_ = s;
 }
 
 Logger::Logger()

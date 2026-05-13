@@ -247,9 +247,9 @@ QString HistoryDialog::buildLoadReconciliationMessage() const
         .arg(skipped)
         .arg(repaired);
 
-    // Append a clickable link to the log file when it exists on disk.
-    // This lets the user inspect skip/repair details without hunting for the file manually.
-    {
+    // Only show a link to the log file when logging is actually enabled; showing it
+    // when logging is off is misleading (the file may be stale or absent).
+    if (settings_.logToFile()) {
         const QString logPath = Logger::logFilePath();
         if (QFileInfo::exists(logPath)) {
             message += QString("<br><a href=\"file:///%1\">Open log file</a>")

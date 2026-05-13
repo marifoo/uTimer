@@ -23,14 +23,15 @@ void LoggerTest::initTestCase()
 
     // Start each run with logging off so earlier test suites that call Logger::Log
     // don't accidentally create the file before Test A.
-    Logger::registerSettings(*settingsOff_);
+    Logger::registerSettings(settingsOff_);
 }
 
 void LoggerTest::cleanupTestCase()
 {
-    // Leave logging disabled so later test suites (run after LoggerTest) don't
-    // write to the shared log file unexpectedly.
-    Logger::registerSettings(*settingsOff_);
+    // Clear the global pointer BEFORE deleting the Settings objects to avoid
+    // leaving Logger::s_settings_ pointing at freed memory for the rest of the
+    // process (later test suites call Logger::Log() and would hit the dangling ptr).
+    Logger::registerSettings(nullptr);
     delete settingsOff_;
     delete settingsOn_;
     settingsOff_ = nullptr;
@@ -40,7 +41,7 @@ void LoggerTest::cleanupTestCase()
 // Test A: with logToFile = false, 100 Log() calls must not create or grow the log file.
 void LoggerTest::test_a_disabled_logging_is_silent()
 {
-    Logger::registerSettings(*settingsOff_);
+    Logger::registerSettings(settingsOff_);
 
     const QString logPath = Logger::logFilePath();
     const qint64 sizeBefore = QFile::exists(logPath) ? QFileInfo(logPath).size() : -1;
@@ -59,7 +60,7 @@ void LoggerTest::test_a_disabled_logging_is_silent()
 // Test B: with logToFile = true, a Log() call must appear in the log file.
 void LoggerTest::test_b_enabled_logging_writes()
 {
-    Logger::registerSettings(*settingsOn_);
+    Logger::registerSettings(settingsOn_);
 
     const QString marker = QString("test_b_marker_%1").arg(QDateTime::currentMSecsSinceEpoch());
     Logger::Log(marker);
@@ -81,12 +82,12 @@ void LoggerTest::test_b_enabled_logging_writes()
 void LoggerTest::test_c_toggle_at_runtime_is_honoured()
 {
     // Logging off: this message must NOT appear
-    Logger::registerSettings(*settingsOff_);
+    Logger::registerSettings(settingsOff_);
     const QString beforeMarker = QString("BEFORE_FLIP_%1").arg(QDateTime::currentMSecsSinceEpoch());
     Logger::Log(beforeMarker);
 
     // Logging on: this message MUST appear
-    Logger::registerSettings(*settingsOn_);
+    Logger::registerSettings(settingsOn_);
     const QString afterMarker = QString("AFTER_FLIP_%1").arg(QDateTime::currentMSecsSinceEpoch());
     Logger::Log(afterMarker);
 

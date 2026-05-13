@@ -16,9 +16,10 @@ class Logger
 	void log(const QString & text);
 
 public:
-	/// Must be called once at startup before any Log() call reaches a call-site.
-	/// Until registered, all Log() calls are silently dropped.
-	static void registerSettings(const Settings& s);
+	/// Register the application Settings so Log() can gate on logToFile().
+	/// Pass nullptr to disable all logging (safe to call from test cleanup).
+	/// Until a non-null Settings is registered, all Log() calls are silently dropped.
+	static void registerSettings(const Settings* s);
 	static void Log(const QString & text);
 	/// Returns the absolute path to the log file (applicationDir/uTimer.log).
 	/// This is a pure path computation — does not check if the file exists.
