@@ -20,6 +20,7 @@
 
 #include "mainwin.h"
 #include <QtDebug>
+#include <QDateTime>
 #include <QTime>
 #include <QTimer>
 #include <QSystemTrayIcon>
@@ -317,10 +318,10 @@ void MainWin::shutdown(bool force_direct)
 	// Verify timer stopped correctly
 	// Flush database to disk to reduce risk of loss during Windows shutdown
 	Logger::Log("[DB] Flushing database to disk before shutdown");
-	timetracker_.flushDatabaseToDisc();
+	db_.flushToDisc();
 
 	if (timetracker_.canMarkCleanShutdown()) {
-		timetracker_.markCleanShutdown();
+		db_.setLastCleanShutdownMarker(QDateTime::currentDateTime());
 	}
 
 	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {

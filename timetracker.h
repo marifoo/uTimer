@@ -190,8 +190,6 @@ public:
     EntriesForDateResult hasEntriesForDate(const QDate& date);
     void pauseCheckpoints();
     void resumeCheckpoints();
-    void flushDatabaseToDisc(); // Force pending writes to disk (for shutdown safety)
-    bool markCleanShutdown();
     bool canMarkCleanShutdown() const;
 
 public slots:

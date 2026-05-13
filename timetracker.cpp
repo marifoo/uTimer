@@ -779,11 +779,6 @@ bool TimeTracker::shouldShowStartupRecoveryNotification() const
     return startup_recovery_notification_needed_;
 }
 
-bool TimeTracker::markCleanShutdown()
-{
-    return db_.setLastCleanShutdownMarker(QDateTime::currentDateTime());
-}
-
 bool TimeTracker::canMarkCleanShutdown() const
 {
     QMutexLocker locker(&mutex_);
@@ -1010,11 +1005,6 @@ void TimeTracker::resumeCheckpoints()
         checkpointTimer_.start();
     }
     Logger::Log("[CHECKPOINT] Checkpoints resumed");
-}
-
-void TimeTracker::flushDatabaseToDisc()
-{
-    db_.flushToDisc();
 }
 
 qint64 TimeTracker::reconcileOrphanCheckpoints(
