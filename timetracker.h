@@ -125,6 +125,7 @@ private:
     // discarding the in-flight segment. Returns true when it fired.
     // Safe to call multiple times; only the first call does real work.
     bool discardCrossMidnightOngoingAndStop(const QDateTime& now);
+    EntriesForDateResult hasEntriesForDate(const QDate& date);
     void saveCheckpointInternal(const QDateTime& now);  // Internal checkpoint save (called when mutex already held)
     bool appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
     qint64 reconcileOrphanCheckpoints(
@@ -187,7 +188,6 @@ public:
     bool updateDurationsInDB();
     bool replaceDurationsInDB(std::deque<TimeDuration> historyDurations,
                               std::deque<TimeDuration> currentSessionDurations);
-    EntriesForDateResult hasEntriesForDate(const QDate& date);
     void pauseCheckpoints();
     void resumeCheckpoints();
     bool canMarkCleanShutdown() const;
