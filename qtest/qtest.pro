@@ -17,6 +17,7 @@ SOURCES += \
     main.cpp \
     testcommon.cpp \
     fakedatabasemanager.cpp \
+    test_logger.cpp \
     test_settings.cpp \
     test_helpers.cpp \
     test_lockstatewatcher.cpp \
@@ -37,6 +38,7 @@ HEADERS += \
     testcommon.h \
     fakeclock.h \
     fakedatabasemanager.h \
+    test_logger.h \
     test_settings.h \
     test_helpers.h \
     test_lockstatewatcher.h \

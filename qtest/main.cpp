@@ -2,6 +2,7 @@
 #include <QtTest>
 
 // Forward declarations of all test classes
+class LoggerTest;
 class SettingsTest;
 class HelpersTest;
 class LockStateWatcherTest;
@@ -12,6 +13,7 @@ class IntegrationTest;
 class HistoryDialogTest;
 
 // Include test class headers
+#include "test_logger.h"
 #include "test_settings.h"
 #include "test_helpers.h"
 #include "test_lockstatewatcher.h"
@@ -41,6 +43,7 @@ int main(int argc, char *argv[])
     };
 
     // Run test suites
+    runTest(new LoggerTest, "LoggerTest");
     runTest(new SettingsTest, "SettingsTest");
     runTest(new HelpersTest, "HelpersTest");
     runTest(new LockStateWatcherTest, "LockStateWatcherTest");
