@@ -116,7 +116,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	MainWin main_win(settings, time_tracker);
+	MainWin main_win(settings, time_tracker, database_manager);
 
 #ifdef Q_OS_LINUX
 	// Set up socket notifier to handle Unix signals in the Qt event loop

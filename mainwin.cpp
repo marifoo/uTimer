@@ -35,8 +35,8 @@
 #endif
 
 
-MainWin::MainWin(Settings& settings, TimeTracker& timetracker, QWidget *parent)	
-	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), 
+MainWin::MainWin(Settings& settings, TimeTracker& timetracker, IDatabaseManager& db, QWidget *parent)
+	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), db_(db),
 	  warning_pause_shown_(false), was_active_before_autopause_(false)
 {
 	setupCentralWidget(settings, timetracker);

@@ -8,6 +8,7 @@
 #include "contentwidget.h"
 #include "settings.h"
 #include "types.h"
+#include "idatabasemanager.h"
 
 class MainWin : public QMainWindow
 {
@@ -17,11 +18,12 @@ private:
 	QSystemTrayIcon *tray_icon_;
 	const Settings & settings_;
 	TimeTracker& timetracker_;
+	IDatabaseManager& db_;
 
 	bool warning_activity_shown_;
 	bool warning_pause_shown_;
 	bool was_active_before_autopause_;
-	
+
 	// Midnight forced-stop handling
 	QTimer* midnight_timer_;
 
@@ -41,7 +43,7 @@ protected:
 	void closeEvent(QCloseEvent *event) override;
 
 public:
-	explicit MainWin(Settings &settings, TimeTracker &timetracker, QWidget *parent = nullptr);
+	explicit MainWin(Settings &settings, TimeTracker &timetracker, IDatabaseManager &db, QWidget *parent = nullptr);
 	void start();
 
 signals:
