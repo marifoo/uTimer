@@ -38,7 +38,6 @@ public:
 private:
     QSqlDatabase db;
     uint history_days_to_keep_;
-    const Settings& settings_;
 
     // Guards all public entry points so that no two operations can interleave.
     // This is particularly important for createBackup(), which closes and

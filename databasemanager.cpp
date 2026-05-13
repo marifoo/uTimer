@@ -38,7 +38,6 @@
 #include <QTextStream>
 #include <atomic>
 #include "logger.h"
-#include "settings.h"
 
 namespace {
 constexpr qint64 kDurationReconciliationToleranceMs = 100;
@@ -53,7 +52,7 @@ std::atomic<uint64_t> s_connection_seq{0};
 }
 
 DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
-    : QObject(parent), history_days_to_keep_(std::max(settings.getHistoryDays(), 0)), settings_(settings)
+    : QObject(parent), history_days_to_keep_(std::max(settings.getHistoryDays(), 0))
 {
     // Mint a unique connection name using a monotonic counter.
     // See s_connection_seq declaration for rationale (avoids address-reuse collisions).
