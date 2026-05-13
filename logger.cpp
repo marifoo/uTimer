@@ -1,9 +1,17 @@
 #include "logger.h"
+#include "settings.h"
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
+
+const Settings* Logger::s_settings_ = nullptr;
+
+void Logger::registerSettings(const Settings& s)
+{
+    s_settings_ = &s;
+}
 
 Logger::Logger()
 {
@@ -15,6 +23,7 @@ Logger::Logger()
 
 void Logger::Log(const QString &text)
 {
+    if (!s_settings_ || !s_settings_->logToFile()) return;
     static Logger L;
     L.log(text);
 }
