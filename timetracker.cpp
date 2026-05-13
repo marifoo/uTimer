@@ -48,85 +48,80 @@ constexpr qint64 kOrphanStaleAgeMs = 24LL * 60LL * 60LL * 1000LL;
 
 void SessionState::beginNewSegment(const QDateTime& startTime, const Settings& settings)
 {
+    (void)settings;
     QString oldId = current_checkpoint_segment_id;
     QDateTime oldStart = segment_start_time;
     current_checkpoint_segment_id = TimeDuration::createSegmentId();
     segment_start_time = startTime;
-    if (settings.logToFile()) {
-        Logger::Log(QString("[STATE] beginNewSegment: segId '%1' -> '%2', start %3 -> %4")
-            .arg(oldId, current_checkpoint_segment_id,
-                 oldStart.toString(Qt::ISODate), startTime.toString(Qt::ISODate)));
-    }
+    Logger::Log(QString("[STATE] beginNewSegment: segId '%1' -> '%2', start %3 -> %4")
+        .arg(oldId, current_checkpoint_segment_id,
+             oldStart.toString(Qt::ISODate), startTime.toString(Qt::ISODate)));
 }
 
 void SessionState::clearSegment(const Settings& settings)
 {
+    (void)settings;
     QString oldId = current_checkpoint_segment_id;
     QDateTime oldStart = segment_start_time;
     current_checkpoint_segment_id.clear();
     segment_start_time = QDateTime();
-    if (settings.logToFile()) {
-        Logger::Log(QString("[STATE] clearSegment: segId '%1' -> (empty), start %2 -> (invalid)")
-            .arg(oldId, oldStart.toString(Qt::ISODate)));
-    }
+    Logger::Log(QString("[STATE] clearSegment: segId '%1' -> (empty), start %2 -> (invalid)")
+        .arg(oldId, oldStart.toString(Qt::ISODate)));
 }
 
 void SessionState::updateSegmentStartTime(const QDateTime& newStart, const Settings& settings)
 {
+    (void)settings;
     QDateTime oldStart = segment_start_time;
     segment_start_time = newStart;
-    if (settings.logToFile()) {
-        Logger::Log(QString("[STATE] updateSegmentStartTime: %1 -> %2")
-            .arg(oldStart.toString(Qt::ISODate), newStart.toString(Qt::ISODate)));
-    }
+    Logger::Log(QString("[STATE] updateSegmentStartTime: %1 -> %2")
+        .arg(oldStart.toString(Qt::ISODate), newStart.toString(Qt::ISODate)));
 }
 
 void SessionState::markUnsaved(const Settings& settings)
 {
+    (void)settings;
     if (!has_unsaved_data) {
         has_unsaved_data = true;
-        if (settings.logToFile()) {
-            Logger::Log("[STATE] markUnsaved: false -> true");
-        }
+        Logger::Log("[STATE] markUnsaved: false -> true");
     }
 }
 
 void SessionState::clearUnsaved(const Settings& settings)
 {
+    (void)settings;
     bool old = has_unsaved_data;
     has_unsaved_data = false;
     unsaved_durations.clear();
-    if (old && settings.logToFile()) {
+    if (old) {
         Logger::Log("[STATE] clearUnsaved: true -> false");
     }
 }
 
 void SessionState::resetForNewSession(const Settings& settings)
 {
+    (void)settings;
     size_t oldSize = durations.size();
     bool oldUnsaved = has_unsaved_data;
     durations.clear();
     has_unsaved_data = false;
     unsaved_durations.clear();
-    if (settings.logToFile()) {
-        Logger::Log(QString("[STATE] resetForNewSession: durations %1 -> 0, unsaved %2 -> false")
-            .arg(oldSize).arg(oldUnsaved ? "true" : "false"));
-    }
+    Logger::Log(QString("[STATE] resetForNewSession: durations %1 -> 0, unsaved %2 -> false")
+        .arg(oldSize).arg(oldUnsaved ? "true" : "false"));
 }
 
 void SessionState::adoptOngoingSegment(const TimeDuration& ongoing, const Settings& settings)
 {
+    (void)settings;
     QString oldId = current_checkpoint_segment_id;
     QDateTime oldStart = segment_start_time;
     current_checkpoint_segment_id = ongoing.segment_id.isEmpty()
         ? TimeDuration::createSegmentId()
         : ongoing.segment_id;
     segment_start_time = ongoing.startTime;
-    if (settings.logToFile()) {
-        Logger::Log(QString("[STATE] adoptOngoingSegment: segId '%1' -> '%2', start %3 -> %4")
-            .arg(oldId, current_checkpoint_segment_id,
-                 oldStart.toString(Qt::ISODate), ongoing.startTime.toString(Qt::ISODate)));
-    }
+    Logger::Log(QString("[STATE] adoptOngoingSegment: segId '%1' -> '%2', start %3 -> %4")
+        .arg(oldId, current_checkpoint_segment_id,
+             oldStart.toString(Qt::ISODate), ongoing.startTime.toString(Qt::ISODate)));
 }
 
 // ============================================================================
@@ -260,7 +255,7 @@ TimeTracker::TimeTracker(const Settings &settings, IDatabaseManager& db, QObject
     connect(&checkpointTimer_, &QTimer::timeout, this, &TimeTracker::saveCheckpoint);
 
     // Log when checkpoints are disabled
-    if (checkpoint_interval_msec_ == 0 && settings_.logToFile()) {
+    if (checkpoint_interval_msec_ == 0) {
         Logger::Log("[CHECKPOINT] Checkpoints disabled (interval = 0)");
     }
 
@@ -289,9 +284,7 @@ TimeTracker::~TimeTracker()
 void TimeTracker::startTimer(const QDateTime& now)
 {
     if (mode_ == Mode::Pause) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DEBUG] Starting Timer from Pause - D=" + QString::number(session_.durations.size()));
-        }
+        Logger::Log("[DEBUG] Starting Timer from Pause - D=" + QString::number(session_.durations.size()));
         qint64 t_pause = timer_.restart();
         if (t_pause > 0) {
             if (session_.durations.empty() || session_.durations.back().type != DurationType::Pause) {
@@ -314,15 +307,11 @@ void TimeTracker::startTimer(const QDateTime& now)
         if (checkpoint_interval_msec_ > 0) {
             checkpointTimer_.start(); // Resume periodic checkpoint saving
         }
-        if (settings_.logToFile()) {
-            Logger::Log("[TIMER] > Timer unpaused");
-        }
+        Logger::Log("[TIMER] > Timer unpaused");
         return;
     }
     if (mode_ == Mode::None) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DEBUG] Starting Timer from Stopped - D=" + QString::number(session_.durations.size()));
-        }
+        Logger::Log("[DEBUG] Starting Timer from Stopped - D=" + QString::number(session_.durations.size()));
 
         bool retry_succeeded = true;
 
@@ -330,19 +319,13 @@ void TimeTracker::startTimer(const QDateTime& now)
         // Use unsaved_durations if present to keep retries idempotent.
         const std::deque<TimeDuration>& retry_source = session_.unsaved_durations.empty() ? session_.durations : session_.unsaved_durations;
         if (session_.has_unsaved_data && !retry_source.empty()) {
-            if (settings_.logToFile()) {
-                Logger::Log("[DB] Retrying save of previously unsaved durations");
-            }
+            Logger::Log("[DB] Retrying save of previously unsaved durations");
             if (appendDurationsChunkToDB(retry_source)) {
                 session_.clearUnsaved(settings_);
-                if (settings_.logToFile()) {
-                    Logger::Log("[DB] Previously unsaved durations saved successfully");
-                }
+                Logger::Log("[DB] Previously unsaved durations saved successfully");
             } else {
                 retry_succeeded = false;
-                if (settings_.logToFile()) {
-                    Logger::Log("[DB] CRITICAL: Retry save failed - unsaved data retained for another retry");
-                }
+                Logger::Log("[DB] CRITICAL: Retry save failed - unsaved data retained for another retry");
                 emit userWarning("Could not save previous session data. It is kept in memory and will be retried.");
             }
         }
@@ -364,11 +347,9 @@ void TimeTracker::startTimer(const QDateTime& now)
             // caution and skip boot time to avoid double-counting.
             EntriesForDateResult dbResult = hasEntriesForDate(today);
             shouldAddBootTime = !hasEntriesInMemory && (dbResult == EntriesForDateResult::No);
-            if (settings_.logToFile()) {
-                Logger::Log(shouldAddBootTime
-                            ? "[TIMER] Will add boot time: " + QString::number(boot_time_sec) + " seconds (first session today)"
-                            : "[TIMER] Boot time not added - entries already exist for today");
-            }
+            Logger::Log(shouldAddBootTime
+                        ? "[TIMER] Will add boot time: " + QString::number(boot_time_sec) + " seconds (first session today)"
+                        : "[TIMER] Boot time not added - entries already exist for today");
         }
         if (retry_succeeded) {
             session_.resetForNewSession(settings_);
@@ -383,34 +364,24 @@ void TimeTracker::startTimer(const QDateTime& now)
         if (checkpoint_interval_msec_ > 0) {
             checkpointTimer_.start(); // Start periodic checkpoint saving
         }
-        if (settings_.logToFile()) {
-            Logger::Log("[TIMER] >> Timer started");
-        }
+        Logger::Log("[TIMER] >> Timer started");
         return;
     }
-    if (settings_.logToFile()) {
-        Logger::Log("[DEBUG] Trying to Start Timer from Mode Activity - D=" + QString::number(session_.durations.size()));
-    }
+    Logger::Log("[DEBUG] Trying to Start Timer from Mode Activity - D=" + QString::number(session_.durations.size()));
 }
 
 void TimeTracker::pauseTimer(const QDateTime& now)
 {
     if (mode_ != Mode::Activity) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DEBUG] Pause ignored; not in Activity");
-        }
+        Logger::Log("[DEBUG] Pause ignored; not in Activity");
         return;
     }
-    if (settings_.logToFile()) {
-        Logger::Log("[DEBUG] Pausing Timer from Activity - D=" + QString::number(session_.durations.size()));
-    }
+    Logger::Log("[DEBUG] Pausing Timer from Activity - D=" + QString::number(session_.durations.size()));
     timer_.restart();
     addDuration(DurationType::Activity, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
 
     finalizeActivityToPause(now);
-    if (settings_.logToFile()) {
-        Logger::Log("[TIMER] Timer paused <");
-    }
+    Logger::Log("[TIMER] Timer paused <");
 }
 
 /**
@@ -428,36 +399,26 @@ void TimeTracker::pauseTimer(const QDateTime& now)
 void TimeTracker::backpauseTimer(const QDateTime& now)
 {
     if (mode_ != Mode::Activity) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DEBUG] Backpause ignored; not in Activity");
-        }
+        Logger::Log("[DEBUG] Backpause ignored; not in Activity");
         return;
     }
     if (!settings_.isAutopauseEnabled()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DEBUG] Autopause disabled; backpause ignored");
-        }
+        Logger::Log("[DEBUG] Autopause disabled; backpause ignored");
         return;
     }
-    if (settings_.logToFile()) {
-        Logger::Log("[DEBUG] Backpausing Timer from Activity - D=" + QString::number(session_.durations.size()));
-    }
+    Logger::Log("[DEBUG] Backpausing Timer from Activity - D=" + QString::number(session_.durations.size()));
     qint64 backpause_msec = settings_.getBackpauseMsec();
 
     // Bounds check: backpause should be between 1 second and 1 hour
     constexpr qint64 MIN_BACKPAUSE_MS = 1000;      // 1 second minimum
     constexpr qint64 MAX_BACKPAUSE_MS = 3600000;   // 1 hour maximum
     if (backpause_msec < MIN_BACKPAUSE_MS) {
-        if (settings_.logToFile()) {
-            Logger::Log(QString("[WARNING] Backpause value %1ms below minimum, using %2ms")
-                .arg(backpause_msec).arg(MIN_BACKPAUSE_MS));
-        }
+        Logger::Log(QString("[WARNING] Backpause value %1ms below minimum, using %2ms")
+            .arg(backpause_msec).arg(MIN_BACKPAUSE_MS));
         backpause_msec = MIN_BACKPAUSE_MS;
     } else if (backpause_msec > MAX_BACKPAUSE_MS) {
-        if (settings_.logToFile()) {
-            Logger::Log(QString("[WARNING] Backpause value %1ms exceeds maximum, using %2ms")
-                .arg(backpause_msec).arg(MAX_BACKPAUSE_MS));
-        }
+        Logger::Log(QString("[WARNING] Backpause value %1ms exceeds maximum, using %2ms")
+            .arg(backpause_msec).arg(MAX_BACKPAUSE_MS));
         backpause_msec = MAX_BACKPAUSE_MS;
     }
 
@@ -481,9 +442,7 @@ void TimeTracker::backpauseTimer(const QDateTime& now)
     addDuration(DurationType::Pause, pause_start, now);
 
     finalizeActivityToPause(now);
-    if (settings_.logToFile()) {
-        Logger::Log("[TIMER] Timer retroactively paused <");
-    }
+    Logger::Log("[TIMER] Timer retroactively paused <");
 }
 
 /**
@@ -538,29 +497,21 @@ void TimeTracker::finalizeActivityToPause(const QDateTime& pauseSegmentStart)
 void TimeTracker::stopTimer(const QDateTime& now)
 {
     if (mode_ == Mode::None) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DEBUG] Stop ignored; already stopped");
-        }
+        Logger::Log("[DEBUG] Stop ignored; already stopped");
         return;
     }
     if (mode_ == Mode::Pause) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DEBUG] Stopping from Pause - D=" + QString::number(session_.durations.size()));
-        }
+        Logger::Log("[DEBUG] Stopping from Pause - D=" + QString::number(session_.durations.size()));
         addDuration(DurationType::Pause, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
     } else if (mode_ == Mode::Activity) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DEBUG] Stopping from Activity - D=" + QString::number(session_.durations.size()));
-        }
+        Logger::Log("[DEBUG] Stopping from Activity - D=" + QString::number(session_.durations.size()));
         addDuration(DurationType::Activity, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
     }
     mode_ = Mode::None;
     session_.clearSegment(settings_);
     checkpointTimer_.stop();
     was_active_before_autopause_ = false;
-    if (settings_.logToFile()) {
-        Logger::Log("[TIMER] Timer stopped <<");
-    }
+    Logger::Log("[TIMER] Timer stopped <<");
 
     // Persist current session durations only (not entire history). History dialog does replace explicitly.
     // Use update interface to check for existing entries by start time and update them instead of creating duplicates
@@ -569,15 +520,11 @@ void TimeTracker::stopTimer(const QDateTime& now)
         // Use the same `now` for the shutdown marker to maintain a single
         // consistent timestamp across the entire stop operation.
         db_.setLastCleanShutdownMarker(now);
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Session durations updated");
-        }
+        Logger::Log("[DB] Session durations updated");
     } else {
         session_.markUnsaved(settings_);
         session_.unsaved_durations = session_.durations;
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error updating session durations - data retained for next save attempt");
-        }
+        Logger::Log("[DB] Error updating session durations - data retained for next save attempt");
     }
 }
 
@@ -642,24 +589,18 @@ void TimeTracker::useTimerViaLockEvent(LockEvent event)
         // Save a checkpoint when lock is detected (only if actively tracking time)
         if (mode_ == Mode::Activity) {
             saveCheckpointInternal(now);
-            if (settings_.logToFile()) {
-                Logger::Log("[LOCK] Desktop locked - checkpoint saved, further checkpoints suspended");
-            }
-        } else if (settings_.logToFile()) {
+            Logger::Log("[LOCK] Desktop locked - checkpoint saved, further checkpoints suspended");
+        } else {
             Logger::Log("[LOCK] Desktop locked - no checkpoint (timer not in Activity mode)");
         }
         return;
     }
     if (event == LockEvent::Unlock) {
         is_locked_ = false;
-        if (settings_.logToFile()) {
-            Logger::Log("[LOCK] Desktop unlocked - checkpoint saving resumed");
-        }
+        Logger::Log("[LOCK] Desktop unlocked - checkpoint saving resumed");
     }
     if (!settings_.isAutopauseEnabled()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DEBUG] Autopause disabled; lock event ignored");
-        }
+        Logger::Log("[DEBUG] Autopause disabled; lock event ignored");
         return;
     }
     if (event == LockEvent::LongOngoingLock) {
@@ -717,10 +658,8 @@ void TimeTracker::setDurationType(size_t idx, DurationType type)
 #endif
     if (idx < session_.durations.size()) {
         session_.durations[idx].type = type;
-        if (settings_.logToFile()) {
-            Logger::Log(QString("[TIMER] Duration type changed at index %1 to %2").arg(idx).arg(type == DurationType::Activity ? "Activity" : "Pause"));
-        }
-    } else if (settings_.logToFile()) {
+        Logger::Log(QString("[TIMER] Duration type changed at index %1 to %2").arg(idx).arg(type == DurationType::Activity ? "Activity" : "Pause"));
+    } else {
         Logger::Log(QString("[TIMER] Invalid index %1 for setDurationType (size %2)").arg(idx).arg(session_.durations.size()));
     }
 #ifndef QT_NO_DEBUG
@@ -863,10 +802,10 @@ bool TimeTracker::appendDurationsChunkToDB(const std::deque<TimeDuration>& durat
     auto temp = durations;
     size_t original = temp.size();
     auto removedIds = cleanDurations(&temp);
-    if (settings_.logToFile() && original != temp.size()) {
+    if (original != temp.size()) {
         Logger::Log(QString("[DB] Cleaned session durations: %1 -> %2").arg(original).arg(temp.size()));
     }
-    
+
     return db_.saveDurations(temp, TransactionMode::Append, removedIds);
 }
 
@@ -877,10 +816,10 @@ bool TimeTracker::updateDurationsInDB()
     auto temp = session_.durations;
     size_t original = temp.size();
     auto removedIds = cleanDurations(&temp);
-    if (settings_.logToFile() && original != temp.size()) {
+    if (original != temp.size()) {
         Logger::Log(QString("[DB] Cleaned session durations for update: %1 -> %2").arg(original).arg(temp.size()));
     }
-    
+
     // Use the separate update interface that matches existing entries by segment_id
     return db_.updateDurationsById(temp, removedIds);
 }
@@ -892,7 +831,7 @@ bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> historyDurations
     // Return value ignored: replaceDurationsInDB wipes the entire table,
     // so orphaned segment_ids are implicitly cleaned up by the DELETE FROM.
     cleanDurations(&historyDurations);
-    if (settings_.logToFile() && originalHistory != historyDurations.size()) {
+    if (originalHistory != historyDurations.size()) {
         Logger::Log(QString("[DB] Cleaned history durations for replace: %1 -> %2")
             .arg(originalHistory)
             .arg(historyDurations.size()));
@@ -901,7 +840,7 @@ bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> historyDurations
     size_t originalCurrent = currentSessionDurations.size();
     // Return value ignored: same reasoning as above.
     cleanDurations(&currentSessionDurations);
-    if (settings_.logToFile() && originalCurrent != currentSessionDurations.size()) {
+    if (originalCurrent != currentSessionDurations.size()) {
         Logger::Log(QString("[DB] Cleaned current-session durations for replace: %1 -> %2")
             .arg(originalCurrent)
             .arg(currentSessionDurations.size()));
@@ -932,28 +871,22 @@ void TimeTracker::addDuration(DurationType type,
 {
     const qint64 duration = startTime.msecsTo(endTime);
     if (duration <= 0) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DEBUG] Ignoring non-positive duration");
-        }
+        Logger::Log("[DEBUG] Ignoring non-positive duration");
         return;
     }
     if (startTime.date() != endTime.date()) {
-        if (settings_.logToFile()) {
-            Logger::Log(QString("[MIDNIGHT] Discarding cross-midnight segment "
-                                "(type=%1, start=%2, end=%3, duration=%4 ms)")
-                .arg(type == DurationType::Activity ? "Activity" : "Pause")
-                .arg(startTime.toString(Qt::ISODateWithMs))
-                .arg(endTime.toString(Qt::ISODateWithMs))
-                .arg(duration));
-        }
+        Logger::Log(QString("[MIDNIGHT] Discarding cross-midnight segment "
+                            "(type=%1, start=%2, end=%3, duration=%4 ms)")
+            .arg(type == DurationType::Activity ? "Activity" : "Pause")
+            .arg(startTime.toString(Qt::ISODateWithMs))
+            .arg(endTime.toString(Qt::ISODateWithMs))
+            .arg(duration));
         return;
     }
     session_.durations.emplace_back(TimeDuration(type, startTime, endTime, segmentId));
-    if (settings_.logToFile()) {
-        Logger::Log(QString("[DEBUG] Added duration (%1, %2 ms)")
-            .arg(type == DurationType::Activity ? "Activity" : "Pause")
-            .arg(duration));
-    }
+    Logger::Log(QString("[DEBUG] Added duration (%1, %2 ms)")
+        .arg(type == DurationType::Activity ? "Activity" : "Pause")
+        .arg(duration));
 }
 
 bool TimeTracker::isOngoingSegmentCrossMidnight() const
@@ -982,12 +915,10 @@ bool TimeTracker::discardCrossMidnightOngoingAndStop(const QDateTime& now)
     if (!session_.segment_start_time.isValid()) return false;
     if (session_.segment_start_time.date() == now.date()) return false;
 
-    if (settings_.logToFile()) {
-        Logger::Log(QString("[MIDNIGHT] Cross-midnight ongoing detected "
-                            "(segment_start=%1, now=%2) — discarding segment, forcing stop")
-            .arg(session_.segment_start_time.toString(Qt::ISODateWithMs))
-            .arg(now.toString(Qt::ISODateWithMs)));
-    }
+    Logger::Log(QString("[MIDNIGHT] Cross-midnight ongoing detected "
+                        "(segment_start=%1, now=%2) — discarding segment, forcing stop")
+        .arg(session_.segment_start_time.toString(Qt::ISODateWithMs))
+        .arg(now.toString(Qt::ISODateWithMs)));
 
     // Best-effort: persist any already-completed (same-day) segments that
     // accumulated before midnight. Only the ONGOING segment is discarded.
@@ -995,9 +926,7 @@ bool TimeTracker::discardCrossMidnightOngoingAndStop(const QDateTime& now)
         if (!updateDurationsInDB()) {
             session_.markUnsaved(settings_);
             session_.unsaved_durations = session_.durations;
-            if (settings_.logToFile()) {
-                Logger::Log("[MIDNIGHT] Could not flush completed segments to DB - retained in unsaved buffer");
-            }
+            Logger::Log("[MIDNIGHT] Could not flush completed segments to DB - retained in unsaved buffer");
         } else {
             session_.resetForNewSession(settings_);
         }
@@ -1016,17 +945,13 @@ void TimeTracker::saveCheckpoint()
 
     // Don't save checkpoints while desktop is locked
     if (is_locked_) {
-        if (settings_.logToFile()) {
-            Logger::Log("[CHECKPOINT] Skipped - desktop is locked");
-        }
+        Logger::Log("[CHECKPOINT] Skipped - desktop is locked");
         return;
     }
 
     // Don't save checkpoints while paused (e.g., HistoryDialog is open)
     if (checkpoints_paused_) {
-        if (settings_.logToFile()) {
-            Logger::Log("[CHECKPOINT] Skipped - checkpoints paused");
-        }
+        Logger::Log("[CHECKPOINT] Skipped - checkpoints paused");
         return;
     }
 
@@ -1060,13 +985,11 @@ void TimeTracker::saveCheckpointInternal(const QDateTime& now)
     bool success = db_.saveCheckpoint(type, elapsed, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
 
     if (success) {
-        if (settings_.logToFile()) {
-            Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms, SegmentId: %3")
-                .arg(type == DurationType::Activity ? "Activity" : "Pause")
-                .arg(elapsed)
-                .arg(session_.current_checkpoint_segment_id));
-        }
-    } else if (settings_.logToFile()) {
+        Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms, SegmentId: %3")
+            .arg(type == DurationType::Activity ? "Activity" : "Pause")
+            .arg(elapsed)
+            .arg(session_.current_checkpoint_segment_id));
+    } else {
         Logger::Log("[CHECKPOINT] Failed to save checkpoint to database");
     }
 }
@@ -1076,9 +999,7 @@ void TimeTracker::pauseCheckpoints()
     QMutexLocker locker(&mutex_);
     checkpoints_paused_ = true;
     checkpointTimer_.stop();
-    if (settings_.logToFile()) {
-        Logger::Log("[CHECKPOINT] Checkpoints paused");
-    }
+    Logger::Log("[CHECKPOINT] Checkpoints paused");
 }
 
 void TimeTracker::resumeCheckpoints()
@@ -1088,9 +1009,7 @@ void TimeTracker::resumeCheckpoints()
     if (checkpoint_interval_msec_ > 0 && mode_ == Mode::Activity && !is_locked_) {
         checkpointTimer_.start();
     }
-    if (settings_.logToFile()) {
-        Logger::Log("[CHECKPOINT] Checkpoints resumed");
-    }
+    Logger::Log("[CHECKPOINT] Checkpoints resumed");
 }
 
 bool TimeTracker::checkDatabaseSchema()
@@ -1132,9 +1051,7 @@ qint64 TimeTracker::reconcileOrphanCheckpoints(
     }
 
     if (!db_.reconcileUnfinalizedCheckpoints(finalizeIds, dropIds)) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Failed to reconcile orphan checkpoints");
-        }
+        Logger::Log("[DB] Failed to reconcile orphan checkpoints");
         return 0;
     }
 
@@ -1163,12 +1080,10 @@ qint64 TimeTracker::reconcileOrphanCheckpoints(
         startup_recovery_notification_needed_ = showNotification;
     }
 
-    if (settings_.logToFile()) {
-        Logger::Log(QString("[DB] Orphan checkpoint reconciliation finished: finalized=%1, dropped=%2, recovered_seconds=%3")
-            .arg(finalizeIds.size())
-            .arg(dropIds.size())
-            .arg(recoveredSeconds));
-    }
+    Logger::Log(QString("[DB] Orphan checkpoint reconciliation finished: finalized=%1, dropped=%2, recovered_seconds=%3")
+        .arg(finalizeIds.size())
+        .arg(dropIds.size())
+        .arg(recoveredSeconds));
 
     return recoveredSeconds;
 }
