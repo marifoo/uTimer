@@ -64,9 +64,9 @@ DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
     db.setDatabaseName(QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.sqlite"));
 
     // Log when database is disabled (history_days_to_keep_ = 0 means no history storage)
-    if ((history_days_to_keep_ == 0) && settings.logToFile()) {
+    if (history_days_to_keep_ == 0) {
         Logger::Log("[DB] History days to keep is set to 0, database will not be used.");
-	}
+    }
 }
 
 DatabaseManager::~DatabaseManager()
@@ -116,8 +116,7 @@ bool DatabaseManager::lazyOpen()
 	}
     
     if (!db.open()) {
-        if (settings_.logToFile())
-            Logger::Log("[DB] Error opening database: " + db.lastError().text());
+        Logger::Log("[DB] Error opening database: " + db.lastError().text());
         return false;
     }
 
@@ -139,8 +138,7 @@ bool DatabaseManager::lazyOpen()
     );
 
     if (!tableCreated) {
-        if (settings_.logToFile())
-            Logger::Log("[DB] Error creating table: " + query_new.lastError().text());
+        Logger::Log("[DB] Error creating table: " + query_new.lastError().text());
         db.close();
         return false;
     }
@@ -166,9 +164,7 @@ bool DatabaseManager::lazyOpen()
 
     // Validate schema - ensure start_date and start_time columns exist
     if (!validateSchema()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] CRITICAL: Schema validation failed - database is outdated");
-        }
+        Logger::Log("[DB] CRITICAL: Schema validation failed - database is outdated");
         db.close();
         return false;
     }
@@ -176,18 +172,14 @@ bool DatabaseManager::lazyOpen()
     // Create index for date-based queries (cleanup and hasEntriesForDate)
     QSqlQuery indexQuery(db);
     if (!indexQuery.exec("CREATE INDEX IF NOT EXISTS idx_end_date ON durations(end_date)")) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Warning: Failed to create end_date index: " + indexQuery.lastError().text());
-        }
+        Logger::Log("[DB] Warning: Failed to create end_date index: " + indexQuery.lastError().text());
         // Non-fatal: continue even if index creation fails
     }
 
     // Index for segment identity lookups (checkpoint/update paths).
     QSqlQuery segmentIndexQuery(db);
     if (!segmentIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_segment_id ON durations(segment_id)")) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Warning: Failed to create segment_id index: " + segmentIndexQuery.lastError().text());
-        }
+        Logger::Log("[DB] Warning: Failed to create segment_id index: " + segmentIndexQuery.lastError().text());
         // Non-fatal: continue even if index creation fails
     }
 
@@ -205,9 +197,7 @@ bool DatabaseManager::lazyOpen()
     // the final save is fully durable before the process exits.
     QSqlQuery syncQuery(db);
     if (!syncQuery.exec("PRAGMA synchronous=NORMAL")) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Warning: Failed to set synchronous=NORMAL: " + syncQuery.lastError().text());
-        }
+        Logger::Log("[DB] Warning: Failed to set synchronous=NORMAL: " + syncQuery.lastError().text());
         // Non-fatal: SQLite defaults to FULL, which is strictly safer
     }
 
@@ -224,24 +214,21 @@ bool DatabaseManager::lazyOpen()
 
             if (!query.exec()) {
                 db.rollback();
-                if (settings_.logToFile())
-                    Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
+                Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
                 // Leave retention_cleanup_done_ = false so we retry next time.
                 db.close();
                 return false;
             }
 
             if (!db.commit()) {
-                if (settings_.logToFile())
-                    Logger::Log("[DB] Error committing cleanup transaction: " + db.lastError().text());
+                Logger::Log("[DB] Error committing cleanup transaction: " + db.lastError().text());
                 // Commit failed — leave flag false for retry.
             } else {
                 retention_cleanup_done_ = true;
             }
         }
         else {
-            if (settings_.logToFile())
-                Logger::Log("[DB] Error starting cleanup transaction: " + db.lastError().text());
+            Logger::Log("[DB] Error starting cleanup transaction: " + db.lastError().text());
             // Transaction start failed — leave flag false for retry.
         }
     }
@@ -329,9 +316,7 @@ bool DatabaseManager::checkSchemaOnStartup()
 
     // Open database to check schema
     if (!db.open()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error opening database for schema check: " + db.lastError().text());
-        }
+        Logger::Log("[DB] Error opening database for schema check: " + db.lastError().text());
         return false;
     }
 
@@ -354,9 +339,7 @@ bool DatabaseManager::validateSchema()
 {
     QSqlQuery query(db);
     if (!query.exec("PRAGMA table_info(durations)")) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error checking table schema: " + query.lastError().text());
-        }
+        Logger::Log("[DB] Error checking table schema: " + query.lastError().text());
         return false;
     }
 
@@ -376,12 +359,10 @@ bool DatabaseManager::validateSchema()
     }
 
     if (!hasStartDate || !hasStartTime || !hasSegmentId) {
-        if (settings_.logToFile()) {
-            Logger::Log(QString("[DB] Schema validation failed: start_date=%1, start_time=%2, segment_id=%3")
-                .arg(hasStartDate ? "present" : "MISSING")
-                .arg(hasStartTime ? "present" : "MISSING")
-                .arg(hasSegmentId ? "present" : "MISSING"));
-        }
+        Logger::Log(QString("[DB] Schema validation failed: start_date=%1, start_time=%2, segment_id=%3")
+            .arg(hasStartDate ? "present" : "MISSING")
+            .arg(hasStartTime ? "present" : "MISSING")
+            .arg(hasSegmentId ? "present" : "MISSING"));
         return false;
     }
 
@@ -392,9 +373,7 @@ bool DatabaseManager::ensureIsFinalizedColumn()
 {
     QSqlQuery tableInfo(db);
     if (!tableInfo.exec("PRAGMA table_info(durations)")) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error checking table_info for is_finalized migration: " + tableInfo.lastError().text());
-        }
+        Logger::Log("[DB] Error checking table_info for is_finalized migration: " + tableInfo.lastError().text());
         return false;
     }
 
@@ -410,23 +389,17 @@ bool DatabaseManager::ensureIsFinalizedColumn()
         return true;
     }
 
-    if (settings_.logToFile()) {
-        Logger::Log("[DB] Migrating schema: adding durations.is_finalized and marking existing rows as finalized");
-    }
+    Logger::Log("[DB] Migrating schema: adding durations.is_finalized and marking existing rows as finalized");
 
     QSqlQuery alterQuery(db);
     if (!alterQuery.exec("ALTER TABLE durations ADD COLUMN is_finalized INTEGER NOT NULL DEFAULT 0")) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error adding is_finalized column: " + alterQuery.lastError().text());
-        }
+        Logger::Log("[DB] Error adding is_finalized column: " + alterQuery.lastError().text());
         return false;
     }
 
     QSqlQuery migrateQuery(db);
     if (!migrateQuery.exec("UPDATE durations SET is_finalized = 1")) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error finalizing migrated rows: " + migrateQuery.lastError().text());
-        }
+        Logger::Log("[DB] Error finalizing migrated rows: " + migrateQuery.lastError().text());
         return false;
     }
 
@@ -437,9 +410,7 @@ bool DatabaseManager::ensureSegmentIdColumn()
 {
     QSqlQuery tableInfo(db);
     if (!tableInfo.exec("PRAGMA table_info(durations)")) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error checking table_info for segment_id migration: " + tableInfo.lastError().text());
-        }
+        Logger::Log("[DB] Error checking table_info for segment_id migration: " + tableInfo.lastError().text());
         return false;
     }
 
@@ -455,9 +426,7 @@ bool DatabaseManager::ensureSegmentIdColumn()
         return true;
     }
 
-    if (settings_.logToFile()) {
-        Logger::Log("[DB] Migrating schema: rebuilding durations table with segment_id identity");
-    }
+    Logger::Log("[DB] Migrating schema: rebuilding durations table with segment_id identity");
 
     if (!db.transaction()) {
         return false;
@@ -527,9 +496,7 @@ bool DatabaseManager::ensureSegmentIdColumn()
         return false;
     }
 
-    if (settings_.logToFile()) {
-        Logger::Log(QString("[DB] segment_id migration completed for %1 rows").arg(migratedRows));
-    }
+    Logger::Log(QString("[DB] segment_id migration completed for %1 rows").arg(migratedRows));
 
     return true;
 }
@@ -542,9 +509,7 @@ bool DatabaseManager::ensureSettingsTable()
             "key TEXT PRIMARY KEY,"
             "value TEXT NOT NULL"
             ")")) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error creating app_settings table: " + query.lastError().text());
-        }
+        Logger::Log("[DB] Error creating app_settings table: " + query.lastError().text());
         return false;
     }
 
@@ -590,12 +555,10 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
 
     // Copy the database file
     bool success = QFile::copy(db.databaseName(), backupName);
-    
+
     if (!success) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error: Failed to create backup of database");
-        }
-    } else if (settings_.logToFile()) {
+        Logger::Log("[DB] Error: Failed to create backup of database");
+    } else {
         Logger::Log("[DB] Created database backup: " + backupName);
     }
 
@@ -618,20 +581,15 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
         }
         
         durationsFile.close();
-        
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Created durations log: " + durationsFileName);
-        }
-    } else if (settings_.logToFile()) {
+        Logger::Log("[DB] Created durations log: " + durationsFileName);
+    } else {
         Logger::Log("[DB] Warning: Could not create durations log file");
     }
 
     // Reopen database if it was open before
     if (wasOpen) {
         if (!db.open()) {
-            if (settings_.logToFile()) {
-                Logger::Log("[DB] CRITICAL: Failed to reopen database after backup: " + db.lastError().text());
-            }
+            Logger::Log("[DB] CRITICAL: Failed to reopen database after backup: " + db.lastError().text());
             return false;  // Signal backup failure since DB is now unusable
         }
     }
@@ -663,22 +621,19 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
 
     // Create backup before any write operation
     if (!createBackup(durations, mode)) {
-        if (settings_.logToFile()) {
+        {
             QString modeStr = (mode == TransactionMode::Replace) ? "REPLACE" : "APPEND";
             Logger::Log("[DB] Warning: Backup failed before " + modeStr + " operation - proceeding without backup");
         }
     }
 
     if (!lazyOpen()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Could not lazy open DB to save Durations");
-        }
+        Logger::Log("[DB] Could not lazy open DB to save Durations");
         return false;
     }
 
     if (!db.transaction()) {
-        if (settings_.logToFile())
-            Logger::Log("[DB] Error starting transaction for Saving: " + db.lastError().text());
+        Logger::Log("[DB] Error starting transaction for Saving: " + db.lastError().text());
         lazyClose();
         return false;
     }
@@ -688,12 +643,11 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
         QSqlQuery clearQuery(db);
         if (!clearQuery.exec("DELETE FROM durations")) {
             db.rollback();
-            if (settings_.logToFile())
-                Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
+            Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
             lazyClose();
             return false;
         }
-	}
+    }
 
     // Delete orphaned segment_ids that were merged away by cleanDurations.
     // This must happen inside the same transaction as the INSERT for atomicity.
@@ -704,8 +658,7 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
             deleteOrphanQuery.bindValue(":segment_id", orphanId);
             if (!deleteOrphanQuery.exec()) {
                 db.rollback();
-                if (settings_.logToFile())
-                    Logger::Log("[DB] Error deleting orphaned segment_id: " + deleteOrphanQuery.lastError().text());
+                Logger::Log("[DB] Error deleting orphaned segment_id: " + deleteOrphanQuery.lastError().text());
                 lazyClose();
                 return false;
             }
@@ -732,15 +685,14 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
 
         if (!query.exec()) {
             db.rollback();
-            if (settings_.logToFile())
-                Logger::Log("[DB] Error inserting duration: " + query.lastError().text());
+            Logger::Log("[DB] Error inserting duration: " + query.lastError().text());
             lazyClose();
             return false;
         }
     }
 
     bool commitSuccessful = db.commit();
-    if (!commitSuccessful && settings_.logToFile()) {
+    if (!commitSuccessful) {
         Logger::Log("[DB] Error committing save transaction: " + db.lastError().text());
     }
 
@@ -769,22 +721,16 @@ bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& histo
     allDurations.insert(allDurations.end(), currentSessionDurations.begin(), currentSessionDurations.end());
 
     if (!createBackup(allDurations, TransactionMode::Replace)) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Warning: Backup failed before REPLACE operation - proceeding without backup");
-        }
+        Logger::Log("[DB] Warning: Backup failed before REPLACE operation - proceeding without backup");
     }
 
     if (!lazyOpen()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Could not lazy open DB to replace durations");
-        }
+        Logger::Log("[DB] Could not lazy open DB to replace durations");
         return false;
     }
 
     if (!db.transaction()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error starting transaction for replace: " + db.lastError().text());
-        }
+        Logger::Log("[DB] Error starting transaction for replace: " + db.lastError().text());
         lazyClose();
         return false;
     }
@@ -792,9 +738,7 @@ bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& histo
     QSqlQuery clearQuery(db);
     if (!clearQuery.exec("DELETE FROM durations")) {
         db.rollback();
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
-        }
+        Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
         lazyClose();
         return false;
     }
@@ -819,9 +763,7 @@ bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& histo
 
         if (!finalizedInsert.exec()) {
             db.rollback();
-            if (settings_.logToFile()) {
-                Logger::Log("[DB] Error inserting finalized duration: " + finalizedInsert.lastError().text());
-            }
+            Logger::Log("[DB] Error inserting finalized duration: " + finalizedInsert.lastError().text());
             lazyClose();
             return false;
         }
@@ -847,16 +789,14 @@ bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& histo
 
         if (!unfinalizedInsert.exec()) {
             db.rollback();
-            if (settings_.logToFile()) {
-                Logger::Log("[DB] Error inserting current-session duration: " + unfinalizedInsert.lastError().text());
-            }
+            Logger::Log("[DB] Error inserting current-session duration: " + unfinalizedInsert.lastError().text());
             lazyClose();
             return false;
         }
     }
 
     const bool success = db.commit();
-    if (!success && settings_.logToFile()) {
+    if (!success) {
         Logger::Log("[DB] Error committing replace transaction: " + db.lastError().text());
     }
 
@@ -889,17 +829,13 @@ LoadResult DatabaseManager::loadDurations()
     LoadResult result;
 
     if (!lazyOpen()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Could not lazy open DB to load Durations");
-        }
+        Logger::Log("[DB] Could not lazy open DB to load Durations");
         return result;
     }
 
     // Start read transaction for consistent snapshot
     if (!db.transaction()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error starting read transaction: " + db.lastError().text());
-        }
+        Logger::Log("[DB] Error starting read transaction: " + db.lastError().text());
         lazyClose();
         return result;
     }
@@ -909,9 +845,7 @@ LoadResult DatabaseManager::loadDurations()
     query.prepare("SELECT segment_id, type, duration, start_date, start_time, end_date, end_time FROM durations WHERE is_finalized = 1 ORDER BY start_date, start_time");
     if (!query.exec()) {
         db.rollback();
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error executing load query: " + query.lastError().text());
-        }
+        Logger::Log("[DB] Error executing load query: " + query.lastError().text());
         lazyClose();
         return result;
     }
@@ -935,9 +869,7 @@ LoadResult DatabaseManager::loadDurations()
         // Validate type enum range
         if (typeInt != static_cast<int>(DurationType::Activity) &&
             typeInt != static_cast<int>(DurationType::Pause)) {
-            if (settings_.logToFile()) {
-                Logger::Log(QString("[DB] Warning: Invalid type value %1, skipping entry").arg(typeInt));
-            }
+            Logger::Log(QString("[DB] Warning: Invalid type value %1, skipping entry").arg(typeInt));
             result.skipped++;
             continue;
         }
@@ -946,20 +878,16 @@ LoadResult DatabaseManager::loadDurations()
 
         // Validate timestamps
         if (!startDate.isValid() || !startTime.isValid() || !endDate.isValid() || !endTime.isValid()) {
-            if (settings_.logToFile()) {
-                Logger::Log(QString("[DB] Warning: Skipped invalid timestamp entry - StartDate: %1, StartTime: %2, EndDate: %3, EndTime: %4")
-                    .arg(startDate.toString()).arg(startTime.toString()).arg(endDate.toString()).arg(endTime.toString()));
-            }
+            Logger::Log(QString("[DB] Warning: Skipped invalid timestamp entry - StartDate: %1, StartTime: %2, EndDate: %3, EndTime: %4")
+                .arg(startDate.toString()).arg(startTime.toString()).arg(endDate.toString()).arg(endTime.toString()));
             result.skipped++;
             continue;
         }
 
         // Validate start <= end
         if (startDateTime > endDateTime) {
-            if (settings_.logToFile()) {
-                Logger::Log(QString("[DB] Warning: Skipped entry with start > end - Start: %1, End: %2")
-                    .arg(startDateTime.toString(Qt::ISODate)).arg(endDateTime.toString(Qt::ISODate)));
-            }
+            Logger::Log(QString("[DB] Warning: Skipped entry with start > end - Start: %1, End: %2")
+                .arg(startDateTime.toString(Qt::ISODate)).arg(endDateTime.toString(Qt::ISODate)));
             result.skipped++;
             continue;
         }
@@ -968,16 +896,12 @@ LoadResult DatabaseManager::loadDurations()
         qint64 computedDuration = startDateTime.msecsTo(endDateTime);
 
         if (storedDuration < 0) {
-            if (settings_.logToFile()) {
-                Logger::Log(QString("[DB] Warning: Negative stored duration %1ms - using computed duration %2ms")
-                    .arg(storedDuration).arg(computedDuration));
-            }
+            Logger::Log(QString("[DB] Warning: Negative stored duration %1ms - using computed duration %2ms")
+                .arg(storedDuration).arg(computedDuration));
             result.repaired++;
         } else if (qAbs(computedDuration - storedDuration) > kDurationReconciliationToleranceMs) {
-            if (settings_.logToFile()) {
-                Logger::Log(QString("[DB] Warning: Duration mismatch (stored: %1ms, computed: %2ms) - using computed value")
-                    .arg(storedDuration).arg(computedDuration));
-            }
+            Logger::Log(QString("[DB] Warning: Duration mismatch (stored: %1ms, computed: %2ms) - using computed value")
+                .arg(storedDuration).arg(computedDuration));
             result.repaired++;
         }
 
@@ -991,7 +915,7 @@ LoadResult DatabaseManager::loadDurations()
     db.rollback();
     lazyClose();
 
-    if ((result.skipped > 0 || result.repaired > 0) && settings_.logToFile()) {
+    if (result.skipped > 0 || result.repaired > 0) {
         Logger::Log(QString("[DB] loadDurations reconciliation summary: skipped=%1, repaired=%2")
             .arg(result.skipped)
             .arg(result.repaired));
@@ -1015,9 +939,7 @@ EntriesForDateResult DatabaseManager::hasEntriesForDate(const QDate& date)
     QMutexLocker locker(&db_mutex_);
 
     if (!lazyOpen()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Could not lazy open DB to check entries for date");
-        }
+        Logger::Log("[DB] Could not lazy open DB to check entries for date");
         return EntriesForDateResult::Unknown;
     }
 
@@ -1031,9 +953,7 @@ EntriesForDateResult DatabaseManager::hasEntriesForDate(const QDate& date)
         int count = query.value(0).toInt();
         result = (count > 0) ? EntriesForDateResult::Yes : EntriesForDateResult::No;
     } else {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error checking entries for date: " + query.lastError().text());
-        }
+        Logger::Log("[DB] Error checking entries for date: " + query.lastError().text());
     }
 
     lazyClose();
@@ -1061,9 +981,7 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
     }
 
     if (!lazyOpen()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Could not lazy open DB to save checkpoint");
-        }
+        Logger::Log("[DB] Could not lazy open DB to save checkpoint");
         return false;
     }
 
@@ -1077,9 +995,7 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
     QString endTimeStr = endUtc.time().toString("HH:mm:ss.zzz");
 
     if (!db.transaction()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error starting transaction for checkpoint: " + db.lastError().text());
-        }
+        Logger::Log("[DB] Error starting transaction for checkpoint: " + db.lastError().text());
         lazyClose();
         return false;
     }
@@ -1097,16 +1013,14 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
 
     if (!updateQuery.exec()) {
         db.rollback();
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error updating checkpoint by segment_id: " + updateQuery.lastError().text());
-        }
+        Logger::Log("[DB] Error updating checkpoint by segment_id: " + updateQuery.lastError().text());
         lazyClose();
         return false;
     }
 
     if (updateQuery.numRowsAffected() > 0) {
         success = db.commit();
-        if (!success && settings_.logToFile()) {
+        if (!success) {
             Logger::Log("[DB] Error committing checkpoint update: " + db.lastError().text());
         }
     } else {
@@ -1125,15 +1039,13 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
 
         if (!insertQuery.exec()) {
             db.rollback();
-            if (settings_.logToFile()) {
-                Logger::Log("[DB] Error inserting checkpoint by segment_id: " + insertQuery.lastError().text());
-            }
+            Logger::Log("[DB] Error inserting checkpoint by segment_id: " + insertQuery.lastError().text());
             lazyClose();
             return false;
         }
 
         success = db.commit();
-        if (!success && settings_.logToFile()) {
+        if (!success) {
             Logger::Log("[DB] Error committing checkpoint insert: " + db.lastError().text());
         }
     }
@@ -1170,16 +1082,12 @@ bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durati
     }
 
     if (!lazyOpen()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Could not lazy open DB to update durations");
-        }
+        Logger::Log("[DB] Could not lazy open DB to update durations");
         return false;
     }
 
     if (!db.transaction()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error starting transaction for updating durations: " + db.lastError().text());
-        }
+        Logger::Log("[DB] Error starting transaction for updating durations: " + db.lastError().text());
         lazyClose();
         return false;
     }
@@ -1193,8 +1101,7 @@ bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durati
             deleteOrphanQuery.bindValue(":segment_id", orphanId);
             if (!deleteOrphanQuery.exec()) {
                 db.rollback();
-                if (settings_.logToFile())
-                    Logger::Log("[DB] Error deleting orphaned segment_id: " + deleteOrphanQuery.lastError().text());
+                Logger::Log("[DB] Error deleting orphaned segment_id: " + deleteOrphanQuery.lastError().text());
                 lazyClose();
                 return false;
             }
@@ -1235,9 +1142,7 @@ bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durati
 
         if (!updateQuery.exec()) {
             db.rollback();
-            if (settings_.logToFile()) {
-                Logger::Log("[DB] Error updating duration by segment_id: " + updateQuery.lastError().text());
-            }
+            Logger::Log("[DB] Error updating duration by segment_id: " + updateQuery.lastError().text());
             lazyClose();
             return false;
         }
@@ -1253,9 +1158,7 @@ bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durati
 
             if (!insertQuery.exec()) {
                 db.rollback();
-                if (settings_.logToFile()) {
-                    Logger::Log("[DB] Error inserting duration by segment_id: " + insertQuery.lastError().text());
-                }
+                Logger::Log("[DB] Error inserting duration by segment_id: " + insertQuery.lastError().text());
                 lazyClose();
                 return false;
             }
@@ -1264,9 +1167,9 @@ bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durati
     }
 
     bool success = db.commit();
-    if (success && settings_.logToFile()) {
+    if (success) {
         Logger::Log(QString("[DB] Upserted %1 durations").arg(count));
-    } else if (!success && settings_.logToFile()) {
+    } else {
         Logger::Log("[DB] Error committing update transaction: " + db.lastError().text());
     }
 
@@ -1302,9 +1205,7 @@ void DatabaseManager::flushToDisc()
     }
 
     if (!lazyOpen()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Could not open DB to flush to disc");
-        }
+        Logger::Log("[DB] Could not open DB to flush to disc");
         return;
     }
 
@@ -1314,9 +1215,7 @@ void DatabaseManager::flushToDisc()
     // guaranteed to be physically on disk before we return.  During normal
     // operation we run at NORMAL (set in lazyOpen) for performance.
     if (!query.exec("PRAGMA synchronous=FULL")) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Failed to set synchronous mode: " + query.lastError().text());
-        }
+        Logger::Log("[DB] Failed to set synchronous mode: " + query.lastError().text());
     }
 
     // Execute a no-op statement to trigger the synchronous flush.
@@ -1325,9 +1224,7 @@ void DatabaseManager::flushToDisc()
 
     lazyClose();
 
-    if (settings_.logToFile()) {
-        Logger::Log("[DB] Flush to disc completed");
-    }
+    Logger::Log("[DB] Flush to disc completed");
 }
 
 std::deque<OrphanCheckpoint> DatabaseManager::loadUnfinalizedCheckpoints()
@@ -1343,9 +1240,7 @@ std::deque<OrphanCheckpoint> DatabaseManager::loadUnfinalizedCheckpoints()
     QSqlQuery query(db);
     query.prepare("SELECT id, segment_id, type, duration, start_date, start_time, end_date, end_time FROM durations WHERE is_finalized = 0 ORDER BY id ASC");
     if (!query.exec()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error loading orphan checkpoints: " + query.lastError().text());
-        }
+        Logger::Log("[DB] Error loading orphan checkpoints: " + query.lastError().text());
         lazyClose();
         return orphans;
     }
@@ -1392,9 +1287,7 @@ bool DatabaseManager::reconcileUnfinalizedCheckpoints(const std::vector<long lon
     }
 
     if (!db.transaction()) {
-        if (settings_.logToFile()) {
-            Logger::Log("[DB] Error starting orphan reconciliation transaction: " + db.lastError().text());
-        }
+        Logger::Log("[DB] Error starting orphan reconciliation transaction: " + db.lastError().text());
         lazyClose();
         return false;
     }
