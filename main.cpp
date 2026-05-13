@@ -101,6 +101,7 @@ int main(int argc, char *argv[])
 	QTimer timer;
 
 	Settings settings(QDir(QCoreApplication::applicationDirPath()).filePath("user-settings.ini"));
+	Logger::registerSettings(settings);
 	LockStateWatcher lockstate_watcher(settings);
 	DatabaseManager database_manager(settings);
 	TimeTracker time_tracker(settings, database_manager);
