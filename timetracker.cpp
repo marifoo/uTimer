@@ -1,14 +1,22 @@
 /**
- * TimeTracker - Core timing engine managing Activity/Pause/None states.
+ * TimeTracker — Core timing engine managing Activity/Pause/None states.
  *
  * Architecture:
- * - State machine with three modes: Activity (timing work), Pause (timing break), None (stopped)
- * - Completed segments stored in session_.durations deque; ongoing segment tracked by timer_.elapsed()
- * - Checkpoints save ongoing Activity segments to DB every 5 minutes for crash recovery
- * - All public methods are thread-safe via QRecursiveMutex
- * - Per-session mutable state is grouped in SessionState (session_) with explicit
- *   transition methods that log old→new values, replacing the old pattern of
- *   scattered raw-field mutations
+ * - State machine with three modes: Activity, Pause, None.
+ * - Completed segments stored in session_.durations (deque); ongoing
+ *   segment tracked by timer_.elapsed() and session_.segment_start_time.
+ * - Checkpoints persist the ongoing Activity segment every 5 min.
+ * - Thread-safe via QRecursiveMutex; per-session mutable state grouped
+ *   in SessionState with explicit logged transitions.
+ *
+ * Day-boundary policy (see plan.md §3 for the formal contract):
+ * - TimeTracker NEVER stores or persists a segment whose
+ *   startTime.date() != endTime.date(). Such segments are silently
+ *   discarded by addDuration() and refused by saveCheckpointInternal().
+ * - The owner of the day boundary is MainWin: a scheduled stop at
+ *   23:59:59.500 and a 100 ms watchdog drive the standard Stop
+ *   pipeline. TimeTracker itself never schedules timers for the day
+ *   boundary and never splits a segment at midnight.
  *
  * Checkpoint behavior:
  * - Only saved during Activity mode (not Pause or Stopped)
@@ -287,7 +295,7 @@ void TimeTracker::startTimer(const QDateTime& now)
         qint64 t_pause = timer_.restart();
         if (t_pause > 0) {
             if (session_.durations.empty() || session_.durations.back().type != DurationType::Pause) {
-                addDurationWithMidnightSplit(DurationType::Pause, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
+                addDuration(DurationType::Pause, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
             } else {
                 session_.durations.back().endTime = now;
                 session_.durations.back().duration = session_.durations.back().startTime.msecsTo(now);
@@ -367,7 +375,7 @@ void TimeTracker::startTimer(const QDateTime& now)
         }
         if (shouldAddBootTime) {
             QDateTime bootStart = now.addMSecs(-static_cast<qint64>(boot_time_sec) * 1000);
-            addDurationWithMidnightSplit(DurationType::Activity, bootStart, now);
+            addDuration(DurationType::Activity, bootStart, now);
         }
         timer_.start();
         mode_ = Mode::Activity;
@@ -397,7 +405,7 @@ void TimeTracker::pauseTimer(const QDateTime& now)
         Logger::Log("[DEBUG] Pausing Timer from Activity - D=" + QString::number(session_.durations.size()));
     }
     timer_.restart();
-    addDurationWithMidnightSplit(DurationType::Activity, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
+    addDuration(DurationType::Activity, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
 
     finalizeActivityToPause(now);
     if (settings_.logToFile()) {
@@ -465,12 +473,12 @@ void TimeTracker::backpauseTimer(const QDateTime& now)
 
     // Activity segment: segment_start_time to activity_end
     if (activity_end > session_.segment_start_time) {
-        addDurationWithMidnightSplit(DurationType::Activity, session_.segment_start_time, activity_end, session_.current_checkpoint_segment_id);
+        addDuration(DurationType::Activity, session_.segment_start_time, activity_end, session_.current_checkpoint_segment_id);
     }
 
     // Pause segment: activity_end to now
     QDateTime pause_start = activity_end;
-    addDurationWithMidnightSplit(DurationType::Pause, pause_start, now);
+    addDuration(DurationType::Pause, pause_start, now);
 
     finalizeActivityToPause(now);
     if (settings_.logToFile()) {
@@ -539,16 +547,17 @@ void TimeTracker::stopTimer(const QDateTime& now)
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Stopping from Pause - D=" + QString::number(session_.durations.size()));
         }
-        addDurationWithMidnightSplit(DurationType::Pause, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
+        addDuration(DurationType::Pause, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
     } else if (mode_ == Mode::Activity) {
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Stopping from Activity - D=" + QString::number(session_.durations.size()));
         }
-        addDurationWithMidnightSplit(DurationType::Activity, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
+        addDuration(DurationType::Activity, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
     }
     mode_ = Mode::None;
     session_.clearSegment(settings_);
-    checkpointTimer_.stop(); // Stop periodic checkpoint saving when timer is stopped
+    checkpointTimer_.stop();
+    was_active_before_autopause_ = false;
     if (settings_.logToFile()) {
         Logger::Log("[TIMER] Timer stopped <<");
     }
@@ -577,12 +586,19 @@ void TimeTracker::useTimerViaButton(Button button)
     QMutexLocker locker(&mutex_);
 #ifndef QT_NO_DEBUG
     StateGuard guard(*this, "useTimerViaButton");
-    guard.markTransitioned(); // All branches intentionally mutate state
+    guard.markTransitioned();
 #endif
-    // Capture wall-clock time once for the entire operation. All helpers
-    // receive this single timestamp, preventing races from preemption or
-    // clock skew between successive QDateTime::currentDateTime() calls.
     const QDateTime now = QDateTime::currentDateTime();
+    if (discardCrossMidnightOngoingAndStop(now)) {
+        // Ongoing segment crossed midnight — engine is now in None state.
+        // Whatever the user asked for, discard it: per the day-boundary
+        // policy the timer must remain stopped until the user starts
+        // again manually.
+#ifndef QT_NO_DEBUG
+        checkDurationInvariants();
+#endif
+        return;
+    }
     switch (button) {
         case Button::Start: startTimer(now); break;
         case Button::Pause: pauseTimer(now); break;
@@ -609,12 +625,18 @@ void TimeTracker::useTimerViaLockEvent(LockEvent event)
     QMutexLocker locker(&mutex_);
 #ifndef QT_NO_DEBUG
     StateGuard guard(*this, "useTimerViaLockEvent");
-    guard.markTransitioned(); // Lock events may trigger backpause/resume
+    guard.markTransitioned();
 #endif
-    // Capture wall-clock time once for the entire operation. All helpers
-    // receive this single timestamp, preventing races from preemption or
-    // clock skew between successive QDateTime::currentDateTime() calls.
     const QDateTime now = QDateTime::currentDateTime();
+    if (discardCrossMidnightOngoingAndStop(now)) {
+        // Already-forced stopped — ignore the lock event for engine
+        // purposes. was_active_before_autopause_ is already cleared inside
+        // the helper so a subsequent Unlock does not restart.
+#ifndef QT_NO_DEBUG
+        checkDurationInvariants();
+#endif
+        return;
+    }
     if (event == LockEvent::Lock) {
         is_locked_ = true;
         // Save a checkpoint when lock is detected (only if actively tracking time)
@@ -789,11 +811,14 @@ std::pair<int, int> TimeTracker::getLastHistoryLoadStats() const
 std::optional<TimeDuration> TimeTracker::getOngoingDuration() const
 {
     QMutexLocker locker(&mutex_);
-    if (mode_ == Mode::None) {
+    if (mode_ == Mode::None) return std::nullopt;
+    const QDateTime now = QDateTime::currentDateTime();
+    if (!session_.segment_start_time.isValid() || session_.segment_start_time >= now) {
         return std::nullopt;
     }
-    QDateTime now = QDateTime::currentDateTime();
-    if (!session_.segment_start_time.isValid() || session_.segment_start_time >= now) {
+    if (session_.segment_start_time.date() != now.date()) {
+        // Cross-midnight ongoing — about to be force-stopped by the
+        // watchdog within ~100 ms. Don't expose this transient state.
         return std::nullopt;
     }
     DurationType type = (mode_ == Mode::Activity) ? DurationType::Activity : DurationType::Pause;
@@ -891,167 +916,98 @@ EntriesForDateResult TimeTracker::hasEntriesForDate(const QDate& date)
 }
 
 /**
- * Pure computation: splits a duration at midnight boundaries without mutating
- * any TimeTracker state. Returns a MidnightSplitResult that the caller can
- * apply explicitly via applyMidnightSplit().
+ * Appends a single same-day segment to session_.durations.
  *
- * If the duration spans midnight, the result contains:
- * - previous_day_entries: segments ending at 23:59:59.999 (for immediate DB save)
- * - new_entries: segments starting at 00:00:00.000 (for current-day in-memory)
- * - updated_segment_start_time: start of the new day
+ * Cross-midnight inputs are silently discarded (with a [MIDNIGHT] log line).
+ * The scheduled stop in MainWin at 23:59:59.500 and the watchdog in
+ * MainWin::update() prevent cross-midnight inputs from reaching here;
+ * this discard is a last-line defence.
  *
- * If no midnight crossing, new_entries contains a single segment and
- * previous_day_entries is empty.
+ * Zero-duration and negative-duration inputs are also dropped.
  */
-MidnightSplitResult TimeTracker::computeMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId) const
+void TimeTracker::addDuration(DurationType type,
+                              const QDateTime& startTime,
+                              const QDateTime& endTime,
+                              const QString& segmentId)
 {
-    MidnightSplitResult result;
-
-    qint64 duration = startTime.msecsTo(endTime);
+    const qint64 duration = startTime.msecsTo(endTime);
     if (duration <= 0) {
         if (settings_.logToFile()) {
             Logger::Log("[DEBUG] Ignoring non-positive duration");
         }
-        return result;
+        return;
     }
-
-    // Check if midnight was crossed (this should rarely happen due to auto-stop/restart)
     if (startTime.date() != endTime.date()) {
-        result.crossed_midnight = true;
-
         if (settings_.logToFile()) {
-            Logger::Log(QString("[WARNING] Unexpected midnight crossing detected - duration spans %1 to %2")
-                .arg(startTime.toString(Qt::ISODate))
-                .arg(endTime.toString(Qt::ISODate)));
+            Logger::Log(QString("[MIDNIGHT] Discarding cross-midnight segment "
+                                "(type=%1, start=%2, end=%3, duration=%4 ms)")
+                .arg(type == DurationType::Activity ? "Activity" : "Pause")
+                .arg(startTime.toString(Qt::ISODateWithMs))
+                .arg(endTime.toString(Qt::ISODateWithMs))
+                .arg(duration));
         }
-
-        // Fallback: Split at midnight boundary
-        QDateTime endOfStartDay(startTime.date(), QTime(23, 59, 59, 999));
-        QDateTime startOfNewDay(endTime.date(), QTime(0, 0, 0, 0));
-
-        if (startTime < endOfStartDay) {
-            result.previous_day_entries.emplace_back(TimeDuration(type, startTime, endOfStartDay, segmentId));
-            if (settings_.logToFile()) {
-                Logger::Log(QString("[DEBUG] Split: before-midnight segment (%1, %2ms)")
-                    .arg(type == DurationType::Activity ? "Activity" : "Pause")
-                    .arg(startTime.msecsTo(endOfStartDay)));
-            }
-        }
-
-        if (startOfNewDay < endTime) {
-            result.new_entries.emplace_back(TimeDuration(type, startOfNewDay, endTime));
-            result.updated_segment_start_time = startOfNewDay;
-            if (settings_.logToFile()) {
-                Logger::Log(QString("[DEBUG] Split: after-midnight segment (%1, %2ms)")
-                    .arg(type == DurationType::Activity ? "Activity" : "Pause")
-                    .arg(startOfNewDay.msecsTo(endTime)));
-            }
-        }
-        return result;
+        return;
     }
-
-    // Normal case: duration does not cross midnight
-    result.new_entries.emplace_back(TimeDuration(type, startTime, endTime, segmentId));
+    session_.durations.emplace_back(TimeDuration(type, startTime, endTime, segmentId));
     if (settings_.logToFile()) {
-        Logger::Log(QString("[DEBUG] Added duration (%1, %2ms)")
+        Logger::Log(QString("[DEBUG] Added duration (%1, %2 ms)")
             .arg(type == DurationType::Activity ? "Activity" : "Pause")
             .arg(duration));
     }
-    return result;
+}
+
+bool TimeTracker::isOngoingSegmentCrossMidnight() const
+{
+    QMutexLocker locker(&mutex_);
+    if (mode_ == Mode::None) return false;
+    if (!session_.segment_start_time.isValid()) return false;
+    return session_.segment_start_time.date() != QDate::currentDate();
 }
 
 /**
- * Applies a MidnightSplitResult to the session state.
+ * Forces the engine into the stopped state when the ongoing segment has
+ * crossed midnight, discarding the in-flight segment.
  *
- * For midnight-crossing splits:
- * 1. Appends previous_day_entries to session_.durations
- * 2. Saves previous day to DB
- * 3. Clears durations for the new day
- * 4. Appends new_entries (after-midnight segments)
- * 5. Updates segment_start_time if needed
+ * Returns true when it fired (telling the caller to abandon any pending
+ * transition). Safe to call multiple times; only the first call does real work.
  *
- * For normal (no midnight crossing) splits:
- * 1. Simply appends new_entries to session_.durations
- *
- * Memory allocation failures trigger emergency saves to prevent data loss.
+ * This does NOT touch midnight_timer_ in MainWin or the GUI. Those are kept
+ * in sync because the watchdog in MainWin::update() polls
+ * isOngoingSegmentCrossMidnight() every 100 ms and, on a true result,
+ * routes through content_widget_->pressedStopButton().
  */
-void TimeTracker::applyMidnightSplit(const MidnightSplitResult& result)
+bool TimeTracker::discardCrossMidnightOngoingAndStop(const QDateTime& now)
 {
-    if (result.crossed_midnight) {
-        // Append before-midnight entries
-        for (const auto& entry : result.previous_day_entries) {
-            try {
-                session_.durations.emplace_back(entry);
-            } catch (const std::bad_alloc&) {
-                if (settings_.logToFile()) {
-                    Logger::Log("[CRITICAL] Memory allocation failed in applyMidnightSplit (before midnight) - attempting emergency save");
-                }
-                appendDurationsToDB();
-                session_.markUnsaved(settings_);
-                return;
-            }
-        }
+    if (mode_ == Mode::None) return false;
+    if (!session_.segment_start_time.isValid()) return false;
+    if (session_.segment_start_time.date() == now.date()) return false;
 
-        // Save the previous day's data
-        if (appendDurationsToDB()) {
-            session_.resetForNewSession(settings_);
-            if (settings_.logToFile()) {
-                Logger::Log("[DB] Previous day saved to DB (fallback midnight handling)");
-            }
-        } else {
+    if (settings_.logToFile()) {
+        Logger::Log(QString("[MIDNIGHT] Cross-midnight ongoing detected "
+                            "(segment_start=%1, now=%2) — discarding segment, forcing stop")
+            .arg(session_.segment_start_time.toString(Qt::ISODateWithMs))
+            .arg(now.toString(Qt::ISODateWithMs)));
+    }
+
+    // Best-effort: persist any already-completed (same-day) segments that
+    // accumulated before midnight. Only the ONGOING segment is discarded.
+    if (!session_.durations.empty()) {
+        if (!updateDurationsInDB()) {
             session_.markUnsaved(settings_);
             session_.unsaved_durations = session_.durations;
             if (settings_.logToFile()) {
-                Logger::Log("[DB] CRITICAL: Failed to save previous day during midnight crossing - data retained in memory for next save attempt");
+                Logger::Log("[MIDNIGHT] Could not flush completed segments to DB - retained in unsaved buffer");
             }
-            // Data remains in session_.durations and will be saved on next stopTimer() call
-        }
-
-        // Append after-midnight entries
-        for (const auto& entry : result.new_entries) {
-            try {
-                session_.durations.emplace_back(entry);
-            } catch (const std::bad_alloc&) {
-                if (settings_.logToFile()) {
-                    Logger::Log("[CRITICAL] Memory allocation failed in applyMidnightSplit (after midnight) - data may be incomplete");
-                }
-                session_.markUnsaved(settings_);
-                return;
-            }
-        }
-
-        // Update segment_start_time to start of new day
-        if (result.updated_segment_start_time.has_value()) {
-            session_.updateSegmentStartTime(result.updated_segment_start_time.value(), settings_);
-        }
-    } else {
-        // Normal case: no midnight crossing, just append new entries
-        for (const auto& entry : result.new_entries) {
-            try {
-                session_.durations.emplace_back(entry);
-            } catch (const std::bad_alloc&) {
-                if (settings_.logToFile()) {
-                    Logger::Log("[CRITICAL] Memory allocation failed in applyMidnightSplit - attempting emergency save");
-                }
-                appendDurationsToDB();
-                session_.markUnsaved(settings_);
-                return;
-            }
+        } else {
+            session_.resetForNewSession(settings_);
         }
     }
-}
 
-/**
- * Adds a duration segment to the in-memory deque, handling midnight boundaries.
- *
- * This is a thin wrapper that calls the pure computeMidnightSplit() to determine
- * what entries to create, then applies the result via applyMidnightSplit().
- * This separation makes the midnight logic testable independently of state mutation.
- */
-void TimeTracker::addDurationWithMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId)
-{
-    MidnightSplitResult result = computeMidnightSplit(type, startTime, endTime, segmentId);
-    applyMidnightSplit(result);
+    mode_ = Mode::None;
+    session_.clearSegment(settings_);
+    checkpointTimer_.stop();
+    was_active_before_autopause_ = false;
+    return true;
 }
 
 void TimeTracker::saveCheckpoint()
@@ -1083,15 +1039,9 @@ void TimeTracker::saveCheckpointInternal(const QDateTime& now)
 {
     // NOTE: This function assumes the mutex is already held by the caller
 
-    // Don't save checkpoints if feature is disabled
-    if (checkpoint_interval_msec_ == 0) {
-        return;
-    }
-
-    // Only save checkpoint if timer is in Activity mode (not during Pause or Stopped)
-    if (mode_ != Mode::Activity) {
-        return;
-    }
+    if (checkpoint_interval_msec_ == 0) return;
+    if (mode_ != Mode::Activity)        return;
+    if (discardCrossMidnightOngoingAndStop(now)) return;
 
     // Calculate current elapsed time for the ongoing segment
     qint64 elapsed = timer_.elapsed();

@@ -96,27 +96,6 @@ void TimeTrackerTest::test_timetracker_backpause_resets_checkpoint_and_splits()
     QVERIFY(total >= 120000 - 2000); // allow minor tolerance
 }
 
-void TimeTrackerTest::test_timetracker_midnight_split_and_checkpoint_reset()
-{
-    QTemporaryDir tempDir;
-    QVERIFY(tempDir.isValid());
-    QString settingsPath = createSettingsFile(tempDir.path(), 7);
-    Settings settings(settingsPath);
-    DatabaseManager db(settings);
-    TimeTracker tracker(settings, db);
-
-    tracker.mode_ = TimeTracker::Mode::Activity;
-    tracker.session_.segment_start_time = QDateTime(QDate::currentDate().addDays(-1), QTime(23,59,58,0));
-    tracker.addDurationWithMidnightSplit(DurationType::Activity,
-                                         tracker.session_.segment_start_time,
-                                         tracker.session_.segment_start_time.addSecs(5));
-    
-    // Post-midnight part remains in memory
-    QVERIFY(tracker.session_.durations.size() >= 1);
-    
-    // Pre-midnight part should be in DB
-    QCOMPARE(db.hasEntriesForDate(QDate::currentDate().addDays(-1)), EntriesForDateResult::Yes);
-}
 
 void TimeTrackerTest::test_timetracker_lock_events_checkpoint_and_resume()
 {
@@ -503,84 +482,6 @@ void TimeTrackerTest::test_session_state_stop_clears_segment()
     QVERIFY(!tracker.session_.has_unsaved_data);
 }
 
-void TimeTrackerTest::test_compute_midnight_split_no_crossing()
-{
-    // Arrange
-    QTemporaryDir tempDir;
-    QVERIFY(tempDir.isValid());
-    Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
-    TimeTracker tracker(settings, fakeDb);
-
-    QDateTime start = QDateTime::currentDateTime().addSecs(-60);
-    QDateTime end = QDateTime::currentDateTime();
-
-    // Act
-    MidnightSplitResult result = tracker.computeMidnightSplit(DurationType::Activity, start, end);
-
-    // Assert: no midnight crossing, single entry
-    QVERIFY(!result.crossed_midnight);
-    QCOMPARE(result.new_entries.size(), static_cast<size_t>(1));
-    QVERIFY(result.previous_day_entries.empty());
-    QVERIFY(!result.updated_segment_start_time.has_value());
-    QCOMPARE(result.new_entries[0].type, DurationType::Activity);
-    QCOMPARE(result.new_entries[0].startTime, start);
-    QCOMPARE(result.new_entries[0].endTime, end);
-}
-
-void TimeTrackerTest::test_compute_midnight_split_crossing()
-{
-    // Arrange
-    QTemporaryDir tempDir;
-    QVERIFY(tempDir.isValid());
-    Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
-    TimeTracker tracker(settings, fakeDb);
-
-    QDate yesterday = QDate::currentDate().addDays(-1);
-    QDateTime start(yesterday, QTime(23, 59, 58, 0));
-    QDateTime end = start.addSecs(5); // crosses midnight
-
-    // Act
-    MidnightSplitResult result = tracker.computeMidnightSplit(DurationType::Activity, start, end);
-
-    // Assert: midnight crossing detected
-    QVERIFY(result.crossed_midnight);
-    QCOMPARE(result.previous_day_entries.size(), static_cast<size_t>(1));
-    QCOMPARE(result.new_entries.size(), static_cast<size_t>(1));
-    QVERIFY(result.updated_segment_start_time.has_value());
-
-    // Pre-midnight entry ends at 23:59:59.999
-    QCOMPARE(result.previous_day_entries[0].endTime.time(), QTime(23, 59, 59, 999));
-    QCOMPARE(result.previous_day_entries[0].startTime, start);
-    QCOMPARE(result.previous_day_entries[0].type, DurationType::Activity);
-
-    // Post-midnight entry starts at 00:00:00.000
-    QCOMPARE(result.new_entries[0].startTime.time(), QTime(0, 0, 0, 0));
-    QCOMPARE(result.new_entries[0].type, DurationType::Activity);
-    QCOMPARE(result.updated_segment_start_time.value().time(), QTime(0, 0, 0, 0));
-}
-
-void TimeTrackerTest::test_compute_midnight_split_zero_duration()
-{
-    // Arrange
-    QTemporaryDir tempDir;
-    QVERIFY(tempDir.isValid());
-    Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
-    TimeTracker tracker(settings, fakeDb);
-
-    QDateTime now = QDateTime::currentDateTime();
-
-    // Act: zero duration
-    MidnightSplitResult result = tracker.computeMidnightSplit(DurationType::Activity, now, now);
-
-    // Assert: no entries produced
-    QVERIFY(!result.crossed_midnight);
-    QVERIFY(result.new_entries.empty());
-    QVERIFY(result.previous_day_entries.empty());
-}
-
 // ============================================================================
 // Boot time + hasEntriesForDate tri-state tests (T18)
 // ============================================================================
@@ -757,4 +658,293 @@ void TimeTrackerTest::test_pause_row_persisted_immediately_on_resume()
     }
     QVERIFY2(hasPause, "Pause row must survive a crash after resume (T19)");
     QVERIFY2(hasActivity, "Activity row must be present in history after pause+resume");
+}
+
+// ============================================================================
+// Midnight forced-stop and cross-midnight discard tests
+// ============================================================================
+
+void TimeTrackerTest::test_addduration_appends_single_same_day_segment()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    QDateTime start = QDateTime::currentDateTime().addSecs(-60);
+    QDateTime end = QDateTime::currentDateTime();
+
+    // Act
+    tracker.addDuration(DurationType::Activity, start, end);
+
+    // Assert
+    QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(1));
+    QCOMPARE(tracker.session_.durations[0].type, DurationType::Activity);
+    QCOMPARE(tracker.session_.durations[0].startTime, start);
+    QCOMPARE(tracker.session_.durations[0].endTime, end);
+}
+
+void TimeTrackerTest::test_addduration_discards_cross_midnight_segment()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    QDate yesterday = QDate::currentDate().addDays(-1);
+    QDateTime start(yesterday, QTime(23, 59, 58, 0));
+    QDateTime end = start.addSecs(5); // crosses midnight
+
+    // Act
+    tracker.addDuration(DurationType::Activity, start, end);
+
+    // Assert: cross-midnight segment was silently discarded
+    QVERIFY(tracker.session_.durations.empty());
+}
+
+void TimeTrackerTest::test_addduration_discards_zero_and_negative_duration()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+    QDateTime now = QDateTime::currentDateTime();
+
+    // Act: zero duration
+    tracker.addDuration(DurationType::Activity, now, now);
+    // Act: negative duration
+    tracker.addDuration(DurationType::Activity, now, now.addSecs(-10));
+
+    // Assert
+    QVERIFY(tracker.session_.durations.empty());
+}
+
+void TimeTrackerTest::test_isOngoingSegmentCrossMidnight_returns_false_when_stopped()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    // mode_ == None by default
+    QVERIFY(!tracker.isOngoingSegmentCrossMidnight());
+}
+
+void TimeTrackerTest::test_isOngoingSegmentCrossMidnight_returns_false_for_same_day()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    tracker.mode_ = TimeTracker::Mode::Activity;
+    tracker.session_.segment_start_time = QDateTime::currentDateTime().addSecs(-60);
+
+    // Assert
+    QVERIFY(!tracker.isOngoingSegmentCrossMidnight());
+}
+
+void TimeTrackerTest::test_isOngoingSegmentCrossMidnight_returns_true_when_segment_started_yesterday()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    tracker.mode_ = TimeTracker::Mode::Activity;
+    tracker.session_.segment_start_time =
+        QDateTime(QDate::currentDate().addDays(-1), QTime(23, 59, 58, 0));
+
+    // Assert
+    QVERIFY(tracker.isOngoingSegmentCrossMidnight());
+}
+
+void TimeTrackerTest::test_useTimerViaButton_force_stops_on_cross_midnight_ongoing()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    tracker.mode_ = TimeTracker::Mode::Activity;
+    tracker.session_.segment_start_time =
+        QDateTime(QDate::currentDate().addDays(-1), QTime(23, 59, 58, 0));
+    tracker.timer_.start();
+
+    // Act: try to stop — discardCrossMidnightOngoingAndStop should fire first
+    tracker.useTimerViaButton(Button::Stop);
+
+    // Assert: engine is in None, no cross-midnight row in DB
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QVERIFY(!tracker.session_.segment_start_time.isValid());
+    QVERIFY(!tracker.was_active_before_autopause_);
+    // FakeDatabaseManager captures writes; no duration should have been written
+    // with a cross-midnight segment (the in-flight segment is discarded)
+    for (const auto& d : fakeDb.storedDurations) {
+        QVERIFY(d.startTime.date() == d.endTime.date());
+    }
+}
+
+void TimeTrackerTest::test_useTimerViaButton_pause_event_is_dropped_when_cross_midnight()
+{
+    // Arrange: simulate cross-midnight state, user tries to pause
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    tracker.mode_ = TimeTracker::Mode::Activity;
+    tracker.session_.segment_start_time =
+        QDateTime(QDate::currentDate().addDays(-1), QTime(23, 59, 58, 0));
+    tracker.timer_.start();
+
+    // Act: user presses Pause — but the guard should intercept and force-stop
+    tracker.useTimerViaButton(Button::Pause);
+
+    // Assert: engine is in None (not Pause)
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QVERIFY(!tracker.session_.segment_start_time.isValid());
+}
+
+void TimeTrackerTest::test_useTimerViaLockEvent_unlock_does_not_restart_after_cross_midnight_discard()
+{
+    // Arrange: simulate cross-midnight with was_active_before_autopause_ set
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/autopause_enabled", true);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    tracker.mode_ = TimeTracker::Mode::Pause;
+    tracker.session_.segment_start_time =
+        QDateTime(QDate::currentDate().addDays(-1), QTime(23, 59, 58, 0));
+    tracker.was_active_before_autopause_ = true;
+    tracker.timer_.start();
+
+    // Act: Unlock event arrives — guard should discard and not restart
+    tracker.useTimerViaLockEvent(LockEvent::Unlock);
+
+    // Assert: stayed in None, did not auto-restart
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QVERIFY(!tracker.was_active_before_autopause_);
+}
+
+void TimeTrackerTest::test_saveCheckpointInternal_does_not_write_cross_midnight_row()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/checkpoint_interval_minutes", 1);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    tracker.mode_ = TimeTracker::Mode::Activity;
+    tracker.session_.segment_start_time =
+        QDateTime(QDate::currentDate().addDays(-1), QTime(23, 59, 58, 0));
+    tracker.timer_.start();
+
+    // Act: checkpoint fires (simulating late checkpoint after sleep)
+    QDateTime now = QDateTime::currentDateTime();
+    tracker.saveCheckpointInternal(now);
+
+    // Assert: engine stopped, no checkpoint written to DB
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QCOMPARE(fakeDb.savedCheckpoints.size(), static_cast<size_t>(0));
+}
+
+void TimeTrackerTest::test_stop_clears_was_active_before_autopause()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    tracker.was_active_before_autopause_ = true;
+
+    // Act
+    tracker.useTimerViaButton(Button::Stop);
+
+    // Assert
+    QVERIFY(!tracker.was_active_before_autopause_);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+}
+
+void TimeTrackerTest::test_startTimer_drops_cross_midnight_boot_time_entry()
+{
+    // A boot_time_sec large enough that bootStart falls on the previous day.
+    // addDuration should silently discard it and the user still enters Activity.
+
+    // Arrange
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    // Use a large boot time that is guaranteed to reach back across midnight
+    writer.setValue("uTimer/boot_time_seconds", 90000); // 25 hours
+    writer.sync();
+
+    Settings settings(settingsPath);
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
+
+    // Act
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // Assert: cross-midnight boot entry was dropped; no completed durations
+    // (the ongoing segment is fresh from startTimer)
+    QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(0));
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+
+    tracker.useTimerViaButton(Button::Stop);
+}
+
+void TimeTrackerTest::test_getOngoingDuration_returns_nullopt_when_cross_midnight()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    tracker.mode_ = TimeTracker::Mode::Activity;
+    tracker.session_.segment_start_time =
+        QDateTime(QDate::currentDate().addDays(-1), QTime(23, 59, 58, 0));
+
+    // Act
+    auto result = tracker.getOngoingDuration();
+
+    // Assert: cross-midnight transient is hidden from observers
+    QVERIFY(!result.has_value());
 }

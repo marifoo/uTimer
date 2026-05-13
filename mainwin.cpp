@@ -1,14 +1,21 @@
 /**
- * MainWin - Application entry point and orchestrator.
+ * MainWin — Application entry point and orchestrator.
  *
  * Responsibilities:
  * - Window management (System Tray, Always-on-Top, minimize behaviors)
- * - Coordinating midnight boundary events:
- *   The app enforces a strict day-boundary split for time tracking.
- *   Activities cannot span across midnight to ensure "Time per Day" stats are accurate.
- *   This is handled by scheduling auto-stop/restart events at 23:59:59.
+ * - Forced day-boundary stop:
+ *     A single-shot QTimer fires at 23:59:59.500 each day a session
+ *     is running and forces the timer off via the standard Stop
+ *     pipeline. There is NO automatic restart on the new day; the
+ *     user must start the next session manually.
+ * - Cross-midnight watchdog:
+ *     update() polls TimeTracker every 100 ms. If the ongoing
+ *     segment is observed to cross local midnight (because the
+ *     scheduled stop did not fire — e.g., sleep/hibernate, modal
+ *     dialog), the watchdog triggers the same Stop pipeline. The
+ *     in-flight segment is discarded; that span of time is lost.
  * - Global event handling (Shutdown, Sleep/Wake)
- * - User warning system (Health checks for too much work/too little pause)
+ * - User warning system (Health checks for too much work / no pause)
  */
 
 #include "mainwin.h"
@@ -39,11 +46,9 @@ MainWin::MainWin(Settings& settings, TimeTracker& timetracker, QWidget *parent)
 	setWindowTitle("µTimer");
 	setWindowFlags(windowFlags() &(~Qt::WindowMaximizeButtonHint));
 	
-	// Create midnight timer (single-shot, reused for both stop and restart)
-	// This timer is critical for the "Day Boundary" architecture.
 	midnight_timer_ = new QTimer(this);
 	midnight_timer_->setSingleShot(true);
-	// Note: connection is made dynamically in scheduleMidnightStop/Restart
+	// Connection is made dynamically in scheduleMidnightStop.
 }
 
 void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
@@ -57,17 +62,18 @@ void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
 	QObject::connect(content_widget_, SIGNAL(minToTray()), this, SLOT(minToTray()));
 	QObject::connect(content_widget_, SIGNAL(toggleAlwaysOnTop()), this, SLOT(toggleAlwaysOnTop()));
 	
-	// Schedule midnight timer when user starts timer
 	QObject::connect(content_widget_, &ContentWidget::pressedButton, this, [this](Button button) {
 		if (button == Button::Start) {
-			// User started timer - schedule midnight stop to ensure clean day split
 			scheduleMidnightStop();
 		} else if (button == Button::Stop) {
-			// User stopped timer - cancel midnight timer as no boundary crossing can occur
 			midnight_timer_->stop();
-			
+			// Any stop (manual, scheduled, or watchdog-driven) must cancel
+			// the pending unlock-restart path. Without this, an unlock that
+			// arrives after Stop while was_active_before_autopause_ is still
+			// true would flip the GUI back to Activity.
+			was_active_before_autopause_ = false;
 			if (settings_.logToFile()) {
-				Logger::Log("[MIDNIGHT] Timer stopped manually - cancelled midnight timer");
+				Logger::Log("[MIDNIGHT] Timer stopped - cancelled midnight timer");
 			}
 		}
 	});
@@ -88,10 +94,30 @@ void MainWin::setupIcon()
 
 void MainWin::update()
 {
+	// Primary check: ongoing segment crosses midnight — drive Stop pipeline.
+	if (timetracker_.isOngoingSegmentCrossMidnight()) {
+		if (settings_.logToFile()) {
+			Logger::Log("[MIDNIGHT] Watchdog: cross-midnight ongoing segment - forcing stop");
+		}
+		content_widget_->pressedStopButton();
+	}
+	// Secondary check: TimeTracker is already in None (e.g., because the
+	// checkpoint guard fired first), but the GUI hasn't caught up.
+	else if ((content_widget_->isGUIinActivity() || content_widget_->isGUIinPause())
+	         && !timetracker_.getOngoingDuration().has_value()) {
+		if (settings_.logToFile()) {
+			Logger::Log("[MIDNIGHT] Watchdog: TimeTracker is stopped but GUI lagged - syncing GUI");
+		}
+		content_widget_->setGUItoStop();
+		midnight_timer_->stop();
+		was_active_before_autopause_ = false;
+	}
+
 	content_widget_->updateTimes();
 	tray_icon_->setToolTip(content_widget_->getTooltip());
 
-	if ((content_widget_->isGUIinActivity()) && (settings_.showTooMuchActivityWarning() || settings_.showNoPauseWarning()))
+	if ((content_widget_->isGUIinActivity())
+	    && (settings_.showTooMuchActivityWarning() || settings_.showNoPauseWarning()))
 		showActivityWarnings();
 }
 
@@ -384,11 +410,12 @@ bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* mes
 }
 
 /**
- * Schedules the timer to stop just before midnight (23:59:59.500).
+ * Schedules a one-shot fire at 23:59:59.500 today (or 1 ms from now if
+ * the current local time is already past that).
  *
- * This forces the current session to close before the date changes,
- * ensuring that time is logged to the correct "calendar day".
- * Triggers onMidnightStop() when the timer fires.
+ * On firing, onMidnightStop() runs and emits Button::Stop if the timer
+ * is still active. The midnight_timer_ is NOT re-armed for the next
+ * day — the user has to press Start again to track a new session.
  */
 void MainWin::scheduleMidnightStop()
 {
@@ -416,63 +443,25 @@ void MainWin::scheduleMidnightStop()
 	midnight_timer_->start(static_cast<int>(msecs_until_stop));
 }
 
-/**
- * Schedules the timer to restart just after midnight (00:00:00.500).
- *
- * Called immediately after the midnight stop.
- * Triggers onMidnightRestart() which starts a new session for the new day.
- */
-void MainWin::scheduleMidnightRestart()
-{
-	// Calculate milliseconds until 00:00:00.500
-	QTime current_time = QTime::currentTime();
-	QTime midnight_restart_time(0, 0, 0, 500);
-	
-	qint64 msecs_until_restart;
-	if (current_time < midnight_restart_time) {
-		// We're between 00:00:00.000 and 00:00:00.500 - calculate time until 00:00:00.500
-		msecs_until_restart = current_time.msecsTo(midnight_restart_time);
-	} else {
-		// We're after 00:00:00.500 - restart immediately
-		msecs_until_restart = 1;
-	}
-	
-	if (settings_.logToFile()) {
-		Logger::Log(QString("[MIDNIGHT] Scheduled auto-restart in %1 seconds")
-			.arg(msecs_until_restart / 1000.0, 0, 'f', 1));
-	}
-	
-	// Disconnect any previous connection and connect to restart handler
-	midnight_timer_->disconnect();
-	connect(midnight_timer_, &QTimer::timeout, this, &MainWin::onMidnightRestart);
-	midnight_timer_->start(static_cast<int>(msecs_until_restart));
-}
 
 void MainWin::onMidnightStop()
 {
-	bool timer_is_running = content_widget_->isGUIinActivity() || content_widget_->isGUIinPause();
-	
-	if (timer_is_running) {
+	const bool timer_is_running =
+		content_widget_->isGUIinActivity() || content_widget_->isGUIinPause();
+	if (!timer_is_running) {
 		if (settings_.logToFile()) {
-			Logger::Log("[MIDNIGHT] Auto-stopping timer at end of day");
+			Logger::Log("[MIDNIGHT] Scheduled stop fired but timer is not running - ignoring");
 		}
-		
-		content_widget_->pressedStopButton();
-		
-		// Schedule restart for 00:00:00.500 (half a second after midnight)
-		scheduleMidnightRestart();
+		return;
 	}
-}
 
-void MainWin::onMidnightRestart()
-{
 	if (settings_.logToFile()) {
-		Logger::Log("[MIDNIGHT] Auto-restarting timer for new day");
+		Logger::Log("[MIDNIGHT] Scheduled stop: forcing timer off at end of day");
 	}
-	
-	// Press the start button to begin new day
-	content_widget_->pressedStartPauseButton();
-	
-	// Schedule stop for tonight at 23:59:59.500
-	scheduleMidnightStop();
+
+	// Emits Button::Stop which:
+	//   - cancels midnight_timer_ (lambda in setupCentralWidget)
+	//   - clears MainWin's was_active_before_autopause_
+	//   - drives TimeTracker::useTimerViaButton(Stop)
+	content_widget_->pressedStopButton();
 }

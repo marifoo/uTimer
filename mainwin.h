@@ -22,13 +22,11 @@ private:
 	bool warning_pause_shown_;
 	bool was_active_before_autopause_;
 	
-	// Midnight auto-stop/restart handling
+	// Midnight forced-stop handling
 	QTimer* midnight_timer_;
-	
+
 	void scheduleMidnightStop();
-	void scheduleMidnightRestart();
 	void onMidnightStop();
-	void onMidnightRestart();
 
 	void showMsgBox(const QString &text);
 	void showMainWin();

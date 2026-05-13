@@ -20,13 +20,13 @@
  * SessionState — groups the mutable per-session data that TimeTracker manages.
  *
  * Previously these fields were scattered as raw members on TimeTracker,
- * making it easy for code paths (notably addDurationWithMidnightSplit) to
- * mutate them as side effects without the caller being aware. Grouping them
- * into a struct with explicit transition methods ensures:
+ * making it easy for code paths to mutate them as side effects without the
+ * caller being aware. Grouping them into a struct with explicit transition
+ * methods ensures:
  *   - Every mutation is named and logged (in debug builds)
  *   - State changes are traceable during debugging
- *   - Pure helper functions can compute results without touching the struct,
- *     and the caller applies changes explicitly
+ *   - Callers like addDuration can compute results without touching the struct
+ *     directly, and the caller applies changes explicitly
  *
  * The struct is intentionally not a class — TimeTracker is its sole owner
  * and accesses fields directly. The transition methods are convenience
@@ -65,7 +65,7 @@ struct SessionState {
     /// Clears the segment_id and start time (used when the timer stops).
     void clearSegment(const Settings& settings);
 
-    /// Updates segment_start_time (e.g. after midnight split or pause).
+    /// Updates segment_start_time (e.g. after a pause transition).
     void updateSegmentStartTime(const QDateTime& newStart, const Settings& settings);
 
     /// Marks unsaved data state after a failed DB write.
@@ -83,31 +83,6 @@ struct SessionState {
     void adoptOngoingSegment(const TimeDuration& ongoing, const Settings& settings);
 };
 
-/**
- * Result of splitting a duration at midnight boundaries.
- *
- * addDurationWithMidnightSplit was previously a side-effectful method that
- * mutated durations_, has_unsaved_data_, unsaved_durations_, and
- * segment_start_time_ directly. This struct captures its output so the
- * caller can apply the changes explicitly.
- */
-struct MidnightSplitResult {
-    /// New duration entries to append to durations.
-    std::deque<TimeDuration> new_entries;
-
-    /// Entries that belong to the previous day and should be saved to DB
-    /// immediately (non-empty only when a midnight boundary was crossed).
-    std::deque<TimeDuration> previous_day_entries;
-
-    /// When a midnight crossing occurs, the segment_start_time must be
-    /// updated to the start of the new day. std::nullopt when no update
-    /// is needed.
-    std::optional<QDateTime> updated_segment_start_time;
-
-    /// True if a midnight boundary was crossed (triggers DB save of
-    /// previous-day data).
-    bool crossed_midnight = false;
-};
 
 class TimeTracker : public QObject
 {
@@ -136,9 +111,20 @@ private:
     void pauseTimer(const QDateTime& now);
     void backpauseTimer(const QDateTime& now);
     void finalizeActivityToPause(const QDateTime& pauseSegmentStart);
-    MidnightSplitResult computeMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId = QString()) const;
-    void applyMidnightSplit(const MidnightSplitResult& result);
-    void addDurationWithMidnightSplit(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId = QString());
+    // Appends a single same-day segment to session_.durations.
+    // Silently discards segments where startTime.date() != endTime.date()
+    // (last-line defence for cross-midnight). The scheduled stop in MainWin
+    // and the watchdog in MainWin::update() are supposed to make
+    // cross-midnight inputs unreachable here.
+    void addDuration(DurationType type,
+                     const QDateTime& startTime,
+                     const QDateTime& endTime,
+                     const QString& segmentId = QString());
+
+    // If the ongoing segment is cross-midnight, forces the engine into None,
+    // discarding the in-flight segment. Returns true when it fired.
+    // Safe to call multiple times; only the first call does real work.
+    bool discardCrossMidnightOngoingAndStop(const QDateTime& now);
     void saveCheckpointInternal(const QDateTime& now);  // Internal checkpoint save (called when mutex already held)
     bool appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
     qint64 reconcileOrphanCheckpoints(
@@ -191,6 +177,9 @@ public:
     std::deque<TimeDuration> getDurationsHistory();
     std::pair<int, int> getLastHistoryLoadStats() const;
     std::optional<TimeDuration> getOngoingDuration() const;
+    // Cheap thread-safe predicate used by the MainWin watchdog. Returns true
+    // iff there is an ongoing segment whose start date is earlier than today.
+    bool isOngoingSegmentCrossMidnight() const;
     qint64 getStartupRecoveredSeconds() const;
     bool shouldShowStartupRecoveryNotification() const;
     void setDurationType(size_t idx, DurationType type);

@@ -28,7 +28,9 @@ uTimer follows a component-based architecture using Qt's Signal/Slot mechanism. 
     *   Creates timestamped backups (`.backup` files) before major write operations.
     *   Manages "Checkpoints" (lightweight updates) vs "Full Saves" (transactional replaces).
     *   `history_days_to_keep_ = 0` disables database entirely.
-*   **`MainWin` (`mainwin.cpp`)**: The orchestrator. Manages the system tray, window state, and the **Midnight Boundary** logic. The app enforces a strict split of sessions at 23:59:59 by automatically stopping and restarting the timer to ensure accurate per-day statistics.
+*   **`MainWin` (`mainwin.cpp`)**: The orchestrator. Manages the system tray, window state, and the **day-boundary policy**:
+    - A scheduled `QTimer` fires at 23:59:59.500 and forces the timer off via the normal Stop pipeline. There is no automatic restart on the new day.
+    - A 100 ms watchdog in `update()` checks `TimeTracker::isOngoingSegmentCrossMidnight()`. If the scheduled stop is missed (sleep/hibernate, modal dialog blocking the event loop) and the ongoing segment is observed to cross midnight, the watchdog drives the same Stop pipeline. The cross-midnight span of time is discarded — never stored, never persisted.
 *   **`HistoryDialog` (`historydialog.cpp`)**: Editable history view. It pauses checkpoints while open to prevent race conditions.
 
 ### Key Data Flow
