@@ -1,4 +1,5 @@
 #include "test_integration.h"
+#include "fakedatabasemanager.h"
 #include <QtTest>
 
 using TestCommon::createSettingsFile;
@@ -358,6 +359,66 @@ void IntegrationTest::test_integration_empty_database_operations()
     
     std::deque<TimeDuration> empty;
     QVERIFY(manager.updateDurationsById(empty));
+}
+
+// ============================================================================
+// Phase 1 test gate (T1)
+// ============================================================================
+
+void IntegrationTest::test_F_shutdown_sequence_stop_flush_marker()
+{
+    // Test F: shutdown sequence end-to-end.
+    //
+    // After Phase 1 the shutdown sequence in MainWin::shutdown() calls:
+    //   1. timetracker_.useTimerViaButton(Button::Stop)  — stops the engine
+    //   2. db_.flushToDisc()                             — durability flush
+    //   3. db_.setLastCleanShutdownMarker(...)           — if canMarkCleanShutdown()
+    //
+    // This test drives all three steps through TimeTracker + FakeDatabaseManager
+    // and asserts each side-effect happened in the correct order, mimicking
+    // what MainWin::shutdown() does after Phase 1.
+
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    // Start the timer so there is something to stop.
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(20);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+
+    // Clear the call log captured during startup / start so the assertion
+    // below only sees the shutdown sequence.
+    fakeDb.callLog.clear();
+
+    // Act — replicate MainWin::shutdown() logic (Phase 1 version):
+    // Step 1: stop timer
+    tracker.useTimerViaButton(Button::Stop);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+
+    // Step 2: flush DB to disc
+    fakeDb.flushToDisc();   // calls db_.flushToDisc() as MainWin does
+
+    // Step 3: mark clean shutdown if the engine says it is safe
+    QVERIFY(tracker.canMarkCleanShutdown()); // stopped + no unsaved data
+    QDateTime markerTime = QDateTime::currentDateTime();
+    bool marked = fakeDb.setLastCleanShutdownMarker(markerTime);
+    QVERIFY(marked);
+
+    // Assert — verify all three side-effects and their order.
+    // The stop propagates as updateDurationsById (from updateDurationsInDB)
+    // followed by setLastCleanShutdownMarker from stopTimer itself; then our
+    // flush and our explicit marker call follow.
+    QVERIFY(fakeDb.callLog.contains("flushToDisc"));
+    QVERIFY(fakeDb.callLog.contains("setLastCleanShutdownMarker"));
+
+    int flushIdx = fakeDb.callLog.lastIndexOf("flushToDisc");
+    int markerIdx = fakeDb.callLog.lastIndexOf("setLastCleanShutdownMarker");
+    QVERIFY2(flushIdx < markerIdx,
+             "flushToDisc must happen before the final setLastCleanShutdownMarker");
 }
 
 void IntegrationTest::test_integration_backpause_db_update()

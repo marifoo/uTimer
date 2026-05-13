@@ -948,3 +948,191 @@ void TimeTrackerTest::test_getOngoingDuration_returns_nullopt_when_cross_midnigh
     // Assert: cross-midnight transient is hidden from observers
     QVERIFY(!result.has_value());
 }
+
+// ============================================================================
+// Phase 1 test gate (T1)
+// ============================================================================
+
+void TimeTrackerTest::test_D_timetracker_public_surface_regression()
+{
+    // Test D: Construct a TimeTracker and exercise every remaining public
+    // method to confirm none were accidentally removed during Phase 1.
+    // This is a regression guard — it would fail to compile if a method
+    // disappeared from the header.
+
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    QDateTime now = QDateTime::currentDateTime();
+
+    // Exercise every public method (slots + regular)
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // Accessors
+    qint64 active = tracker.getActiveTime();
+    QVERIFY(active >= 0);
+
+    qint64 pause = tracker.getPauseTime();
+    QVERIFY(pause >= 0);
+
+    const auto& durations = tracker.getCurrentDurations();
+    (void)durations;
+
+    auto ongoing = tracker.getOngoingDuration();
+    QVERIFY(ongoing.has_value()); // timer is running
+
+    bool crossMidnight = tracker.isOngoingSegmentCrossMidnight();
+    QVERIFY(!crossMidnight); // started now, so not cross-midnight
+
+    qint64 recovered = tracker.getStartupRecoveredSeconds();
+    QCOMPARE(recovered, static_cast<qint64>(0)); // fresh db, nothing to recover
+
+    bool showNotification = tracker.shouldShowStartupRecoveryNotification();
+    (void)showNotification;
+
+    auto histStats = tracker.getLastHistoryLoadStats();
+    (void)histStats;
+
+    bool canMark = tracker.canMarkCleanShutdown();
+    QVERIFY(!canMark); // timer is running
+
+    // Mutators
+    tracker.pauseCheckpoints();
+    tracker.resumeCheckpoints();
+
+    tracker.useTimerViaButton(Button::Pause);
+    QTest::qWait(10);
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // setDurationType: index 0 should exist after Activity+Pause cycle
+    if (!tracker.session_.durations.empty()) {
+        tracker.setDurationType(0, DurationType::Pause);
+        tracker.setDurationType(0, DurationType::Activity);
+    }
+
+    tracker.useTimerViaButton(Button::Stop);
+
+    // DB write helpers
+    fakeDb.callLog.clear();
+    tracker.appendDurationsToDB();
+    tracker.updateDurationsInDB();
+    tracker.replaceDurationsInDB({}, {});
+
+    // replaceCurrentDurations
+    tracker.replaceCurrentDurations({}, std::nullopt);
+
+    // getDurationsHistory
+    auto history = tracker.getDurationsHistory();
+    (void)history;
+
+    // Confirm the engine predicate is still there
+    QVERIFY(tracker.canMarkCleanShutdown()); // stopped, no unsaved data
+
+    // lock event path
+    tracker.useTimerViaLockEvent(LockEvent::Lock);
+    tracker.useTimerViaLockEvent(LockEvent::Unlock);
+}
+
+void TimeTrackerTest::test_E_boot_time_gate_entries_yes_skips_boot_time()
+{
+    // Test E (Yes branch): DB says entries exist for today → boot time skipped.
+
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/boot_time_seconds", 30);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    FakeDatabaseManager fakeDb;
+    fakeDb.entriesForDateResult = EntriesForDateResult::Yes;
+    TimeTracker tracker(settings, fakeDb);
+
+    // Act
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // Assert: no boot-time segment was added (session_.durations is empty
+    // at start because there are no completed segments yet)
+    qint64 totalActivity = 0;
+    for (const auto& d : tracker.session_.durations)
+        if (d.type == DurationType::Activity)
+            totalActivity += d.duration;
+    QVERIFY2(totalActivity < 5000,
+             "Boot time must not be added when DB reports Yes for today");
+
+    tracker.useTimerViaButton(Button::Stop);
+}
+
+void TimeTrackerTest::test_E_boot_time_gate_entries_no_adds_boot_time()
+{
+    // Test E (No branch): DB says no entries for today → boot time added.
+
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/boot_time_seconds", 30);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    FakeDatabaseManager fakeDb;
+    fakeDb.entriesForDateResult = EntriesForDateResult::No;
+    TimeTracker tracker(settings, fakeDb);
+
+    // Act
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // Assert: a 30-second boot-time Activity segment was prepended
+    qint64 totalActivity = 0;
+    for (const auto& d : tracker.session_.durations)
+        if (d.type == DurationType::Activity)
+            totalActivity += d.duration;
+    QVERIFY2(totalActivity >= 29000,
+             "Boot time must be added when DB reports No entries for today");
+
+    tracker.useTimerViaButton(Button::Stop);
+}
+
+void TimeTrackerTest::test_E_boot_time_gate_entries_unknown_skips_boot_time()
+{
+    // Test E (Unknown branch): DB result is Unknown (e.g., history disabled)
+    // → boot time skipped to avoid double-counting.
+
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/boot_time_seconds", 30);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    FakeDatabaseManager fakeDb;
+    fakeDb.entriesForDateResult = EntriesForDateResult::Unknown;
+    TimeTracker tracker(settings, fakeDb);
+
+    // Act
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // Assert: no boot-time segment added
+    qint64 totalActivity = 0;
+    for (const auto& d : tracker.session_.durations)
+        if (d.type == DurationType::Activity)
+            totalActivity += d.duration;
+    QVERIFY2(totalActivity < 5000,
+             "Boot time must not be added when DB reports Unknown for today");
+
+    tracker.useTimerViaButton(Button::Stop);
+}

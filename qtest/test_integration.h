@@ -33,6 +33,10 @@ private slots:
     void test_integration_duplicate_prevention();
     void test_integration_empty_database_operations();
     void test_integration_backpause_db_update();
+
+    // Phase 1 test gate (T1)
+    // Test F: shutdown sequence end-to-end via db_ directly.
+    void test_F_shutdown_sequence_stop_flush_marker();
 };
 
 #endif // TEST_INTEGRATION_H
