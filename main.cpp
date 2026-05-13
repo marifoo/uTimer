@@ -127,7 +127,7 @@ int main(int argc, char *argv[])
 			// Read and discard the signal number
 			char sig;
 			if (read(signalFd[1], &sig, sizeof(sig)) > 0) {
-				if (settings.logToFile()) {
+				{
 					QString signalName;
 					switch (sig) {
 						case SIGTERM: signalName = "SIGTERM"; break;

@@ -59,9 +59,8 @@ HistoryDialog::HistoryDialog(TimeTracker& timetracker, const Settings& settings,
     connect(table_, &QTableWidget::customContextMenuRequested, this, &HistoryDialog::showContextMenu);
 
     // Log initial state for debugging
-    if (settings_.logToFile()) {
-        Logger::Log("[HISTORY] Dialog opened");
-        
+    Logger::Log("[HISTORY] Dialog opened");
+    {
         auto historyDurations = timetracker_.getDurationsHistory();
         Logger::Log(QString("[HISTORY] Loaded %1 total durations from DB").arg(historyDurations.size()));
 
@@ -248,10 +247,9 @@ QString HistoryDialog::buildLoadReconciliationMessage() const
         .arg(skipped)
         .arg(repaired);
 
-    // Append a clickable link to the log file when logging is active and
-    // the file actually exists. This lets the user inspect skip/repair
-    // details without hunting for the file manually.
-    if (settings_.logToFile()) {
+    // Append a clickable link to the log file when it exists on disk.
+    // This lets the user inspect skip/repair details without hunting for the file manually.
+    {
         const QString logPath = Logger::logFilePath();
         if (QFileInfo::exists(logPath)) {
             message += QString("<br><a href=\"file:///%1\">Open log file</a>")
@@ -297,9 +295,7 @@ void HistoryDialog::assertPendingOriginsInvariant() const
 void HistoryDialog::updateTotalsLabel(uint idx)
 {
     if (idx >= pendingChanges_.size() || idx >= pages_.size()) {
-        if (settings_.logToFile()) {
-            Logger::Log(QString("[HISTORY] Error: updateTotalsLabel: Invalid index %1").arg(idx));
-        }
+        Logger::Log(QString("[HISTORY] Error: updateTotalsLabel: Invalid index %1").arg(idx));
         return;
     }
 
@@ -321,9 +317,7 @@ void HistoryDialog::updateTotalsLabel(uint idx)
 void HistoryDialog::updateTable(uint idx)
 {
     if (idx >= pendingChanges_.size() || idx >= pages_.size()) {
-        if (settings_.logToFile()) {
-            Logger::Log(QString("[HISTORY] Error: updateTable: Invalid index %1").arg(idx));
-        }
+        Logger::Log(QString("[HISTORY] Error: updateTable: Invalid index %1").arg(idx));
         return;
     }
 
@@ -396,9 +390,7 @@ void HistoryDialog::updateTable(uint idx)
             }
 
             if (capturedRow >= static_cast<int>(pendingChanges_[capturedPageIdx].size())) {
-                if (settings_.logToFile()) {
-                    Logger::Log(QString("[WARNING] Checkbox callback: Invalid row %1").arg(capturedRow));
-                }
+                Logger::Log(QString("[WARNING] Checkbox callback: Invalid row %1").arg(capturedRow));
                 return;
             }
 
@@ -467,9 +459,7 @@ void HistoryDialog::onNewer()
 void HistoryDialog::saveChanges()
 {
     if (result() != QDialog::Accepted) {
-        if (settings_.logToFile()) {
-            Logger::Log("[HISTORY] Dialog cancelled, discarding changes");
-        }
+        Logger::Log("[HISTORY] Dialog cancelled, discarding changes");
         return;
     }
 
@@ -533,23 +523,19 @@ void HistoryDialog::saveChanges()
 
     bool dbSaveSucceeded = true;
     if (!historyDurations.empty() || !currentSessionDurations.empty()) {
-        if (settings_.logToFile()) {
-            Logger::Log(QString("[HISTORY] Saving %1 historical + %2 current-session durations to DB")
-                .arg(historyDurations.size())
-                .arg(currentSessionDurations.size()));
-        }
+        Logger::Log(QString("[HISTORY] Saving %1 historical + %2 current-session durations to DB")
+            .arg(historyDurations.size())
+            .arg(currentSessionDurations.size()));
 
         dbSaveSucceeded = timetracker_.replaceDurationsInDB(historyDurations, currentSessionDurations);
         if (!dbSaveSucceeded) {
-            if (settings_.logToFile()) {
-                Logger::Log("[HISTORY] CRITICAL: Failed to save durations to DB");
-            }
+            Logger::Log("[HISTORY] CRITICAL: Failed to save durations to DB");
             QMessageBox::critical(this, "Database Error",
                 "Failed to save changes to the database. Your changes to historical entries may be lost.");
-        } else if (settings_.logToFile()) {
+        } else {
             Logger::Log("[HISTORY] Successfully saved historical durations to DB");
         }
-    } else if (settings_.logToFile()) {
+    } else {
         Logger::Log("[HISTORY] No historical durations to save");
     }
 
@@ -563,9 +549,7 @@ void HistoryDialog::saveChanges()
     // replaceCurrentDurations couples both operations so callers cannot forget to
     // reset checkpoint tracking after replacing durations — the compiler enforces it.
     timetracker_.replaceCurrentDurations(currentMemoryDurations, ongoingDurationForSave);
-    if (settings_.logToFile()) {
-        Logger::Log("[HISTORY] Updated TimeTracker current session and checkpoint tracking");
-    }
+    Logger::Log("[HISTORY] Updated TimeTracker current session and checkpoint tracking");
 }
 
 void HistoryDialog::showContextMenu(const QPoint& pos)
@@ -614,9 +598,7 @@ void HistoryDialog::onSplitRow()
     contextMenuPage_ = -1;
 
     if (idx >= pendingChanges_.size() || row >= static_cast<int>(pendingChanges_[idx].size())) {
-        if (settings_.logToFile()) {
-            Logger::Log(QString("[HISTORY] Error: onSplitRow: Invalid indices - page: %1, row: %2").arg(idx).arg(row));
-        }
+        Logger::Log(QString("[HISTORY] Error: onSplitRow: Invalid indices - page: %1, row: %2").arg(idx).arg(row));
         return;
     }
     if (idx < rowOrigins_.size()
@@ -633,10 +615,8 @@ void HistoryDialog::onSplitRow()
 
     // Check if duration is long enough to split meaningfully (at least 3 seconds)
     if (start.secsTo(end) < kMinimumSplitDurationSeconds) {
-        if (settings_.logToFile()) {
-            Logger::Log(QString("[HISTORY] Error: onSplitRow: Duration too short to split - only %1 seconds")
-                .arg(start.secsTo(end)));
-        }
+        Logger::Log(QString("[HISTORY] Error: onSplitRow: Duration too short to split - only %1 seconds")
+            .arg(start.secsTo(end)));
         QMessageBox::information(this, "Split Duration",
             "This duration is too short to split meaningfully (minimum 3 seconds required).");
         return;
@@ -651,20 +631,16 @@ void HistoryDialog::onSplitRow()
 
         // Validate split preserves total duration (Issue #4)
         if (firstDuration + secondDuration != originalDuration) {
-            if (settings_.logToFile()) {
-                Logger::Log(QString("[HISTORY] Warning: Split duration mismatch - original: %1ms, split sum: %2ms, adjusting")
-                    .arg(originalDuration).arg(firstDuration + secondDuration));
-            }
+            Logger::Log(QString("[HISTORY] Warning: Split duration mismatch - original: %1ms, split sum: %2ms, adjusting")
+                .arg(originalDuration).arg(firstDuration + secondDuration));
             // Adjust second segment to preserve total duration
             secondDuration = originalDuration - firstDuration;
         }
 
         // Validate split results - ensure both segments have at least 1 second
         if (firstDuration < 1000 || secondDuration < 1000) {
-            if (settings_.logToFile()) {
-                Logger::Log(QString("[HISTORY] Error: onSplitRow: Split results too small - first: %1ms, second: %2ms")
-                    .arg(firstDuration).arg(secondDuration));
-            }
+            Logger::Log(QString("[HISTORY] Error: onSplitRow: Split results too small - first: %1ms, second: %2ms")
+                .arg(firstDuration).arg(secondDuration));
             QMessageBox::warning(this, "Split Duration",
                 "Invalid split: both segments must be at least 1 second long.");
             return;
@@ -817,9 +793,7 @@ void SplitDialog::setSecondSegmentType(DurationType type)
 }
 
 HistoryDialog::~HistoryDialog() {
-    if (settings_.logToFile()) {
-        Logger::Log("[HISTORY] Dialog closing");
-    }
+    Logger::Log("[HISTORY] Dialog closing");
 
     // Clean up cell widgets to prevent memory leaks
     if (table_) {

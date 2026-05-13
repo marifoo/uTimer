@@ -60,8 +60,7 @@ LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent)
 	initializeLinuxLockDetection();
 #endif
 
-	if (settings_.logToFile())
-		Logger::Log("[LOCK] LockStateWatcher initialized, BufferSize = " + QString::number(lock_state_buffer_.size()));
+	Logger::Log("[LOCK] LockStateWatcher initialized, BufferSize = " + QString::number(lock_state_buffer_.size()));
 }
 
 /**
@@ -170,26 +169,23 @@ void LockStateWatcher::update()
 	const LockEvent lock_event = determineLockEvent(isSessionLocked());
 
 	if (lock_event == LockEvent::Lock) {
-		if (settings_.logToFile())
-			Logger::Log("[LOCK] >> Lock determined");
+		Logger::Log("[LOCK] >> Lock determined");
 		lock_timer_.start();
 		emit desktopLockEvent(LockEvent::Lock);
 	}
 	else if (lock_event == LockEvent::Unlock) {
-		if (settings_.logToFile() && lock_timer_.isValid())
+		if (lock_timer_.isValid())
 			Logger::Log("[LOCK] Current Lock Duration = " + QString::number(lock_timer_.elapsed()) + "ms");
 		lock_timer_.invalidate();
-		if (settings_.logToFile())
-			Logger::Log("[LOCK] Unlock determined <<");
+		Logger::Log("[LOCK] Unlock determined <<");
 		emit desktopLockEvent(LockEvent::Unlock);
 	}
 
 	if (lock_timer_.isValid() && (lock_timer_.elapsed() >= settings_.getBackpauseMsec())) {
-		if (settings_.logToFile() && lock_timer_.isValid())
+		if (lock_timer_.isValid())
 			Logger::Log("[LOCK] Current Lock Duration = " + QString::number(lock_timer_.elapsed()) + "ms");
 		lock_timer_.invalidate();
-		if (settings_.logToFile())
-			Logger::Log("[LOCK] Ongoing Lock is long enough to be counted as a Pause");
+		Logger::Log("[LOCK] Ongoing Lock is long enough to be counted as a Pause");
 		if (settings_.isAutopauseEnabled())
 			emit desktopLockEvent(LockEvent::LongOngoingLock);
 	}
@@ -221,8 +217,7 @@ bool LockStateWatcher::initializeLinuxLockDetection()
 	);
 	if (logindCheck.isValid()) {
 		linux_lock_method_ = LinuxLockMethod::SystemdLogind;
-		if (settings_.logToFile())
-			Logger::Log("[LOCK] Using systemd-logind for lock detection");
+		Logger::Log("[LOCK] Using systemd-logind for lock detection");
 		return true;
 	}
 
@@ -235,8 +230,7 @@ bool LockStateWatcher::initializeLinuxLockDetection()
 	);
 	if (fdoCheck.isValid()) {
 		linux_lock_method_ = LinuxLockMethod::FreedesktopScreenSaver;
-		if (settings_.logToFile())
-			Logger::Log("[LOCK] Using freedesktop.ScreenSaver for lock detection");
+		Logger::Log("[LOCK] Using freedesktop.ScreenSaver for lock detection");
 		return true;
 	}
 
@@ -249,8 +243,7 @@ bool LockStateWatcher::initializeLinuxLockDetection()
 	);
 	if (gnomeCheck.isValid()) {
 		linux_lock_method_ = LinuxLockMethod::GnomeScreenSaver;
-		if (settings_.logToFile())
-			Logger::Log("[LOCK] Using GNOME ScreenSaver for lock detection");
+		Logger::Log("[LOCK] Using GNOME ScreenSaver for lock detection");
 		return true;
 	}
 
@@ -263,14 +256,12 @@ bool LockStateWatcher::initializeLinuxLockDetection()
 	);
 	if (kdeCheck.isValid()) {
 		linux_lock_method_ = LinuxLockMethod::KdeScreenSaver;
-		if (settings_.logToFile())
-			Logger::Log("[LOCK] Using KDE ScreenSaver for lock detection");
+		Logger::Log("[LOCK] Using KDE ScreenSaver for lock detection");
 		return true;
 	}
 
 	linux_lock_method_ = LinuxLockMethod::None;
-	if (settings_.logToFile())
-		Logger::Log("[LOCK] WARNING: No lock detection method available on this Linux system");
+	Logger::Log("[LOCK] WARNING: No lock detection method available on this Linux system");
 	return false;
 }
 

@@ -72,9 +72,7 @@ void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
 			// arrives after Stop while was_active_before_autopause_ is still
 			// true would flip the GUI back to Activity.
 			was_active_before_autopause_ = false;
-			if (settings_.logToFile()) {
-				Logger::Log("[MIDNIGHT] Timer stopped - cancelled midnight timer");
-			}
+			Logger::Log("[MIDNIGHT] Timer stopped - cancelled midnight timer");
 		}
 	});
 }
@@ -96,18 +94,14 @@ void MainWin::update()
 {
 	// Primary check: ongoing segment crosses midnight — drive Stop pipeline.
 	if (timetracker_.isOngoingSegmentCrossMidnight()) {
-		if (settings_.logToFile()) {
-			Logger::Log("[MIDNIGHT] Watchdog: cross-midnight ongoing segment - forcing stop");
-		}
+		Logger::Log("[MIDNIGHT] Watchdog: cross-midnight ongoing segment - forcing stop");
 		content_widget_->pressedStopButton();
 	}
 	// Secondary check: TimeTracker is already in None (e.g., because the
 	// checkpoint guard fired first), but the GUI hasn't caught up.
 	else if ((content_widget_->isGUIinActivity() || content_widget_->isGUIinPause())
 	         && !timetracker_.getOngoingDuration().has_value()) {
-		if (settings_.logToFile()) {
-			Logger::Log("[MIDNIGHT] Watchdog: TimeTracker is stopped but GUI lagged - syncing GUI");
-		}
+		Logger::Log("[MIDNIGHT] Watchdog: TimeTracker is stopped but GUI lagged - syncing GUI");
 		content_widget_->setGUItoStop();
 		midnight_timer_->stop();
 		was_active_before_autopause_ = false;
@@ -286,15 +280,11 @@ void MainWin::shutdown(bool force_direct)
 	// Guard against multiple shutdown calls
 	static bool shutdown_completed = false;
 	if (shutdown_completed) {
-		if (settings_.logToFile()) {
-			Logger::Log("[TIMER] Shutdown already completed, skipping");
-		}
+		Logger::Log("[TIMER] Shutdown already completed, skipping");
 		return;
 	}
 
-	if (settings_.logToFile()) {
-		Logger::Log(QString("[TIMER] Shutdown requested (force_direct=%1)").arg(force_direct));
-	}
+	Logger::Log(QString("[TIMER] Shutdown requested (force_direct=%1)").arg(force_direct));
 
 	bool timer_was_running = content_widget_->isGUIinActivity() || content_widget_->isGUIinPause();
 
@@ -326,21 +316,17 @@ void MainWin::shutdown(bool force_direct)
 
 	// Verify timer stopped correctly
 	// Flush database to disk to reduce risk of loss during Windows shutdown
-	if (settings_.logToFile()) {
-		Logger::Log("[DB] Flushing database to disk before shutdown");
-	}
+	Logger::Log("[DB] Flushing database to disk before shutdown");
 	timetracker_.flushDatabaseToDisc();
 
 	if (timetracker_.canMarkCleanShutdown()) {
 		timetracker_.markCleanShutdown();
 	}
 
-	if (settings_.logToFile()) {
-		if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
-			Logger::Log("[TIMER] Error: Timer did not stop correctly during shutdown");
-		} else {
-			Logger::Log("[TIMER] Shutdown completed successfully");
-		}
+	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
+		Logger::Log("[TIMER] Error: Timer did not stop correctly during shutdown");
+	} else {
+		Logger::Log("[TIMER] Shutdown completed successfully");
 	}
 
 	shutdown_completed = true;
@@ -348,19 +334,13 @@ void MainWin::shutdown(bool force_direct)
 
 void MainWin::onAboutToQuit()
 {
-	if (settings_.logToFile()) {
-		Logger::Log("[TIMER] AboutToQuit received");
-	}
-
+	Logger::Log("[TIMER] AboutToQuit received");
 	shutdown(false);  // Normal shutdown, use event loop
 }
 
 void MainWin::closeEvent(QCloseEvent *event)
 {
-	if (settings_.logToFile()) {
-		Logger::Log("[TIMER] CloseEvent received");
-	}
-
+	Logger::Log("[TIMER] CloseEvent received");
 	// Handle manual window closing (Alt+F4, X button, etc.)
 	shutdown(false);  // Normal shutdown, use event loop
 	event->accept();
@@ -372,9 +352,7 @@ bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* mes
 	MSG* msg = static_cast<MSG*>(message);
 	if (msg->message == WM_QUERYENDSESSION)
 	{
-		if (settings_.logToFile()) {
-			Logger::Log("[TIMER] WM_QUERYENDSESSION received - starting early save");
-		}
+		Logger::Log("[TIMER] WM_QUERYENDSESSION received - starting early save");
 
 		// Windows is asking if we can shutdown
 		// Best practice: start saving NOW to have more time before WM_ENDSESSION
@@ -390,9 +368,7 @@ bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* mes
 		// wParam indicates if session is actually ending (TRUE) or shutdown was cancelled (FALSE)
 		bool session_ending = (msg->wParam != 0);
 
-		if (settings_.logToFile()) {
-			Logger::Log(QString("[TIMER] WM_ENDSESSION received (session_ending=%1)").arg(session_ending));
-		}
+		Logger::Log(QString("[TIMER] WM_ENDSESSION received (session_ending=%1)").arg(session_ending));
 
 		if (session_ending) {
 			// Windows is actually shutting down - ensure timer is stopped
@@ -432,11 +408,9 @@ void MainWin::scheduleMidnightStop()
 		msecs_until_stop = 1;
 	}
 	
-	if (settings_.logToFile()) {
-		Logger::Log(QString("[MIDNIGHT] Scheduled auto-stop in %1 seconds")
-			.arg(msecs_until_stop / 1000.0, 0, 'f', 1));
-	}
-	
+	Logger::Log(QString("[MIDNIGHT] Scheduled auto-stop in %1 seconds")
+		.arg(msecs_until_stop / 1000.0, 0, 'f', 1));
+
 	// Disconnect any previous connection and connect to stop handler
 	midnight_timer_->disconnect();
 	connect(midnight_timer_, &QTimer::timeout, this, &MainWin::onMidnightStop);
@@ -449,15 +423,11 @@ void MainWin::onMidnightStop()
 	const bool timer_is_running =
 		content_widget_->isGUIinActivity() || content_widget_->isGUIinPause();
 	if (!timer_is_running) {
-		if (settings_.logToFile()) {
-			Logger::Log("[MIDNIGHT] Scheduled stop fired but timer is not running - ignoring");
-		}
+		Logger::Log("[MIDNIGHT] Scheduled stop fired but timer is not running - ignoring");
 		return;
 	}
 
-	if (settings_.logToFile()) {
-		Logger::Log("[MIDNIGHT] Scheduled stop: forcing timer off at end of day");
-	}
+	Logger::Log("[MIDNIGHT] Scheduled stop: forcing timer off at end of day");
 
 	// Emits Button::Stop which:
 	//   - cancels midnight_timer_ (lambda in setupCentralWidget)
