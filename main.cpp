@@ -16,6 +16,7 @@
 
 #include "settings.h"
 #include "mainwin.h"
+#include "shutdowncoordinator.h"
 #include "timetracker.h"
 #include "databasemanager.h"
 #include "lockstatewatcher.h"
@@ -116,7 +117,8 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	MainWin main_win(settings, time_tracker, database_manager);
+	ShutdownCoordinator shutdown_coordinator(time_tracker, database_manager, settings);
+	MainWin main_win(settings, time_tracker, database_manager, shutdown_coordinator);
 
 #ifdef Q_OS_LINUX
 	// Set up socket notifier to handle Unix signals in the Qt event loop

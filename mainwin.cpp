@@ -19,6 +19,7 @@
  */
 
 #include "mainwin.h"
+#include "shutdowncoordinator.h"
 #include <QtDebug>
 #include <QDateTime>
 #include <QTime>
@@ -36,8 +37,10 @@
 #endif
 
 
-MainWin::MainWin(Settings& settings, TimeTracker& timetracker, IDatabaseManager& db, QWidget *parent)
+MainWin::MainWin(Settings& settings, TimeTracker& timetracker, IDatabaseManager& db,
+	             ShutdownCoordinator& shutdown_coordinator, QWidget *parent)
 	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), db_(db),
+	  shutdown_coordinator_(shutdown_coordinator),
 	  warning_pause_shown_(false), was_active_before_autopause_(false)
 {
 	setupCentralWidget(settings, timetracker);
@@ -278,59 +281,7 @@ void MainWin::start()
  */
 void MainWin::shutdown(bool force_direct)
 {
-	// Guard against multiple shutdown calls
-	static bool shutdown_completed = false;
-	if (shutdown_completed) {
-		Logger::Log("[TIMER] Shutdown already completed, skipping");
-		return;
-	}
-
-	Logger::Log(QString("[TIMER] Shutdown requested (force_direct=%1)").arg(force_direct));
-
-	bool timer_was_running = content_widget_->isGUIinActivity() || content_widget_->isGUIinPause();
-
-	if (timer_was_running) {
-		if (force_direct) {
-			// During Windows shutdown, use direct call - event loop may not work
-			timetracker_.useTimerViaButton(Button::Stop);
-			content_widget_->setGUItoStop();
-		} else {
-			// Normal shutdown - try via GUI button first (triggers signals)
-			content_widget_->pressedStopButton();
-
-			// Allow some time for the timer to fully stop and database operations to complete
-			auto dieTime = QTime::currentTime().addMSecs(150);
-			while (QTime::currentTime() < dieTime)
-				QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
-
-			// Fallback: try direct call if signals didn't work
-			if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
-				timetracker_.useTimerViaButton(Button::Stop);
-				content_widget_->setGUItoStop();
-
-				dieTime = QTime::currentTime().addMSecs(70);
-				while (QTime::currentTime() < dieTime)
-					QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
-			}
-		}
-	}
-
-	// Verify timer stopped correctly
-	// Flush database to disk to reduce risk of loss during Windows shutdown
-	Logger::Log("[DB] Flushing database to disk before shutdown");
-	db_.flushToDisc();
-
-	if (timetracker_.canMarkCleanShutdown()) {
-		db_.setLastCleanShutdownMarker(QDateTime::currentDateTime());
-	}
-
-	if (content_widget_->isGUIinActivity() || content_widget_->isGUIinPause()) {
-		Logger::Log("[TIMER] Error: Timer did not stop correctly during shutdown");
-	} else {
-		Logger::Log("[TIMER] Shutdown completed successfully");
-	}
-
-	shutdown_completed = true;
+	shutdown_coordinator_.run(force_direct);
 }
 
 void MainWin::onAboutToQuit()

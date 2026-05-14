@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "types.h"
 #include "idatabasemanager.h"
+#include "shutdowncoordinator.h"
 
 class MainWin : public QMainWindow
 {
@@ -19,6 +20,7 @@ private:
 	const Settings & settings_;
 	TimeTracker& timetracker_;
 	IDatabaseManager& db_;
+	ShutdownCoordinator& shutdown_coordinator_;
 
 	bool warning_activity_shown_;
 	bool warning_pause_shown_;
@@ -43,7 +45,8 @@ protected:
 	void closeEvent(QCloseEvent *event) override;
 
 public:
-	explicit MainWin(Settings &settings, TimeTracker &timetracker, IDatabaseManager &db, QWidget *parent = nullptr);
+	explicit MainWin(Settings &settings, TimeTracker &timetracker, IDatabaseManager &db,
+	                 ShutdownCoordinator &shutdown_coordinator, QWidget *parent = nullptr);
 	void start();
 
 signals:
