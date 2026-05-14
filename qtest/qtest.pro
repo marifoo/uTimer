@@ -28,6 +28,7 @@ SOURCES += \
     test_historydialog.cpp \
     test_shutdowncoordinator.cpp \
     test_healthmonitor.cpp \
+    test_timeline.cpp \
     $$PWD/../healthmonitor.cpp \
     $$PWD/../historydialog.cpp \
     $$PWD/../shutdowncoordinator.cpp \
@@ -54,6 +55,7 @@ HEADERS += \
     test_historydialog.h \
     test_shutdowncoordinator.h \
     test_healthmonitor.h \
+    test_timeline.h \
     $$PWD/../healthmonitor.h \
     $$PWD/../shutdowncoordinator.h \
     $$PWD/../timetracker.h \

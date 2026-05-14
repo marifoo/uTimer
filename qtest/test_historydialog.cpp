@@ -838,3 +838,68 @@ void HistoryDialogTest::test_splitdialog_setters_affect_types()
     QCOMPARE(dialog.getFirstSegmentType(), DurationType::Pause);
     QCOMPARE(dialog.getSecondSegmentType(), DurationType::Activity);
 }
+
+// ============================================================================
+// Test R — round-trip type toggle via accept updates TimeTracker
+// ============================================================================
+
+void HistoryDialogTest::test_R_round_trip_type_toggle_via_accept()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
+
+    const QDateTime now = QDateTime::currentDateTime();
+    tracker.session_.durations.push_back(
+        TimeDuration(DurationType::Activity, now.addSecs(-100), now.addSecs(-50)));
+
+    {
+        HistoryDialog dialog(tracker, settings);
+        QCOMPARE(dialog.pendingTimelines_[0].completed()[0].type, DurationType::Activity);
+
+        // Toggle to Pause via Timeline API
+        dialog.pendingTimelines_[0] = dialog.pendingTimelines_[0].withSegmentType(0, DurationType::Pause);
+        QCOMPARE(dialog.pendingTimelines_[0].completed()[0].type, DurationType::Pause);
+
+        dialog.done(QDialog::Accepted);
+        dialog.saveChanges();
+    }
+
+    // TimeTracker reflects the change
+    QCOMPARE(tracker.getCurrentDurations().size(), static_cast<size_t>(1));
+    QCOMPARE(tracker.getCurrentDurations()[0].type, DurationType::Pause);
+}
+
+// ============================================================================
+// Test S — cancel preserves state
+// ============================================================================
+
+void HistoryDialogTest::test_S_cancel_preserves_state()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    DatabaseManager db(settings);
+    TimeTracker tracker(settings, db);
+
+    const QDateTime now = QDateTime::currentDateTime();
+    tracker.session_.durations.push_back(
+        TimeDuration(DurationType::Activity, now.addSecs(-100), now.addSecs(-50)));
+
+    {
+        HistoryDialog dialog(tracker, settings);
+        // Toggle to Pause but cancel
+        dialog.pendingTimelines_[0] = dialog.pendingTimelines_[0].withSegmentType(0, DurationType::Pause);
+
+        dialog.done(QDialog::Rejected);
+        dialog.saveChanges();  // saveChanges checks result() and returns early when Rejected
+    }
+
+    // TimeTracker is unchanged — still Activity
+    QCOMPARE(tracker.getCurrentDurations().size(), static_cast<size_t>(1));
+    QCOMPARE(tracker.getCurrentDurations()[0].type, DurationType::Activity);
+}

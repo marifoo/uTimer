@@ -43,6 +43,12 @@ private slots:
     void test_splitdialog_short_duration_disables_slider();
     void test_splitdialog_minimum_duration_boundaries();
     void test_splitdialog_setters_affect_types();
+
+    // Test R: round-trip edit via accept updates timetracker
+    void test_R_round_trip_type_toggle_via_accept();
+
+    // Test S: cancel preserves state
+    void test_S_cancel_preserves_state();
 };
 
 #endif // TEST_HISTORYDIALOG_H
