@@ -16,8 +16,30 @@ bool FakeDatabaseManager::commitSession(const Timeline& session)
 {
     callLog.append("commitSession");
     if (commitSessionResult) {
-        // Upsert semantics: update matching segment_id or append.
-        for (const auto& d : session.completed()) {
+        // Mirror DatabaseManager: normalize internally, compute orphans, then upsert.
+        std::vector<QString> beforeIds;
+        for (const auto& d : session.completed())
+            beforeIds.push_back(d.segment_id);
+
+        Timeline normed = session.normalized();
+
+        // Delete orphaned segment IDs (those that disappeared during normalization)
+        for (const auto& id : beforeIds) {
+            bool stillPresent = false;
+            for (const auto& d : normed.completed())
+                if (d.segment_id == id) { stillPresent = true; break; }
+            if (!stillPresent) {
+                for (auto it = storedDurations.begin(); it != storedDurations.end(); ) {
+                    if (it->segment_id == id)
+                        it = storedDurations.erase(it);
+                    else
+                        ++it;
+                }
+            }
+        }
+
+        // Upsert normalized segments
+        for (const auto& d : normed.completed()) {
             bool found = false;
             for (auto& existing : storedDurations) {
                 if (existing.segment_id == d.segment_id) {

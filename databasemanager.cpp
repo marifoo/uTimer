@@ -599,12 +599,31 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
 /**
  * Persists the completed segments of a session to the database.
  *
- * Delegates to updateDurationsById(), which upserts by segment_id.
- * Orphan-ID computation is internal (T4.3 will add it here).
+ * Normalizes the timeline internally (merging adjacent same-type segments),
+ * computes orphaned segment IDs, and delegates to updateDurationsById()
+ * with the clean deque and orphan list. Callers never see removedSegmentIds.
  */
 bool DatabaseManager::commitSession(const Timeline& session)
 {
-    return updateDurationsById(session.completed(), {});
+    // Collect before-normalization segment IDs
+    std::vector<QString> beforeIds;
+    for (const auto& d : session.completed())
+        beforeIds.push_back(d.segment_id);
+
+    // Normalize to merge adjacent same-type segments
+    Timeline normed = session.normalized();
+
+    // Compute orphan IDs: segment IDs that disappeared during normalization
+    std::vector<QString> orphanIds;
+    for (const auto& id : beforeIds) {
+        bool found = false;
+        for (const auto& d : normed.completed())
+            if (d.segment_id == id) { found = true; break; }
+        if (!found)
+            orphanIds.push_back(id);
+    }
+
+    return updateDurationsById(normed.completed(), orphanIds);
 }
 
 /**

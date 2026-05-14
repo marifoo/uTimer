@@ -805,28 +805,14 @@ bool TimeTracker::appendDurationsChunkToDB(const std::deque<TimeDuration>& durat
 {
     if (durations.empty())
         return true;
-    auto temp = durations;
-    size_t original = temp.size();
-    cleanDurations(&temp);
-    if (original != temp.size()) {
-        Logger::Log(QString("[DB] Cleaned session durations: %1 -> %2").arg(original).arg(temp.size()));
-    }
-
-    return db_.commitSession(Timeline(temp, std::nullopt));
+    return db_.commitSession(Timeline(durations, std::nullopt));
 }
 
 bool TimeTracker::updateDurationsInDB()
 {
     if (session_.durations.empty())
         return true;
-    auto temp = session_.durations;
-    size_t original = temp.size();
-    cleanDurations(&temp);
-    if (original != temp.size()) {
-        Logger::Log(QString("[DB] Cleaned session durations for update: %1 -> %2").arg(original).arg(temp.size()));
-    }
-
-    return db_.commitSession(Timeline(temp, std::nullopt));
+    return db_.commitSession(Timeline(session_.durations, std::nullopt));
 }
 
 bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> historyDurations,
