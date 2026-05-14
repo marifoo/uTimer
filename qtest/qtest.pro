@@ -27,6 +27,7 @@ SOURCES += \
     test_integration.cpp \
     test_historydialog.cpp \
     $$PWD/../historydialog.cpp \
+    $$PWD/../shutdowncoordinator.cpp \
     $$PWD/../timetracker.cpp \
     $$PWD/../lockstatewatcher.cpp \
     $$PWD/../databasemanager.cpp \
@@ -47,6 +48,7 @@ HEADERS += \
     test_database.h \
     test_integration.h \
     test_historydialog.h \
+    $$PWD/../shutdowncoordinator.h \
     $$PWD/../timetracker.h \
     $$PWD/../lockstatewatcher.h \
     $$PWD/../databasemanager.h \

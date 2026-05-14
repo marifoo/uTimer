@@ -5,6 +5,7 @@ HEADERS = \
    $$PWD/databasemanager.h \
    $$PWD/idatabasemanager.h \
    $$PWD/mainwin.h \
+   $$PWD/shutdowncoordinator.h \
    $$PWD/timetracker.h \
    $$PWD/lockstatewatcher.h \
    $$PWD/settings.h \
@@ -18,6 +19,7 @@ SOURCES = \
    $$PWD/databasemanager.cpp \
    $$PWD/main.cpp \
    $$PWD/mainwin.cpp \
+   $$PWD/shutdowncoordinator.cpp \
    $$PWD/timetracker.cpp \
    $$PWD/lockstatewatcher.cpp \
    $$PWD/historydialog.cpp \
