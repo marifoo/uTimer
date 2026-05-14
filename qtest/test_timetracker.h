@@ -82,6 +82,10 @@ private slots:
     void test_E_boot_time_gate_entries_yes_skips_boot_time();
     void test_E_boot_time_gate_entries_no_adds_boot_time();
     void test_E_boot_time_gate_entries_unknown_skips_boot_time();
+
+    // Phase 4 test gate (T4)
+    // Test X: stop persists state via commitSession only.
+    void test_X_stop_persists_via_commitSession_only();
 };
 
 #endif // TEST_TIMETRACKER_H

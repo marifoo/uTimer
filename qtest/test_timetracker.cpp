@@ -1136,3 +1136,42 @@ void TimeTrackerTest::test_E_boot_time_gate_entries_unknown_skips_boot_time()
 
     tracker.useTimerViaButton(Button::Stop);
 }
+
+// ============================================================================
+// Phase 4 test gate — Test X
+// ============================================================================
+
+/**
+ * X: Stop persists state via commitSession only.
+ *
+ * After a start→stop cycle, the FakeDatabaseManager's callLog must contain
+ * "commitSession" for the stop write, and must NOT contain "saveDurations"
+ * or "updateDurationsById" as write paths (those are no longer in the
+ * interface; any occurrence would indicate a regression to the old paths).
+ */
+void TimeTrackerTest::test_X_stop_persists_via_commitSession_only()
+{
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    Settings settings(settingsPath);
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    // Act
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(20);
+    fakeDb.callLog.clear(); // record only the stop-path writes
+    tracker.useTimerViaButton(Button::Stop);
+
+    // Assert: commitSession was called
+    QVERIFY2(fakeDb.callLog.contains("commitSession"),
+             "Stop must call commitSession to persist the session");
+
+    // Assert: old direct-write methods were NOT called via the interface
+    QVERIFY2(!fakeDb.callLog.contains("saveDurations"),
+             "saveDurations must not be called; commitSession is the write path");
+    QVERIFY2(!fakeDb.callLog.contains("updateDurationsById"),
+             "updateDurationsById must not be called; commitSession is the write path");
+}

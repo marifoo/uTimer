@@ -1292,3 +1292,163 @@ void DatabaseTest::test_connection_names_unique_across_100_instances()
     // Assert: all 100 names were distinct.
     QCOMPARE(connectionNames.size(), 100);
 }
+
+// ============================================================================
+// Phase 4 test gate — Tests T, U, V, W
+// ============================================================================
+
+/**
+ * T: commitSession is upsert-by-segment-id.
+ * Save a Timeline; mutate one segment's type; commitSession again;
+ * assert one row in the DB, not two.
+ */
+void DatabaseTest::test_T_commitSession_upserts_by_segment_id()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    DatabaseManager manager(settings);
+
+    QDateTime now = QDateTime::currentDateTime();
+    QString segId = TimeDuration::createSegmentId();
+    std::deque<TimeDuration> segs;
+    segs.emplace_back(DurationType::Activity, now.addSecs(-60), now, segId);
+
+    // First save
+    QVERIFY(manager.commitSession(Timeline(segs, std::nullopt)));
+
+    // Mutate the type and save again with the same segment_id
+    segs.front().type = DurationType::Pause;
+    QVERIFY(manager.commitSession(Timeline(segs, std::nullopt)));
+
+    // Should have exactly one row
+    auto loaded = manager.loadDurations();
+    QCOMPARE(static_cast<int>(loaded.size()), 1);
+    QCOMPARE(loaded.durations.front().type, DurationType::Pause);
+    QCOMPARE(loaded.durations.front().segment_id, segId);
+}
+
+/**
+ * U: Orphan cleanup is internal to commitSession.
+ * Save a Timeline with two mergeable adjacent segments; commitSession
+ * a normalized smaller Timeline (one segment); assert the merged-away
+ * row is gone without the caller ever passing orphan IDs.
+ */
+void DatabaseTest::test_U_commitSession_orphan_cleanup_is_internal()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    DatabaseManager manager(settings);
+
+    QDateTime now = QDateTime::currentDateTime();
+    QString segA = TimeDuration::createSegmentId();
+    QString segB = TimeDuration::createSegmentId();
+
+    // Two adjacent Activity segments — will merge inside commitSession's normalized()
+    std::deque<TimeDuration> twoSegs;
+    twoSegs.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-50), segA);
+    twoSegs.emplace_back(DurationType::Activity, now.addSecs(-50), now.addSecs(-1), segB);
+
+    // Seed them via saveDurations (bypasses commitSession) so they're both in DB
+    QVERIFY(manager.saveDurations(twoSegs, TransactionMode::Append));
+    QCOMPARE(static_cast<int>(manager.loadDurations().size()), 2);
+
+    // Now commitSession with the same two segments — commitSession normalizes
+    // internally, merges them into one, and deletes the orphan (segB)
+    QVERIFY(manager.commitSession(Timeline(twoSegs, std::nullopt)));
+
+    auto loaded = manager.loadDurations();
+    QCOMPARE(static_cast<int>(loaded.size()), 1);
+
+    // Only segA (the keeper after merge) should remain
+    bool segAFound = false;
+    bool segBFound = false;
+    for (const auto& d : loaded.durations) {
+        if (d.segment_id == segA) segAFound = true;
+        if (d.segment_id == segB) segBFound = true;
+    }
+    QVERIFY(segAFound || !segBFound); // exactly one segment, segB is gone
+    QVERIFY(!segBFound);
+}
+
+/**
+ * V: replaceAll wipes and rewrites.
+ * Pre-populate with X rows, call replaceAll with Y rows, assert exactly Y remain.
+ */
+void DatabaseTest::test_V_replaceAll_wipes_and_rewrites()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    DatabaseManager manager(settings);
+
+    QDateTime now = QDateTime::currentDateTime();
+
+    // Seed 3 rows
+    std::deque<TimeDuration> initial;
+    initial.emplace_back(DurationType::Activity, now.addSecs(-300), now.addSecs(-200));
+    initial.emplace_back(DurationType::Pause,    now.addSecs(-200), now.addSecs(-100));
+    initial.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-50));
+    QVERIFY(manager.saveDurations(initial, TransactionMode::Append));
+    QCOMPARE(static_cast<int>(manager.loadDurations().size()), 3);
+
+    // replaceAll with 2 different rows
+    std::deque<TimeDuration> replacement;
+    replacement.emplace_back(DurationType::Activity, now.addSecs(-80), now.addSecs(-40));
+    replacement.emplace_back(DurationType::Pause,    now.addSecs(-40), now.addSecs(-10));
+
+    QVERIFY(manager.replaceAll(Timeline(replacement, std::nullopt),
+                                Timeline({}, std::nullopt)));
+
+    auto loaded = manager.loadDurations();
+    QCOMPARE(static_cast<int>(loaded.size()), 2);
+}
+
+/**
+ * W: Backup is created before replaceAll but NOT before commitSession.
+ * commitSession should NOT create a .backup file; replaceAll should.
+ */
+void DatabaseTest::test_W_backup_created_before_replaceAll_not_commitSession()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    DatabaseManager manager(settings);
+
+    QDir appDir(QCoreApplication::applicationDirPath());
+    QStringList before = appDir.entryList(QStringList() << "*.backup", QDir::Files);
+
+    QDateTime now = QDateTime::currentDateTime();
+    std::deque<TimeDuration> segs;
+    segs.emplace_back(DurationType::Activity, now.addSecs(-60), now);
+
+    // Seed the DB so a .sqlite file exists (needed for createBackup to copy)
+    QVERIFY(manager.saveDurations(segs, TransactionMode::Append));
+
+    QStringList afterSeed = appDir.entryList(QStringList() << "*.backup", QDir::Files);
+    // saveDurations creates a backup too; record count after seeding
+    int countAfterSeed = afterSeed.size();
+
+    // commitSession should NOT create new backup files
+    QVERIFY(manager.commitSession(Timeline(segs, std::nullopt)));
+    QStringList afterCommit = appDir.entryList(QStringList() << "*.backup", QDir::Files);
+    QCOMPARE(afterCommit.size(), countAfterSeed); // no new backup
+
+    // Wait >1 s so the timestamp in the backup filename differs from the seed backup.
+    // createBackup uses second-level timestamps; QFile::copy silently fails if the
+    // destination already exists.
+    QTest::qWait(1100);
+
+    // replaceAll SHOULD create a new backup file
+    QVERIFY(manager.replaceAll(Timeline(segs, std::nullopt),
+                                Timeline({}, std::nullopt)));
+    QStringList afterReplace = appDir.entryList(QStringList() << "*.backup", QDir::Files);
+    QVERIFY(afterReplace.size() > countAfterSeed); // new backup created
+
+    (void)before; // silence unused variable warning
+}

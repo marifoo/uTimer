@@ -73,6 +73,12 @@ private slots:
 
     // Connection name uniqueness (T25)
     void test_connection_names_unique_across_100_instances();
+
+    // Phase 4 test gate (T4)
+    void test_T_commitSession_upserts_by_segment_id();
+    void test_U_commitSession_orphan_cleanup_is_internal();
+    void test_V_replaceAll_wipes_and_rewrites();
+    void test_W_backup_created_before_replaceAll_not_commitSession();
 };
 
 #endif // TEST_DATABASE_H
