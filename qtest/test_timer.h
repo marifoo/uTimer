@@ -40,6 +40,10 @@ private slots:
     void test_session_state_reset_for_new_session();
     void test_session_state_adopt_ongoing_segment();
 
+    // Issue 9: retry cache cleared after successful replaceAll
+    void test_replaceAll_success_clears_unsaved_cache();
+    void test_replaceAll_failure_keeps_unsaved_cache();
+
     // State transition tests for public Timer methods
     void test_session_state_start_to_pause_transition();
     void test_session_state_pause_to_activity_transition();

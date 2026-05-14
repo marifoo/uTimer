@@ -774,6 +774,7 @@ void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations
     guard.markTransitioned(); // Intentionally replaces durations
 #endif
     session_.durations = newDurations;
+    session_.clearUnsaved(settings_);
 
     if (!ongoing.has_value()) {
 #ifndef QT_NO_DEBUG
@@ -889,7 +890,13 @@ bool Timer::updateDurationsInDB()
 
 bool Timer::replaceAll(const Timeline& history, const Timeline& session)
 {
-    return db_.replaceAll(history, session);
+    QMutexLocker locker(&mutex_);
+    const bool ok = db_.replaceAll(history, session);
+    if (ok) {
+        // DB is now authoritative; stale retry cache must not survive past here.
+        session_.clearUnsaved(settings_);
+    }
+    return ok;
 }
 
 EntriesForDateResult Timer::hasEntriesForDate(const QDate& date)

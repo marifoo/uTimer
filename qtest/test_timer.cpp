@@ -383,6 +383,49 @@ void TimerTest::test_session_state_reset_for_new_session()
     QVERIFY(tracker.session_.unsaved_durations.empty());
 }
 
+void TimerTest::test_replaceAll_success_clears_unsaved_cache()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    QDateTime now = QDateTime::currentDateTime();
+    tracker.session_.durations.emplace_back(
+        TimeDuration::create(DurationType::Activity, now.addSecs(-60), now).value());
+    tracker.session_.unsaved_durations = tracker.session_.durations;
+    tracker.session_.has_unsaved_data = true;
+
+    const bool ok = tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt));
+
+    QVERIFY(ok);
+    QVERIFY(!tracker.session_.has_unsaved_data);
+    QVERIFY(tracker.session_.unsaved_durations.empty());
+}
+
+void TimerTest::test_replaceAll_failure_keeps_unsaved_cache()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    fakeDb.replaceDurationsResult = false;
+    Timer tracker(settings, fakeDb);
+
+    QDateTime now = QDateTime::currentDateTime();
+    tracker.session_.durations.emplace_back(
+        TimeDuration::create(DurationType::Activity, now.addSecs(-60), now).value());
+    tracker.session_.unsaved_durations = tracker.session_.durations;
+    tracker.session_.has_unsaved_data = true;
+
+    const bool ok = tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt));
+
+    QVERIFY(!ok);
+    QVERIFY(tracker.session_.has_unsaved_data);
+    QVERIFY(!tracker.session_.unsaved_durations.empty());
+}
+
 void TimerTest::test_session_state_adopt_ongoing_segment()
 {
     // Arrange
