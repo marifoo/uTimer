@@ -118,20 +118,21 @@ void HistoryDialog::createPages()
     QList<QDate> historyDates = historyByDay.keys();
     std::sort(historyDates.begin(), historyDates.end(), std::greater<QDate>()); // Most recent first
 
-    std::deque<TimeDuration> currentPageDurations;
-    std::vector<RowOrigin> currentPageOrigins;
-    currentPageDurations.insert(currentPageDurations.end(), currentDurations.begin(), currentDurations.end());
-    currentPageOrigins.insert(currentPageOrigins.end(), currentDurations.size(), RowOrigin::CurrentMemory);
+    std::deque<TimeDuration> currentPageCompleted;
+    std::vector<bool> currentPageIsMemory;
+    currentPageCompleted.insert(currentPageCompleted.end(), currentDurations.begin(), currentDurations.end());
+    currentPageIsMemory.insert(currentPageIsMemory.end(), currentDurations.size(), true);
 
     auto todayIt = historyByDay.find(today);
     if (todayIt != historyByDay.end()) {
-        currentPageDurations.insert(currentPageDurations.end(), todayIt->begin(), todayIt->end());
-        currentPageOrigins.insert(currentPageOrigins.end(), todayIt->size(), RowOrigin::CurrentDatabase);
+        currentPageCompleted.insert(currentPageCompleted.end(), todayIt->begin(), todayIt->end());
+        currentPageIsMemory.insert(currentPageIsMemory.end(), todayIt->size(), false);
     }
 
+    // Build currentPageDurations for the Page struct (includes ongoing for title count)
+    std::deque<TimeDuration> currentPageDurations = currentPageCompleted;
     if (ongoingSnapshot_.has_value()) {
         currentPageDurations.push_back(ongoingSnapshot_.value());
-        currentPageOrigins.push_back(RowOrigin::Ongoing);
     }
 
     // Add today page (current session + today's DB + ongoing)
@@ -153,16 +154,17 @@ void HistoryDialog::createPages()
         });
     }
 
-    // Initialize working copy for pending changes
-    pendingChanges_.resize(pages_.size());
-    rowOrigins_.resize(pages_.size());
-    for (size_t i = 0; i < pages_.size(); ++i) {
-        pendingChanges_[i] = pages_[i].durations;
-        if (i == 0) {
-            rowOrigins_[i] = currentPageOrigins;
-        } else {
-            rowOrigins_[i].assign(pages_[i].durations.size(), RowOrigin::HistoricalDatabase);
-        }
+    // Initialize pendingTimelines_ and isMemoryRow_
+    pendingTimelines_.reserve(pages_.size());
+    isMemoryRow_.reserve(pages_.size());
+
+    // Page 0: completed = currentPageCompleted (no ongoing), ongoing = ongoingSnapshot_
+    pendingTimelines_.push_back(Timeline(currentPageCompleted, ongoingSnapshot_));
+    isMemoryRow_.push_back(currentPageIsMemory);
+
+    for (size_t i = 1; i < pages_.size(); ++i) {
+        pendingTimelines_.push_back(Timeline(pages_[i].durations, std::nullopt));
+        isMemoryRow_.push_back(std::vector<bool>(pages_[i].durations.size(), false));
     }
 
     assertPendingOriginsInvariant();
@@ -282,26 +284,27 @@ std::pair<qint64, qint64> HistoryDialog::calculateTotals(const std::deque<TimeDu
 void HistoryDialog::assertPendingOriginsInvariant() const
 {
 #ifndef QT_NO_DEBUG
-    Q_ASSERT_X(rowOrigins_.size() == pendingChanges_.size(),
+    Q_ASSERT_X(isMemoryRow_.size() == pendingTimelines_.size(),
         "HistoryDialog::assertPendingOriginsInvariant",
-        "rowOrigins_ and pendingChanges_ must have same page count");
-    for (size_t i = 0; i < pendingChanges_.size(); ++i) {
-        Q_ASSERT_X(rowOrigins_[i].size() == pendingChanges_[i].size(),
+        "isMemoryRow_ and pendingTimelines_ must have same page count");
+    for (size_t i = 0; i < pendingTimelines_.size(); ++i) {
+        Q_ASSERT_X(isMemoryRow_[i].size() == pendingTimelines_[i].completed().size(),
             "HistoryDialog::assertPendingOriginsInvariant",
-            "rowOrigins_[i] and pendingChanges_[i] must have same row count");
+            "isMemoryRow_[i] must have same row count as pendingTimelines_[i].completed()");
     }
 #endif
 }
 
 void HistoryDialog::updateTotalsLabel(uint idx)
 {
-    if (idx >= pendingChanges_.size() || idx >= pages_.size()) {
+    if (idx >= pendingTimelines_.size() || idx >= pages_.size()) {
         Logger::Log(QString("[HISTORY] Error: updateTotalsLabel: Invalid index %1").arg(idx));
         return;
     }
 
-    auto totals = calculateTotals(pendingChanges_[idx]);
-    QString totalsStr = QString("\nActivity: ") + convMSecToTimeStr(totals.first) + QString("  Pause: ") + convMSecToTimeStr(totals.second);
+    qint64 totalActivity = pendingTimelines_[idx].activeMsec();
+    qint64 totalPause = pendingTimelines_[idx].pauseMsec();
+    QString totalsStr = QString("\nActivity: ") + convMSecToTimeStr(totalActivity) + QString("  Pause: ") + convMSecToTimeStr(totalPause);
     pageLabel_->setText(pages_[idx].title + totalsStr);
 }
 
@@ -317,7 +320,7 @@ void HistoryDialog::updateTotalsLabel(uint idx)
  */
 void HistoryDialog::updateTable(uint idx)
 {
-    if (idx >= pendingChanges_.size() || idx >= pages_.size()) {
+    if (idx >= pendingTimelines_.size() || idx >= pages_.size()) {
         Logger::Log(QString("[HISTORY] Error: updateTable: Invalid index %1").arg(idx));
         return;
     }
@@ -332,17 +335,29 @@ void HistoryDialog::updateTable(uint idx)
     }
 
     table_->clearContents();
-    table_->setRowCount(static_cast<int>(pendingChanges_[idx].size()));
+
+    const auto& comp = pendingTimelines_[idx].completed();
+    const bool hasOngoing = pendingTimelines_[idx].ongoing().has_value();
+    int rowCount = static_cast<int>(comp.size());
+    if (hasOngoing) ++rowCount;
+    table_->setRowCount(rowCount);
+
     updateTotalsLabel(idx);
 
-    // Determine if this page has been modified
+    // Determine if this page has been modified (compare completed portion only)
+    const auto& originalDurations = pages_[idx].durations;
+    // For page 0, original durations includes the ongoing row at the end; compare only completed
+    size_t originalCompletedSize = originalDurations.size();
+    if (idx == 0 && ongoingSnapshot_.has_value()) {
+        originalCompletedSize = originalDurations.size() > 0 ? originalDurations.size() - 1 : 0;
+    }
     bool pageModified = false;
-    if (pendingChanges_[idx].size() != pages_[idx].durations.size()) {
+    if (comp.size() != originalCompletedSize) {
         pageModified = true;
     } else {
-        for (size_t i = 0; i < pendingChanges_[idx].size(); ++i) {
-            const auto& pending = pendingChanges_[idx][i];
-            const auto& original = pages_[idx].durations[i];
+        for (size_t i = 0; i < comp.size(); ++i) {
+            const auto& pending = comp[i];
+            const auto& original = originalDurations[i];
             if (pending.type != original.type ||
                 pending.duration != original.duration ||
                 pending.startTime != original.startTime ||
@@ -353,59 +368,43 @@ void HistoryDialog::updateTable(uint idx)
         }
     }
 
-    // Populate table rows
-    for (int row = 0; row < int(pendingChanges_[idx].size()); ++row) {
-        const auto& d = pendingChanges_[idx][row];
-        bool isOngoingRow = (idx < rowOrigins_.size()
-                             && row < static_cast<int>(rowOrigins_[idx].size())
-                             && rowOrigins_[idx][row] == RowOrigin::Ongoing);
+    // Populate completed rows
+    for (int row = 0; row < static_cast<int>(comp.size()); ++row) {
+        const auto& d = comp[row];
         QString typeStr = d.type == DurationType::Activity ? "Activity  " : "Pause  ";
         QTableWidgetItem* typeItem = new QTableWidgetItem(typeStr);
-        // Use stored startTime directly instead of computing from end - duration
         QTableWidgetItem* startEndItem = new QTableWidgetItem(d.startTime.toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss"));
-        QString durationText = convMSecToTimeStr(d.duration) + "  ";
-        if (isOngoingRow) {
-            durationText += "(Running)";
-        }
-        QTableWidgetItem* durationItem = new QTableWidgetItem(durationText);
+        QTableWidgetItem* durationItem = new QTableWidgetItem(convMSecToTimeStr(d.duration) + "  ");
         table_->setItem(row, 0, typeItem);
         table_->setItem(row, 1, startEndItem);
         table_->setItem(row, 2, durationItem);
 
-        // Add checkbox for Activity/Pause toggle
         QCheckBox* box = new QCheckBox(table_);
         box->setChecked(d.type == DurationType::Activity);
-        box->setEnabled(!isOngoingRow);
+        box->setEnabled(true);
         table_->setCellWidget(row, 3, box);
 
-        // Handle checkbox state changes with proper validation
         connect(box, &QCheckBox::stateChanged, this, [this, capturedPageIdx = idx, capturedRow = row](int state) {
-            if (capturedPageIdx < rowOrigins_.size()
-                && capturedRow < static_cast<int>(rowOrigins_[capturedPageIdx].size())
-                && rowOrigins_[capturedPageIdx][capturedRow] == RowOrigin::Ongoing) {
-                return;
-            }
             // Reject stale events from checkboxes on other pages
             if (capturedPageIdx != pageIndex_) {
                 return;
             }
 
-            if (capturedRow >= static_cast<int>(pendingChanges_[capturedPageIdx].size())) {
+            if (capturedRow >= static_cast<int>(pendingTimelines_[capturedPageIdx].completed().size())) {
                 Logger::Log(QString("[WARNING] Checkbox callback: Invalid row %1").arg(capturedRow));
                 return;
             }
 
-            // Update the duration type in pending changes
-            pendingChanges_[capturedPageIdx][capturedRow].type = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
+            DurationType newType = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
+            pendingTimelines_[capturedPageIdx] = pendingTimelines_[capturedPageIdx].withSegmentType(
+                static_cast<size_t>(capturedRow), newType);
             assertPendingOriginsInvariant();
-            QString typeStr = pendingChanges_[capturedPageIdx][capturedRow].type == DurationType::Activity ? "Activity  " : "Pause  ";
+            QString typeStr = newType == DurationType::Activity ? "Activity  " : "Pause  ";
 
-            // Update UI
             if (table_->item(capturedRow, 0)) {
                 table_->item(capturedRow, 0)->setText(typeStr);
                 updateTotalsLabel(capturedPageIdx);
 
-                // Highlight the modified row
                 for (int col = 0; col < table_->columnCount(); ++col) {
                     if (table_->item(capturedRow, col)) {
                         table_->item(capturedRow, col)->setBackground(QColor(180, 216, 228, 255));
@@ -414,7 +413,6 @@ void HistoryDialog::updateTable(uint idx)
             }
         });
 
-        // Highlight all rows if page has been modified
         if (pageModified) {
             for (int col = 0; col < table_->columnCount(); ++col) {
                 if (table_->item(row, col)) {
@@ -422,6 +420,24 @@ void HistoryDialog::updateTable(uint idx)
                 }
             }
         }
+    }
+
+    // Populate ongoing row if present
+    if (hasOngoing) {
+        int row = static_cast<int>(comp.size());
+        const auto& og = pendingTimelines_[idx].ongoing().value();
+        QString typeStr = og.type == DurationType::Activity ? "Activity  " : "Pause  ";
+        QTableWidgetItem* typeItem = new QTableWidgetItem(typeStr);
+        QTableWidgetItem* startEndItem = new QTableWidgetItem(og.startTime.toString("hh:mm:ss") + " - " + og.endTime.toString("hh:mm:ss"));
+        QTableWidgetItem* durationItem = new QTableWidgetItem(convMSecToTimeStr(og.duration) + "  (Running)");
+        table_->setItem(row, 0, typeItem);
+        table_->setItem(row, 1, startEndItem);
+        table_->setItem(row, 2, durationItem);
+
+        QCheckBox* box = new QCheckBox(table_);
+        box->setChecked(og.type == DurationType::Activity);
+        box->setEnabled(false);
+        table_->setCellWidget(row, 3, box);
     }
 
     // Update navigation button states
@@ -464,17 +480,7 @@ void HistoryDialog::saveChanges()
         return;
     }
 
-    // Apply all pending changes to the original pages
-    for (size_t i = 0; i < pages_.size(); ++i) {
-        std::swap(pages_[i].durations, pendingChanges_[i]);
-    }
-    // rowOrigins_ is intentionally out of sync with pendingChanges_ here:
-    // the swap moved pendingChanges_ back to original size while rowOrigins_
-    // carries post-edit origins. The invariant applies only while editing.
-
-    // Update TimeTracker's current session and collect rows for DB replace.
-    // The ongoing row is handled separately so checkpoint tracking can be reset
-    // after replaceDurationsInDB assigns fresh row IDs.
+    // Collect durations from pendingTimelines_ and route by origin
     std::deque<TimeDuration> historyDurations;
     std::deque<TimeDuration> currentMemoryDurations;
     std::deque<TimeDuration> currentSessionDurations;
@@ -482,36 +488,19 @@ void HistoryDialog::saveChanges()
 
     for (size_t i = 0; i < pages_.size(); ++i) {
         if (pages_[i].isCurrent) {
-            std::deque<TimeDuration> currentDbDurations;
-            for (size_t row = 0; row < pages_[i].durations.size(); ++row) {
-                if (i < rowOrigins_.size() && row < rowOrigins_[i].size()) {
-                    if (rowOrigins_[i][row] == RowOrigin::CurrentMemory) {
-                        currentMemoryDurations.push_back(pages_[i].durations[row]);
-                        currentSessionDurations.push_back(pages_[i].durations[row]);
-                    } else if (rowOrigins_[i][row] == RowOrigin::CurrentDatabase) {
-                        currentDbDurations.push_back(pages_[i].durations[row]);
-                    } else if (rowOrigins_[i][row] == RowOrigin::Ongoing) {
-                        const TimeDuration& pendingOngoing = pages_[i].durations[row];
-                        if (ongoingSnapshot_.has_value()
-                            && pendingOngoing.type == ongoingSnapshot_->type
-                            && pendingOngoing.duration == ongoingSnapshot_->duration
-                            && pendingOngoing.startTime == ongoingSnapshot_->startTime
-                            && pendingOngoing.endTime == ongoingSnapshot_->endTime) {
-                            ongoingDurationForSave = ongoingSnapshot_.value();
-                        } else {
-                            ongoingDurationForSave = pendingOngoing;
-                        }
-                    }
+            const auto& comp = pendingTimelines_[i].completed();
+            for (size_t row = 0; row < comp.size(); ++row) {
+                if (isMemoryRow_[i][row]) {
+                    currentMemoryDurations.push_back(comp[row]);
+                    currentSessionDurations.push_back(comp[row]);
+                } else {
+                    historyDurations.push_back(comp[row]);
                 }
             }
-            historyDurations.insert(historyDurations.end(),
-                                   currentDbDurations.begin(),
-                                   currentDbDurations.end());
+            ongoingDurationForSave = pendingTimelines_[i].ongoing();
         } else {
-            // Collect historical durations for DB save
-            historyDurations.insert(historyDurations.end(),
-                                   pages_[i].durations.begin(),
-                                   pages_[i].durations.end());
+            const auto& comp = pendingTimelines_[i].completed();
+            historyDurations.insert(historyDurations.end(), comp.begin(), comp.end());
         }
     }
 
@@ -559,10 +548,11 @@ void HistoryDialog::showContextMenu(const QPoint& pos)
 {
     int row = table_->rowAt(pos.y());
     if (row < 0) return;
-    
-    if (pageIndex_ < rowOrigins_.size()
-        && row < static_cast<int>(rowOrigins_[pageIndex_].size())
-        && rowOrigins_[pageIndex_][row] == RowOrigin::Ongoing) {
+
+    // Don't allow split on the ongoing row
+    if (pageIndex_ < pendingTimelines_.size()
+        && row == static_cast<int>(pendingTimelines_[pageIndex_].completed().size())
+        && pendingTimelines_[pageIndex_].ongoing().has_value()) {
         return;
     }
 
@@ -600,19 +590,19 @@ void HistoryDialog::onSplitRow()
     uint idx = static_cast<uint>(contextMenuPage_);
     contextMenuPage_ = -1;
 
-    if (idx >= pendingChanges_.size() || row >= static_cast<int>(pendingChanges_[idx].size())) {
+    if (idx >= pendingTimelines_.size() || row >= static_cast<int>(pendingTimelines_[idx].completed().size())) {
         Logger::Log(QString("[HISTORY] Error: onSplitRow: Invalid indices - page: %1, row: %2").arg(idx).arg(row));
         return;
     }
-    if (idx < rowOrigins_.size()
-        && row < static_cast<int>(rowOrigins_[idx].size())
-        && rowOrigins_[idx][row] == RowOrigin::Ongoing) {
+    // Don't allow split on the ongoing row
+    if (row == static_cast<int>(pendingTimelines_[idx].completed().size())
+        && pendingTimelines_[idx].ongoing().has_value()) {
         return;
     }
 
-    TimeDuration& duration = pendingChanges_[idx][row];
+    const auto& completed = pendingTimelines_[idx].completed();
+    const TimeDuration& duration = completed[row];
     qint64 originalDuration = duration.duration;
-    // Use stored startTime directly instead of computing from end - duration
     QDateTime start = duration.startTime;
     QDateTime end = duration.endTime;
 
@@ -652,25 +642,16 @@ void HistoryDialog::onSplitRow()
         DurationType firstType = dlg.getFirstSegmentType();
         DurationType secondType = dlg.getSecondSegmentType();
 
-        // Create split segments with explicit start/end times
-        TimeDuration first(firstType, start, splitTime, duration.segment_id);
-        TimeDuration second(secondType, splitTime, end);
+        // Perform the split via pure Timeline operation
+        pendingTimelines_[idx] = pendingTimelines_[idx].withSplit(
+            static_cast<size_t>(row), dlg.getSplitTime(), firstType, secondType);
 
-        // Replace original duration with two new segments using index-based operations
-        // (Avoid iterator invalidation issues with deque erase/insert)
-        auto& durationsDeque = pendingChanges_[idx];
-        auto& origins = rowOrigins_[idx];
-        const RowOrigin originalOrigin = origins[static_cast<size_t>(row)];
-        durationsDeque.erase(durationsDeque.begin() + row);
-        durationsDeque.insert(durationsDeque.begin() + row, first);
-        durationsDeque.insert(durationsDeque.begin() + row + 1, second);
-
-        origins.erase(origins.begin() + row);
-        origins.insert(origins.begin() + row, originalOrigin);
-        origins.insert(origins.begin() + row + 1, originalOrigin);
+        // Update isMemoryRow_: insert entry for second half with same value as first
+        bool wasMemory = isMemoryRow_[idx][static_cast<size_t>(row)];
+        isMemoryRow_[idx].insert(isMemoryRow_[idx].begin() + row + 1, wasMemory);
 
         assertPendingOriginsInvariant();
-        
+
         updateTable(idx);
     }
 }
@@ -809,8 +790,8 @@ HistoryDialog::~HistoryDialog() {
         }
     }
 
-    pendingChanges_.clear();
-    rowOrigins_.clear();
+    pendingTimelines_.clear();
+    isMemoryRow_.clear();
     assertPendingOriginsInvariant();
 
     // Resume checkpoints now that dialog is closed

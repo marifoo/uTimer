@@ -68,10 +68,11 @@ void HistoryDialogTest::test_historydialog_createPages_includes_current_db_ongoi
     HistoryDialog dialog(tracker, settings);
     QCOMPARE(dialog.pages_.size(), static_cast<size_t>(1));
     QCOMPARE(dialog.pages_[0].isCurrent, true);
-    QCOMPARE(dialog.pendingChanges_[0].size(), static_cast<size_t>(2));
-    QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(2));
-    QVERIFY(dialog.pendingChanges_[0].back().duration > 0);
-    QCOMPARE(dialog.rowOrigins_[0].back(), HistoryDialog::RowOrigin::Ongoing);
+    // completed=1 (DB row), ongoing=1; total display rows=2
+    QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(1));
+    QVERIFY(dialog.pendingTimelines_[0].ongoing().has_value());
+    QVERIFY(dialog.pendingTimelines_[0].ongoing()->duration > 0);
+    QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(1));
 }
 
 void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_time_drift()
@@ -95,11 +96,11 @@ void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_
 
     HistoryDialog dialog(tracker, settings);
     QCOMPARE(dialog.pages_.size(), static_cast<size_t>(1));
-    QCOMPARE(dialog.pendingChanges_[0].size(), static_cast<size_t>(1));
-    QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(1));
-    QCOMPARE(dialog.rowOrigins_[0][0], HistoryDialog::RowOrigin::CurrentMemory);
-    QCOMPARE(dialog.pendingChanges_[0][0].startTime, memoryStart);
-    QCOMPARE(dialog.pendingChanges_[0][0].endTime, memoryEnd);
+    QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(1));
+    QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(1));
+    QCOMPARE(dialog.isMemoryRow_[0][0], true);  // originated from session_.durations
+    QCOMPARE(dialog.pendingTimelines_[0].completed()[0].startTime, memoryStart);
+    QCOMPARE(dialog.pendingTimelines_[0].completed()[0].endTime, memoryEnd);
 }
 
 void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midnight_row_by_start_date()
@@ -149,10 +150,10 @@ void HistoryDialogTest::test_historydialog_checkbox_toggle_updates_pending_and_t
 
     QCheckBox* box = qobject_cast<QCheckBox*>(dialog.table_->cellWidget(0, 3));
     QVERIFY(box != nullptr);
-    QCOMPARE(dialog.pendingChanges_[0][0].type, DurationType::Activity);
+    QCOMPARE(dialog.pendingTimelines_[0].completed()[0].type, DurationType::Activity);
     box->setChecked(false);
 
-    QCOMPARE(dialog.pendingChanges_[0][0].type, DurationType::Pause);
+    QCOMPARE(dialog.pendingTimelines_[0].completed()[0].type, DurationType::Pause);
     QVERIFY(dialog.pageLabel_->text().contains("Pause"));
 }
 
@@ -173,7 +174,7 @@ void HistoryDialogTest::test_historydialog_saveChanges_updates_timetracker_and_d
     QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
 
     HistoryDialog dialog(tracker, settings);
-    dialog.pendingChanges_[0][0].type = DurationType::Pause;
+    dialog.pendingTimelines_[0] = dialog.pendingTimelines_[0].withSegmentType(0, DurationType::Pause);
 
     dialog.done(QDialog::Accepted);
     dialog.saveChanges();
@@ -216,9 +217,9 @@ void HistoryDialogTest::test_historydialog_split_action_splits_row()
     });
 
     dialog.onSplitRow();
-    QCOMPARE(dialog.pendingChanges_[0].size(), static_cast<size_t>(2));
-    const auto& first = dialog.pendingChanges_[0][0];
-    const auto& second = dialog.pendingChanges_[0][1];
+    QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(2));
+    const auto& first = dialog.pendingTimelines_[0].completed()[0];
+    const auto& second = dialog.pendingTimelines_[0].completed()[1];
     QCOMPARE(first.startTime, start);
     QCOMPARE(second.endTime, end);
     QCOMPARE(first.endTime, second.startTime);
@@ -251,9 +252,9 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
     QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
 
     HistoryDialog dialog(tracker, settings);
-    QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(2));
-    QCOMPARE(dialog.rowOrigins_[0][0], HistoryDialog::RowOrigin::CurrentMemory);
-    QCOMPARE(dialog.rowOrigins_[0][1], HistoryDialog::RowOrigin::CurrentDatabase);
+    QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.isMemoryRow_[0][0], true);   // memory row
+    QCOMPARE(dialog.isMemoryRow_[0][1], false);  // DB row
 
     dialog.contextMenuRow_ = 0;
     dialog.contextMenuPage_ = 0;
@@ -270,11 +271,11 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
     });
 
     dialog.onSplitRow();
-    QCOMPARE(dialog.pendingChanges_[0].size(), static_cast<size_t>(3));
-    QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(3));
-    QCOMPARE(dialog.rowOrigins_[0][0], HistoryDialog::RowOrigin::CurrentMemory);
-    QCOMPARE(dialog.rowOrigins_[0][1], HistoryDialog::RowOrigin::CurrentMemory);
-    QCOMPARE(dialog.rowOrigins_[0][2], HistoryDialog::RowOrigin::CurrentDatabase);
+    QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(3));
+    QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(3));
+    QCOMPARE(dialog.isMemoryRow_[0][0], true);   // first half: memory
+    QCOMPARE(dialog.isMemoryRow_[0][1], true);   // second half: memory (same origin as first)
+    QCOMPARE(dialog.isMemoryRow_[0][2], false);  // DB row unchanged
 
     dialog.done(QDialog::Accepted);
     dialog.saveChanges();
@@ -326,10 +327,10 @@ void HistoryDialogTest::test_historydialog_split_non_today_db_row_survives_save_
     });
 
     dialog.onSplitRow();
-    QCOMPARE(dialog.pendingChanges_[1].size(), static_cast<size_t>(2));
-    QCOMPARE(dialog.rowOrigins_[1].size(), static_cast<size_t>(2));
-    QCOMPARE(dialog.rowOrigins_[1][0], HistoryDialog::RowOrigin::HistoricalDatabase);
-    QCOMPARE(dialog.rowOrigins_[1][1], HistoryDialog::RowOrigin::HistoricalDatabase);
+    QCOMPARE(dialog.pendingTimelines_[1].completed().size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.isMemoryRow_[1].size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.isMemoryRow_[1][0], false);  // historical DB row
+    QCOMPARE(dialog.isMemoryRow_[1][1], false);  // historical DB row
 
     dialog.done(QDialog::Accepted);
     dialog.saveChanges();
@@ -415,7 +416,7 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
     {
         HistoryDialog dialog(tracker, settings);
         QVERIFY(dialog.pages_.size() >= static_cast<size_t>(2));
-        dialog.pendingChanges_[1][0].type = DurationType::Activity;
+        dialog.pendingTimelines_[1] = dialog.pendingTimelines_[1].withSegmentType(0, DurationType::Activity);
         dialog.done(QDialog::Accepted);
         dialog.saveChanges();
     }
@@ -698,11 +699,11 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
     QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
 
     HistoryDialog dialog(tracker, settings);
-    QCOMPARE(dialog.rowOrigins_[0].size(), static_cast<size_t>(2));
-    QCOMPARE(dialog.rowOrigins_[0][0], HistoryDialog::RowOrigin::CurrentMemory);
-    QCOMPARE(dialog.rowOrigins_[0][1], HistoryDialog::RowOrigin::CurrentDatabase);
+    QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.isMemoryRow_[0][0], true);   // memory row
+    QCOMPARE(dialog.isMemoryRow_[0][1], false);  // DB row
 
-    dialog.pendingChanges_[0][0].type = DurationType::Pause;
+    dialog.pendingTimelines_[0] = dialog.pendingTimelines_[0].withSegmentType(0, DurationType::Pause);
 
     const QString lockConnName = "historydialog_save_failure_lock";
     {

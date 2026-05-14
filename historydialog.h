@@ -10,6 +10,7 @@
 #include <set>
 #include "types.h"
 #include "timetracker.h"
+#include "timeline.h"
 
 class QLabel;
 class QTableWidget;
@@ -34,8 +35,8 @@ private:
     TimeTracker& timetracker_;
     const Settings& settings_;
     std::vector<Page> pages_;
-    std::vector<std::deque<TimeDuration>> pendingChanges_; // Store the entire edited page for each page index
-    std::vector<std::vector<RowOrigin>> rowOrigins_;
+    std::vector<Timeline> pendingTimelines_;
+    std::vector<std::vector<bool>> isMemoryRow_;  // true = originated from session_.durations
     std::optional<TimeDuration> ongoingSnapshot_;
     uint pageIndex_;
     int contextMenuRow_ = -1;
