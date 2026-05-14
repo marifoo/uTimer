@@ -7,7 +7,7 @@ metadata:
 
 # Implementation Progress: improve-design-plan.md
 
-**Status as of 2026-05-14:** Phases 0, 1, 2, 3, and 4 complete. Ready to begin Phase 5.
+**Status as of 2026-05-14:** All phases complete (0–6). Implementation done.
 
 ## Overall Status
 
@@ -19,7 +19,7 @@ metadata:
 | 3 | Timeline value type | DONE (T3.1–T3.7, test gate, review gate — no non-minor findings) |
 | 4 | Collapse the three write methods | DONE (T4.1–T4.5, T4.6 review fix, test gate, review gate) |
 | 5 | Day-boundary policy into Timer | DONE (T5.0a–T5.6, test gate, review gate) |
-| 6 | Renames | Not started |
+| 6 | Renames | DONE (T6.1–T6.5, T6.5.fix, test gate, review gate) |
 
 ## Phase 2 — Extract ShutdownCoordinator and HealthMonitor
 
@@ -97,13 +97,19 @@ metadata:
 
 ## Phase 6 — Renames
 
-- [ ] T6.1 — Rename IDatabaseManager to SessionStore
-- [ ] T6.2 — Rename DatabaseManager to SqliteSessionStore
-- [ ] T6.3 — Rename FakeDatabaseManager to FakeSessionStore
-- [ ] T6.4 — Rename TimeTracker to Timer
-- [ ] T6.5 — Sanity sweep
-- [ ] T6 Test Gate
-- [ ] T6 Review Gate
+- [x] T6.1 — Rename IDatabaseManager to SessionStore (3c6eec9)
+- [x] T6.2 — Rename DatabaseManager to SqliteSessionStore (26f0df4)
+- [x] T6.3 — Rename FakeDatabaseManager to FakeSessionStore (97bb59d)
+- [x] T6.4 — Rename TimeTracker to Timer (05b7235)
+- [x] T6.5 — Sanity sweep + test_renames.cpp (e9e5488)
+- [x] T6.5.fix — address review: rename test_timetracker_ slots to test_timer_ (7069eb5)
+- [x] T6 Test Gate — test_renames.cpp verifies no old names in production headers (included in T6.5)
+- [x] T6 Review Gate — one non-minor finding addressed (slot name prefix)
+
+**Notes:**
+- T6.4 variable names like `time_tracker` in main.cpp left as-is (a QTimer named `timer` already exists — renaming the TimeTracker instance would conflict)
+- test_renames.cpp checks all 14 production headers for TimeTracker, IDatabaseManager, FakeDatabaseManager, and patterns of bare DatabaseManager
+- Review also noted AGENTS.md changes are slightly beyond pure rename (also corrected day-boundary ownership description) — deemed accurate and acceptable
 
 ## How to resume after interruption
 
