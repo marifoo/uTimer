@@ -117,7 +117,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	ShutdownCoordinator shutdown_coordinator(time_tracker, database_manager, settings);
+	ShutdownCoordinator shutdown_coordinator(time_tracker, database_manager);
 	MainWin main_win(settings, time_tracker, database_manager, shutdown_coordinator);
 
 #ifdef Q_OS_LINUX

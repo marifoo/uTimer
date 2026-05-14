@@ -16,7 +16,7 @@ void ShutdownCoordinatorTest::test_G_happy_path_stop_flush_marker()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeDatabaseManager fakeDb;
     TimeTracker tracker(settings, fakeDb);
-    ShutdownCoordinator coordinator(tracker, fakeDb, settings);
+    ShutdownCoordinator coordinator(tracker, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
@@ -46,7 +46,7 @@ void ShutdownCoordinatorTest::test_H_idempotent_second_run_is_noop()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeDatabaseManager fakeDb;
     TimeTracker tracker(settings, fakeDb);
-    ShutdownCoordinator coordinator(tracker, fakeDb, settings);
+    ShutdownCoordinator coordinator(tracker, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
@@ -72,7 +72,7 @@ void ShutdownCoordinatorTest::test_I_force_direct_skips_retry_loop()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeDatabaseManager fakeDb;
     TimeTracker tracker(settings, fakeDb);
-    ShutdownCoordinator coordinator(tracker, fakeDb, settings);
+    ShutdownCoordinator coordinator(tracker, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
@@ -80,11 +80,14 @@ void ShutdownCoordinatorTest::test_I_force_direct_skips_retry_loop()
 
     fakeDb.callLog.clear();
 
-    // The force-direct path should stop the timer with a single direct call.
-    // We verify the net result (stopped) and that the essential post-stop
-    // operations (flush, marker) still happen.
+    // The force-direct path must not block for 150 ms (no processEvents pump).
+    // We measure elapsed time: run(true) with FakeDb completes well under 50 ms.
+    QElapsedTimer elapsed;
+    elapsed.start();
     coordinator.run(true);
+    qint64 elapsedMs = elapsed.elapsed();
 
+    QVERIFY2(elapsedMs < 100, qPrintable(QString("force-direct took %1 ms; expected < 100 ms").arg(elapsedMs)));
     QVERIFY(!tracker.getOngoingDuration().has_value());
     QVERIFY(fakeDb.callLog.contains("flushToDisc"));
     QVERIFY(fakeDb.callLog.contains("setLastCleanShutdownMarker"));

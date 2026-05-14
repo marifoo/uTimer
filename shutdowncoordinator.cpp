@@ -7,8 +7,8 @@
 #include <QTime>
 #include <QCoreApplication>
 
-ShutdownCoordinator::ShutdownCoordinator(TimeTracker& timetracker, IDatabaseManager& db, const Settings& settings)
-    : timetracker_(timetracker), db_(db), settings_(settings), shutdown_completed_(false)
+ShutdownCoordinator::ShutdownCoordinator(TimeTracker& timetracker, IDatabaseManager& db)
+    : timetracker_(timetracker), db_(db), shutdown_completed_(false)
 {
 }
 

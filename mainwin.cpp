@@ -257,6 +257,8 @@ void MainWin::start()
 void MainWin::shutdown(bool force_direct)
 {
 	shutdown_coordinator_.run(force_direct);
+	// GUI sync stays in MainWin: coordinator has no ContentWidget dependency
+	content_widget_->setGUItoStop();
 }
 
 void MainWin::onAboutToQuit()
