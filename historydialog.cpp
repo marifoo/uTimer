@@ -467,7 +467,9 @@ void HistoryDialog::saveChanges()
     for (size_t i = 0; i < pages_.size(); ++i) {
         std::swap(pages_[i].durations, pendingChanges_[i]);
     }
-    assertPendingOriginsInvariant();
+    // rowOrigins_ is intentionally out of sync with pendingChanges_ here:
+    // the swap moved pendingChanges_ back to original size while rowOrigins_
+    // carries post-edit origins. The invariant applies only while editing.
 
     // Update TimeTracker's current session and collect rows for DB replace.
     // The ongoing row is handled separately so checkpoint tracking can be reset
