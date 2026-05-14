@@ -12,6 +12,28 @@ FakeDatabaseManager::FakeDatabaseManager()
 {
 }
 
+bool FakeDatabaseManager::commitSession(const Timeline& session)
+{
+    callLog.append("commitSession");
+    if (commitSessionResult) {
+        // Upsert semantics: update matching segment_id or append.
+        for (const auto& d : session.completed()) {
+            bool found = false;
+            for (auto& existing : storedDurations) {
+                if (existing.segment_id == d.segment_id) {
+                    existing = d;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                storedDurations.push_back(d);
+            }
+        }
+    }
+    return commitSessionResult;
+}
+
 bool FakeDatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode /*mode*/,
                                          const std::vector<QString>& /*removedSegmentIds*/)
 {

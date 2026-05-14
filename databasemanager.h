@@ -19,6 +19,7 @@ public:
     explicit DatabaseManager(const Settings& settings, QObject *parent = nullptr);
     ~DatabaseManager();
 
+    bool commitSession(const Timeline& session) override;
     bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
                        const std::vector<QString>& removedSegmentIds = {}) override;
     bool replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,

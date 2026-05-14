@@ -23,6 +23,7 @@
 #include <optional>
 #include <vector>
 #include "types.h"
+#include "timeline.h"
 
 /**
  * Forward declaration of the OrphanCheckpoint and LoadResult types.
@@ -61,6 +62,7 @@ class IDatabaseManager
 public:
     virtual ~IDatabaseManager() = default;
 
+    virtual bool commitSession(const Timeline& session) = 0;
     virtual bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
                                const std::vector<QString>& removedSegmentIds = {}) = 0;
     virtual bool replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,

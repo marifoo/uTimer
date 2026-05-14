@@ -17,6 +17,7 @@
 #define FAKEDATABASEMANAGER_H
 
 #include "idatabasemanager.h"
+#include "timeline.h"
 #include <QStringList>
 #include <deque>
 #include <optional>
@@ -30,6 +31,7 @@ public:
 
     // ---- IDatabaseManager interface ----
 
+    bool commitSession(const Timeline& session) override;
     bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
                        const std::vector<QString>& removedSegmentIds = {}) override;
     bool replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
@@ -70,6 +72,7 @@ public:
 
     // ---- Configurable return values ----
 
+    bool commitSessionResult = true;
     bool saveDurationsResult = true;
     bool replaceDurationsResult = true;
     bool saveCheckpointResult = true;

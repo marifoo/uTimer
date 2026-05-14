@@ -597,6 +597,17 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
 }
 
 /**
+ * Persists the completed segments of a session to the database.
+ *
+ * Delegates to updateDurationsById(), which upserts by segment_id.
+ * Orphan-ID computation is internal (T4.3 will add it here).
+ */
+bool DatabaseManager::commitSession(const Timeline& session)
+{
+    return updateDurationsById(session.completed(), {});
+}
+
+/**
  * Persists a batch of duration entries to the database.
  *
  * Modes:
