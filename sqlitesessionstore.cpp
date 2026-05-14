@@ -1244,26 +1244,43 @@ void SqliteSessionStore::flushToDisc()
     }
 
     if (!lazyOpen()) {
-        Logger::Log("[DB] Could not open DB to flush to disc");
+        Logger::Log("[DB] flushToDisc: could not open DB");
         return;
     }
 
-    QSqlQuery query(db);
-
-    // Promote to FULL synchronous mode so the next statement's commit is
-    // guaranteed to be physically on disk before we return.  During normal
-    // operation we run at NORMAL (set in lazyOpen) for performance.
-    if (!query.exec("PRAGMA synchronous=FULL")) {
-        Logger::Log("[DB] Failed to set synchronous mode: " + query.lastError().text());
+    QSqlQuery pragma(db);
+    if (!pragma.exec("PRAGMA synchronous=FULL")) {
+        Logger::Log("[DB] flushToDisc: set synchronous=FULL failed: " + pragma.lastError().text());
+        lazyClose();
+        return;
     }
 
-    // Execute a no-op statement to trigger the synchronous flush.
-    // This ensures the PRAGMA takes effect.
-    query.exec("SELECT 1");
+    if (!db.transaction()) {
+        Logger::Log("[DB] flushToDisc: could not begin transaction");
+        lazyClose();
+        return;
+    }
+
+    const QString ts = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    QSqlQuery query(db);
+    query.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('last_flush_utc', :ts)");
+    query.bindValue(":ts", ts);
+
+    if (!query.exec()) {
+        Logger::Log("[DB] flushToDisc: write failed: " + query.lastError().text());
+        db.rollback();
+        lazyClose();
+        return;
+    }
+    if (!db.commit()) {
+        Logger::Log("[DB] flushToDisc: commit failed: " + db.lastError().text());
+        db.rollback();
+        lazyClose();
+        return;
+    }
 
     lazyClose();
-
-    Logger::Log("[DB] Flush to disc completed");
+    Logger::Log("[DB] flushToDisc: durable heartbeat committed");
 }
 
 std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()

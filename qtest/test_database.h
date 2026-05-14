@@ -79,6 +79,10 @@ private slots:
     void test_U_commitSession_orphan_cleanup_is_internal();
     void test_V_replaceAll_wipes_and_rewrites();
     void test_W_backup_created_before_replaceAll_not_commitSession();
+
+    // flushToDisc durable heartbeat (Issue 2)
+    void test_flushToDisc_writes_heartbeat_row();
+    void test_flushToDisc_idempotent();
 };
 
 #endif // TEST_DATABASE_H

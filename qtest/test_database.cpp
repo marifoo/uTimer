@@ -1452,3 +1452,94 @@ void DatabaseTest::test_W_backup_created_before_replaceAll_not_commitSession()
 
     (void)before; // silence unused variable warning
 }
+
+// ============================================================================
+// flushToDisc durable heartbeat tests (Issue 2)
+// ============================================================================
+
+void DatabaseTest::test_flushToDisc_writes_heartbeat_row()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    // Ensure the DB is created before flushing
+    QVERIFY(manager.saveDurations({}, TransactionMode::Append));
+
+    manager.flushToDisc();
+
+    // Open DB directly and check for the heartbeat row
+    const QString connName = "flush_heartbeat_check";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery query(db);
+        query.prepare("SELECT value FROM app_settings WHERE key = 'last_flush_utc'");
+        QVERIFY(query.exec());
+        QVERIFY(query.next());
+        const QString value = query.value(0).toString();
+        QVERIFY(!value.isEmpty());
+        QDateTime parsed = QDateTime::fromString(value, Qt::ISODateWithMs);
+        QVERIFY(parsed.isValid());
+        QCOMPARE(parsed.timeSpec(), Qt::UTC);
+        QVERIFY(parsed.secsTo(QDateTime::currentDateTimeUtc()) < 5);
+        QVERIFY(!query.next()); // exactly one row
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+}
+
+void DatabaseTest::test_flushToDisc_idempotent()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    QVERIFY(manager.saveDurations({}, TransactionMode::Append));
+
+    manager.flushToDisc();
+
+    // Capture timestamp after first flush
+    QString firstTs;
+    const QString connName = "flush_idempotent_check";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        q.prepare("SELECT value FROM app_settings WHERE key = 'last_flush_utc'");
+        QVERIFY(q.exec());
+        QVERIFY(q.next());
+        firstTs = q.value(0).toString();
+        QVERIFY(!q.next()); // exactly one row
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    manager.flushToDisc(); // second call must not fail
+
+    const QString connName2 = "flush_idempotent_check2";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName2);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        q.prepare("SELECT value FROM app_settings WHERE key = 'last_flush_utc'");
+        QVERIFY(q.exec());
+        QVERIFY(q.next());
+        const QString secondTs = q.value(0).toString();
+        QVERIFY(!q.next()); // still exactly one row
+        QDateTime parsed = QDateTime::fromString(secondTs, Qt::ISODateWithMs);
+        QVERIFY(parsed.isValid());
+        QCOMPARE(parsed.timeSpec(), Qt::UTC);
+        // Second flush timestamp must be >= first flush timestamp
+        QVERIFY(secondTs >= firstTs);
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName2);
+}
