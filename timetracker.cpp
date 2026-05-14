@@ -807,12 +807,12 @@ bool TimeTracker::appendDurationsChunkToDB(const std::deque<TimeDuration>& durat
         return true;
     auto temp = durations;
     size_t original = temp.size();
-    auto removedIds = cleanDurations(&temp);
+    cleanDurations(&temp);
     if (original != temp.size()) {
         Logger::Log(QString("[DB] Cleaned session durations: %1 -> %2").arg(original).arg(temp.size()));
     }
 
-    return db_.saveDurations(temp, TransactionMode::Append, removedIds);
+    return db_.commitSession(Timeline(temp, std::nullopt));
 }
 
 bool TimeTracker::updateDurationsInDB()
@@ -821,13 +821,12 @@ bool TimeTracker::updateDurationsInDB()
         return true;
     auto temp = session_.durations;
     size_t original = temp.size();
-    auto removedIds = cleanDurations(&temp);
+    cleanDurations(&temp);
     if (original != temp.size()) {
         Logger::Log(QString("[DB] Cleaned session durations for update: %1 -> %2").arg(original).arg(temp.size()));
     }
 
-    // Use the separate update interface that matches existing entries by segment_id
-    return db_.updateDurationsById(temp, removedIds);
+    return db_.commitSession(Timeline(temp, std::nullopt));
 }
 
 bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> historyDurations,
