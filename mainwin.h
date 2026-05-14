@@ -4,7 +4,6 @@
 #include <QMainWindow>
 #include <QSystemTrayIcon>
 #include <QString>
-#include <QTimer>
 #include "contentwidget.h"
 #include "healthmonitor.h"
 #include "settings.h"
@@ -25,12 +24,6 @@ private:
 	HealthMonitor* health_monitor_;
 
 	bool was_active_before_autopause_;
-
-	// Midnight forced-stop handling
-	QTimer* midnight_timer_;
-
-	void scheduleMidnightStop();
-	void onMidnightStop();
 
 	void showMsgBox(const QString &text);
 	void showMainWin();

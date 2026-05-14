@@ -57,19 +57,41 @@ void TimeTracker::DayBoundaryWatcher::tick([[maybe_unused]] const QDateTime& now
     // T5.3 will fill this with the watchdog logic.
 }
 
-void TimeTracker::DayBoundaryWatcher::armScheduledStop([[maybe_unused]] const QDateTime& now)
+void TimeTracker::DayBoundaryWatcher::armScheduledStop(const QDateTime& now)
 {
-    // T5.2 will fill this with the 23:59:59.500 scheduling logic.
+    QTime current_time = now.time();
+    QTime midnight_stop_time(23, 59, 59, 500);
+
+    qint64 msecs_until_stop;
+    if (current_time < midnight_stop_time) {
+        msecs_until_stop = current_time.msecsTo(midnight_stop_time);
+    } else {
+        // Already past 23:59:59.500 — fire in 1 ms to trigger the watchdog path.
+        msecs_until_stop = 1;
+    }
+
+    Logger::Log(QString("[MIDNIGHT] Scheduled engine auto-stop in %1 seconds")
+        .arg(msecs_until_stop / 1000.0, 0, 'f', 1));
+
+    midnight_timer_.disconnect();
+    QObject::connect(&midnight_timer_, &QTimer::timeout,
+                     [this]() { onMidnightTimerFired(); });
+    midnight_timer_.start(static_cast<int>(msecs_until_stop));
 }
 
 void TimeTracker::DayBoundaryWatcher::cancel()
 {
-    // T5.2 will fill this.
+    midnight_timer_.stop();
+    Logger::Log("[MIDNIGHT] Scheduled stop timer cancelled");
 }
 
 void TimeTracker::DayBoundaryWatcher::onMidnightTimerFired()
 {
-    // T5.2 will fill this.
+    Logger::Log("[MIDNIGHT] Scheduled stop: engine forcing timer off at end of day");
+    // Route through the public, mutex-guarded entry point.
+    // discardCrossMidnightOngoingAndStop() will also be checked inside but
+    // should return false since this fires slightly before midnight.
+    owner_.useTimerViaButton(Button::Stop);
 }
 
 // ============================================================================
@@ -338,6 +360,7 @@ void TimeTracker::startTimer(const QDateTime& now)
         if (checkpoint_interval_msec_ > 0) {
             checkpointTimer_.start(); // Resume periodic checkpoint saving
         }
+        day_boundary_watcher_.armScheduledStop(now);
         Logger::Log("[TIMER] > Timer unpaused");
         return;
     }
@@ -395,6 +418,7 @@ void TimeTracker::startTimer(const QDateTime& now)
         if (checkpoint_interval_msec_ > 0) {
             checkpointTimer_.start(); // Start periodic checkpoint saving
         }
+        day_boundary_watcher_.armScheduledStop(now);
         Logger::Log("[TIMER] >> Timer started");
         return;
     }
@@ -541,6 +565,7 @@ void TimeTracker::stopTimer(const QDateTime& now)
     mode_ = Mode::None;
     session_.clearSegment(settings_);
     checkpointTimer_.stop();
+    day_boundary_watcher_.cancel();
     was_active_before_autopause_ = false;
     Logger::Log("[TIMER] Timer stopped <<");
 
@@ -937,6 +962,7 @@ bool TimeTracker::discardCrossMidnightOngoingAndStop(const QDateTime& now)
     mode_ = Mode::None;
     session_.clearSegment(settings_);
     checkpointTimer_.stop();
+    day_boundary_watcher_.cancel();
     was_active_before_autopause_ = false;
     return true;
 }
