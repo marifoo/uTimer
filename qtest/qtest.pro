@@ -61,7 +61,7 @@ HEADERS += \
     $$PWD/../timetracker.h \
     $$PWD/../lockstatewatcher.h \
     $$PWD/../databasemanager.h \
-    $$PWD/../idatabasemanager.h \
+    $$PWD/../sessionstore.h \
     $$PWD/../helpers.h \
     $$PWD/../settings.h \
     $$PWD/../logger.h \

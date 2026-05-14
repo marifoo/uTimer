@@ -16,20 +16,20 @@
 #ifndef FAKEDATABASEMANAGER_H
 #define FAKEDATABASEMANAGER_H
 
-#include "idatabasemanager.h"
+#include "sessionstore.h"
 #include "timeline.h"
 #include <QStringList>
 #include <deque>
 #include <optional>
 #include <vector>
 
-class FakeDatabaseManager : public IDatabaseManager
+class FakeDatabaseManager : public SessionStore
 {
 public:
     FakeDatabaseManager();
     ~FakeDatabaseManager() override = default;
 
-    // ---- IDatabaseManager interface ----
+    // ---- SessionStore interface ----
 
     bool commitSession(const Timeline& session) override;
     bool replaceAll(const Timeline& history, const Timeline& session) override;

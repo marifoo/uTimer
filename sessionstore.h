@@ -1,22 +1,22 @@
 /**
- * IDatabaseManager — Abstract interface for time-duration persistence.
+ * SessionStore — Abstract interface for time-duration persistence.
  *
- * Extracted from the concrete DatabaseManager class so that TimeTracker
+ * Extracted from the concrete SqliteSessionStore class so that TimeTracker
  * (and anything else that needs DB access) can depend on an abstraction
  * rather than the SQLite implementation.  This enables:
  *
- *   - FakeDatabaseManager in tests: records every call, returns
+ *   - FakeSessionStore in tests: records every call, returns
  *     configurable success/failure, stores data in memory (no SQLite).
  *   - Easier reasoning about which DB operations TimeTracker actually needs.
  *
- * Every public method that TimeTracker calls on DatabaseManager is
+ * Every public method that TimeTracker calls on SqliteSessionStore is
  * represented here as a pure virtual.  Internal helpers (lazyOpen,
  * createBackup, etc.) remain private implementation details of the
  * concrete class.
  */
 
-#ifndef IDATABASEMANAGER_H
-#define IDATABASEMANAGER_H
+#ifndef SESSIONSTORE_H
+#define SESSIONSTORE_H
 
 #include <QDateTime>
 #include <deque>
@@ -29,7 +29,7 @@
  * Forward declaration of the OrphanCheckpoint and LoadResult types.
  * These are defined here (not inside the interface) so that both the
  * interface and the concrete class share the same types without
- * requiring DatabaseManager to be included.
+ * requiring SqliteSessionStore to be included.
  */
 struct OrphanCheckpoint {
     long long id = -1;
@@ -57,10 +57,10 @@ struct LoadResult {
     operator std::deque<TimeDuration>&() { return durations; }
 };
 
-class IDatabaseManager
+class SessionStore
 {
 public:
-    virtual ~IDatabaseManager() = default;
+    virtual ~SessionStore() = default;
 
     virtual bool commitSession(const Timeline& session) = 0;
     virtual bool replaceAll(const Timeline& history, const Timeline& session) = 0;
@@ -77,4 +77,4 @@ public:
     virtual std::optional<QDateTime> consumeLastCleanShutdownMarker() = 0;
 };
 
-#endif // IDATABASEMANAGER_H
+#endif // SESSIONSTORE_H

@@ -1,13 +1,13 @@
 #include "shutdowncoordinator.h"
 #include "timetracker.h"
-#include "idatabasemanager.h"
+#include "sessionstore.h"
 #include "types.h"
 #include "logger.h"
 #include <QDateTime>
 #include <QTime>
 #include <QCoreApplication>
 
-ShutdownCoordinator::ShutdownCoordinator(TimeTracker& timetracker, IDatabaseManager& db)
+ShutdownCoordinator::ShutdownCoordinator(TimeTracker& timetracker, SessionStore& db)
     : timetracker_(timetracker), db_(db), shutdown_completed_(false)
 {
 }

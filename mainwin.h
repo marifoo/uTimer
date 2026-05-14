@@ -8,7 +8,7 @@
 #include "healthmonitor.h"
 #include "settings.h"
 #include "types.h"
-#include "idatabasemanager.h"
+#include "sessionstore.h"
 #include "shutdowncoordinator.h"
 
 class MainWin : public QMainWindow
@@ -19,7 +19,7 @@ private:
 	QSystemTrayIcon *tray_icon_;
 	const Settings & settings_;
 	TimeTracker& timetracker_;
-	IDatabaseManager& db_;
+	SessionStore& db_;
 	ShutdownCoordinator& shutdown_coordinator_;
 	HealthMonitor* health_monitor_;
 
@@ -36,7 +36,7 @@ protected:
 	void closeEvent(QCloseEvent *event) override;
 
 public:
-	explicit MainWin(Settings &settings, TimeTracker &timetracker, IDatabaseManager &db,
+	explicit MainWin(Settings &settings, TimeTracker &timetracker, SessionStore &db,
 	                 ShutdownCoordinator &shutdown_coordinator, QWidget *parent = nullptr);
 	void start();
 

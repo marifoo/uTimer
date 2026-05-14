@@ -4,7 +4,7 @@ HEADERS = \
    $$PWD/contentwidget.h \
    $$PWD/databasemanager.h \
    $$PWD/healthmonitor.h \
-   $$PWD/idatabasemanager.h \
+   $$PWD/sessionstore.h \
    $$PWD/mainwin.h \
    $$PWD/shutdowncoordinator.h \
    $$PWD/timetracker.h \

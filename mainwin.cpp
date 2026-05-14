@@ -27,7 +27,7 @@
 #endif
 
 
-MainWin::MainWin(Settings& settings, TimeTracker& timetracker, IDatabaseManager& db,
+MainWin::MainWin(Settings& settings, TimeTracker& timetracker, SessionStore& db,
 	             ShutdownCoordinator& shutdown_coordinator, QWidget *parent)
 	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), db_(db),
 	  shutdown_coordinator_(shutdown_coordinator),

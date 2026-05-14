@@ -296,7 +296,7 @@ void TimeTracker::checkDurationInvariants() const
 // TimeTracker implementation
 // ============================================================================
 
-TimeTracker::TimeTracker(const Settings &settings, IDatabaseManager& db, QObject *parent)
+TimeTracker::TimeTracker(const Settings &settings, SessionStore& db, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), session_(), mode_(Mode::None),
       was_active_before_autopause_(false), is_locked_(false),
       checkpoints_paused_(false), db_(db),

@@ -14,7 +14,7 @@
 #include <vector>
 #include "settings.h"
 #include "types.h"
-#include "idatabasemanager.h"
+#include "sessionstore.h"
 #include "timeline.h"
 
 /**
@@ -145,7 +145,7 @@ private:
     bool was_active_before_autopause_;
     bool is_locked_;  // Track if desktop is currently locked (to prevent checkpoints while locked)
     bool checkpoints_paused_;  // Track if checkpoints are paused (e.g., while HistoryDialog is open)
-    IDatabaseManager& db_;
+    SessionStore& db_;
     mutable QRecursiveMutex mutex_;  // Protects state transitions from concurrent access
     QTimer checkpointTimer_;  // Timer for periodic checkpoint saving
     qint64 checkpoint_interval_msec_; // Checkpoint interval (0 = disabled)
@@ -215,7 +215,7 @@ private:
 #endif // QT_NO_DEBUG
 
 public:
-    explicit TimeTracker(const Settings & settings, IDatabaseManager& db, QObject *parent = nullptr);
+    explicit TimeTracker(const Settings & settings, SessionStore& db, QObject *parent = nullptr);
     ~TimeTracker();
 
     qint64 getActiveTime() const;

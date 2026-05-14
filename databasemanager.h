@@ -10,14 +10,14 @@
 #include <optional>
 #include "types.h"
 #include "settings.h"
-#include "idatabasemanager.h"
+#include "sessionstore.h"
 
 // saveDurations/createBackup use TransactionMode as an implementation detail.
-// The enum is not part of IDatabaseManager's public interface; it lives here
+// The enum is not part of SessionStore's public interface; it lives here
 // so it can be removed from types.h.
 enum class TransactionMode { Append, Replace };
 
-class DatabaseManager : public QObject, public IDatabaseManager
+class DatabaseManager : public QObject, public SessionStore
 {
     Q_OBJECT
 public:
@@ -32,7 +32,7 @@ public:
     bool checkSchemaOnStartup() override;
 
     // Non-virtual helpers kept for test seeding and internal use.
-    // No longer part of IDatabaseManager — callers that previously used the
+    // No longer part of SessionStore — callers that previously used the
     // interface to call these should use commitSession instead.
     bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
                        const std::vector<QString>& removedSegmentIds = {});
