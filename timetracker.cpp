@@ -52,9 +52,12 @@ TimeTracker::DayBoundaryWatcher::DayBoundaryWatcher(TimeTracker& owner)
     midnight_timer_.setSingleShot(true);
 }
 
-void TimeTracker::DayBoundaryWatcher::tick([[maybe_unused]] const QDateTime& now)
+void TimeTracker::DayBoundaryWatcher::tick(const QDateTime& now)
 {
-    // T5.3 will fill this with the watchdog logic.
+    // Watchdog: if the ongoing segment has crossed midnight (e.g. due to sleep
+    // bypassing the scheduled stop), force the engine to stopped state.
+    // The mutex is already held by the caller (TimeTracker::onTick).
+    owner_.discardCrossMidnightOngoingAndStop(now);
 }
 
 void TimeTracker::DayBoundaryWatcher::armScheduledStop(const QDateTime& now)
@@ -673,6 +676,12 @@ void TimeTracker::useTimerViaLockEvent(LockEvent event)
 #ifndef QT_NO_DEBUG
     checkDurationInvariants();
 #endif
+}
+
+void TimeTracker::onTick(const QDateTime& now)
+{
+    QMutexLocker locker(&mutex_);
+    day_boundary_watcher_.tick(now);
 }
 
 qint64 TimeTracker::getActiveTime() const

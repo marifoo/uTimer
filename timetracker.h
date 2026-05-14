@@ -226,6 +226,7 @@ public:
 public slots:
     void useTimerViaButton(Button button);
     void useTimerViaLockEvent(LockEvent event);
+    void onTick(const QDateTime& now);  // 100 ms heartbeat for the watchdog
 
 signals:
     void userWarning(const QString& text);

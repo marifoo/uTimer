@@ -81,16 +81,11 @@ void MainWin::setupIcon()
 
 void MainWin::update()
 {
-	// Primary check: ongoing segment crosses midnight — drive Stop pipeline.
-	if (timetracker_.isOngoingSegmentCrossMidnight()) {
-		Logger::Log("[MIDNIGHT] Watchdog: cross-midnight ongoing segment - forcing stop");
-		content_widget_->pressedStopButton();
-	}
-	// Secondary check: TimeTracker is already in None (e.g., because the
-	// checkpoint guard fired first), but the GUI hasn't caught up.
-	else if ((content_widget_->isGUIinActivity() || content_widget_->isGUIinPause())
-	         && !timetracker_.getOngoingDuration().has_value()) {
-		Logger::Log("[MIDNIGHT] Watchdog: TimeTracker is stopped but GUI lagged - syncing GUI");
+	// GUI-lag sync: engine stopped (by DayBoundaryWatcher or shutdown) but GUI
+	// hasn't caught up yet — sync the GUI to the stopped state.
+	if ((content_widget_->isGUIinActivity() || content_widget_->isGUIinPause())
+	    && !timetracker_.getOngoingDuration().has_value()) {
+		Logger::Log("[MIDNIGHT] GUI sync: TimeTracker stopped but GUI lagged");
 		content_widget_->setGUItoStop();
 		was_active_before_autopause_ = false;
 	}
