@@ -942,3 +942,117 @@ void HistoryDialogTest::test_S_cancel_preserves_state()
     QCOMPARE(tracker.getCurrentDurations().size(), static_cast<size_t>(1));
     QCOMPARE(tracker.getCurrentDurations()[0].type, DurationType::Activity);
 }
+
+void HistoryDialogTest::test_saveChanges_deduplicates_cross_bucket_overlaps()
+{
+    // DB history row (today): Activity 10:00-10:30
+    // In-memory session row (today): Activity 10:15-10:45
+    // After save+normalize, expect exactly one Activity row covering 10:00-10:45.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    const QDate today = QDate::currentDate();
+    const QDateTime dbStart(today, QTime(10, 0, 0), Qt::UTC);
+    const QDateTime dbEnd(today, QTime(10, 30, 0), Qt::UTC);
+    const QDateTime memStart(today, QTime(10, 15, 0), Qt::UTC);
+    const QDateTime memEnd(today, QTime(10, 45, 0), Qt::UTC);
+
+    // Seed DB with today's finalized history row
+    std::deque<TimeDuration> dbDurations;
+    dbDurations.emplace_back(DurationType::Activity, dbStart, dbEnd);
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+
+    // Seed in-memory session row (overlaps the DB row)
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+
+    HistoryDialog dialog(tracker, settings);
+    dialog.done(QDialog::Accepted);
+    dialog.saveChanges();
+
+    // Read back DB and verify exactly one Activity row covering 10:00-10:45
+    const QString connName = "historydialog_cross_bucket_dedup";
+    {
+        QSqlDatabase sqlDb = QSqlDatabase::addDatabase("QSQLITE", connName);
+        sqlDb.setDatabaseName(db_path_);
+        QVERIFY(sqlDb.open());
+
+        QSqlQuery countQuery(sqlDb);
+        QVERIFY(countQuery.exec("SELECT COUNT(*) FROM durations WHERE type = " +
+            QString::number(static_cast<int>(DurationType::Activity))));
+        QVERIFY(countQuery.next());
+        QCOMPARE(countQuery.value(0).toInt(), 1);
+
+        QSqlQuery rowQuery(sqlDb);
+        QVERIFY(rowQuery.exec("SELECT start_time, end_time FROM durations WHERE type = " +
+            QString::number(static_cast<int>(DurationType::Activity))));
+        QVERIFY(rowQuery.next());
+        const QTime savedStart = QTime::fromString(rowQuery.value(0).toString(), "HH:mm:ss.zzz");
+        const QTime savedEnd = QTime::fromString(rowQuery.value(1).toString(), "HH:mm:ss.zzz");
+        QCOMPARE(savedStart, QTime(10, 0, 0));
+        QCOMPARE(savedEnd, QTime(10, 45, 0));
+
+        sqlDb.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+}
+
+void HistoryDialogTest::test_saveChanges_noop_save_unchanged()
+{
+    // Regression: non-overlapping data should be preserved exactly after a noop save.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    const QDate today = QDate::currentDate();
+    const QDateTime dbStart(today, QTime(8, 0, 0), Qt::UTC);
+    const QDateTime dbEnd(today, QTime(8, 30, 0), Qt::UTC);
+    const QDateTime memStart(today, QTime(9, 0, 0), Qt::UTC);
+    const QDateTime memEnd(today, QTime(9, 30, 0), Qt::UTC);
+
+    std::deque<TimeDuration> dbDurations;
+    dbDurations.emplace_back(DurationType::Pause, dbStart, dbEnd);
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+
+    HistoryDialog dialog(tracker, settings);
+    dialog.done(QDialog::Accepted);
+    dialog.saveChanges();
+
+    // Both rows should still be present
+    const QString connName = "historydialog_noop_save";
+    {
+        QSqlDatabase sqlDb = QSqlDatabase::addDatabase("QSQLITE", connName);
+        sqlDb.setDatabaseName(db_path_);
+        QVERIFY(sqlDb.open());
+
+        QSqlQuery countQuery(sqlDb);
+        QVERIFY(countQuery.exec("SELECT COUNT(*) FROM durations"));
+        QVERIFY(countQuery.next());
+        QCOMPARE(countQuery.value(0).toInt(), 2);
+
+        QSqlQuery pauseQuery(sqlDb);
+        QVERIFY(pauseQuery.exec("SELECT start_time, end_time FROM durations WHERE type = " +
+            QString::number(static_cast<int>(DurationType::Pause))));
+        QVERIFY(pauseQuery.next());
+        QCOMPARE(QTime::fromString(pauseQuery.value(0).toString(), "HH:mm:ss.zzz"), QTime(8, 0, 0));
+        QCOMPARE(QTime::fromString(pauseQuery.value(1).toString(), "HH:mm:ss.zzz"), QTime(8, 30, 0));
+
+        QSqlQuery actQuery(sqlDb);
+        QVERIFY(actQuery.exec("SELECT start_time, end_time FROM durations WHERE type = " +
+            QString::number(static_cast<int>(DurationType::Activity))));
+        QVERIFY(actQuery.next());
+        QCOMPARE(QTime::fromString(actQuery.value(0).toString(), "HH:mm:ss.zzz"), QTime(9, 0, 0));
+        QCOMPARE(QTime::fromString(actQuery.value(1).toString(), "HH:mm:ss.zzz"), QTime(9, 30, 0));
+
+        sqlDb.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+}

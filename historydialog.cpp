@@ -31,6 +31,7 @@
 #include <QGroupBox>
 #include <QButtonGroup>
 #include <algorithm>
+#include <QHash>
 
 namespace {
 constexpr int kMinimumSplitDurationSeconds = 3;
@@ -467,27 +468,41 @@ void HistoryDialog::saveChanges()
         return;
     }
 
-    // Collect durations from pendingTimelines_ and route by origin
-    std::deque<TimeDuration> historyDurations;
-    std::deque<TimeDuration> currentMemoryDurations;
-    std::deque<TimeDuration> currentSessionDurations;
+    // Step A: Build unified timeline + origin map
+    std::deque<TimeDuration> unifiedCompleted;
+    QHash<QString, bool> originIsMemory;  // segment_id → true if memory row
     std::optional<TimeDuration> ongoingDurationForSave;
 
     for (size_t i = 0; i < pages_.size(); ++i) {
+        const auto& comp = pendingTimelines_[i].completed();
+        for (size_t row = 0; row < comp.size(); ++row) {
+            unifiedCompleted.push_back(comp[row]);
+            const bool isMemory = pages_[i].isCurrent && isMemoryRow_[i][row];
+            originIsMemory.insert(comp[row].segment_id, isMemory);
+        }
         if (pages_[i].isCurrent) {
-            const auto& comp = pendingTimelines_[i].completed();
-            for (size_t row = 0; row < comp.size(); ++row) {
-                if (isMemoryRow_[i][row]) {
-                    currentMemoryDurations.push_back(comp[row]);
-                    currentSessionDurations.push_back(comp[row]);
-                } else {
-                    historyDurations.push_back(comp[row]);
-                }
-            }
             ongoingDurationForSave = pendingTimelines_[i].ongoing();
+        }
+    }
+
+    // Step B: Normalize once across all buckets
+    Timeline normalised = Timeline(unifiedCompleted, std::nullopt).normalized();
+
+    // Step C: Re-split using the origin map
+    std::deque<TimeDuration> historyDurations;
+    std::deque<TimeDuration> currentMemoryDurations;
+    std::deque<TimeDuration> currentSessionDurations;
+
+    for (const auto& d : normalised.completed()) {
+        auto it = originIsMemory.find(d.segment_id);
+        // normalized() only carries existing segment_ids forward — this should never fire.
+        Q_ASSERT(it != originIsMemory.end());
+        const bool isMemory = (it == originIsMemory.end()) ? true : it.value();
+        if (isMemory) {
+            currentMemoryDurations.push_back(d);
+            currentSessionDurations.push_back(d);
         } else {
-            const auto& comp = pendingTimelines_[i].completed();
-            historyDurations.insert(historyDurations.end(), comp.begin(), comp.end());
+            historyDurations.push_back(d);
         }
     }
 

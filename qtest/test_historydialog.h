@@ -49,6 +49,9 @@ private slots:
 
     // Test S: cancel preserves state
     void test_S_cancel_preserves_state();
+
+    void test_saveChanges_deduplicates_cross_bucket_overlaps();
+    void test_saveChanges_noop_save_unchanged();
 };
 
 #endif // TEST_HISTORYDIALOG_H
