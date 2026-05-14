@@ -32,16 +32,12 @@ public:
     // ---- IDatabaseManager interface ----
 
     bool commitSession(const Timeline& session) override;
-    bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
-                       const std::vector<QString>& removedSegmentIds = {}) override;
     bool replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
                               const std::deque<TimeDuration>& currentSessionDurations) override;
     LoadResult loadDurations() override;
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
     bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
                         const QDateTime& endTime, const QString& segmentId) override;
-    bool updateDurationsById(const std::deque<TimeDuration>& durations,
-                             const std::vector<QString>& removedSegmentIds = {}) override;
     bool checkSchemaOnStartup() override;
     void flushToDisc() override;
     std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
@@ -73,10 +69,8 @@ public:
     // ---- Configurable return values ----
 
     bool commitSessionResult = true;
-    bool saveDurationsResult = true;
     bool replaceDurationsResult = true;
     bool saveCheckpointResult = true;
-    bool updateDurationsByIdResult = true;
     bool checkSchemaResult = true;
     bool reconcileResult = true;
     bool setMarkerResult = true;

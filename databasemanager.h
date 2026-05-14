@@ -20,16 +20,20 @@ public:
     ~DatabaseManager();
 
     bool commitSession(const Timeline& session) override;
-    bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
-                       const std::vector<QString>& removedSegmentIds = {}) override;
     bool replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
                               const std::deque<TimeDuration>& currentSessionDurations) override;
     LoadResult loadDurations() override;
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
     bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId) override;
-    bool updateDurationsById(const std::deque<TimeDuration>& durations,
-                             const std::vector<QString>& removedSegmentIds = {}) override;
     bool checkSchemaOnStartup() override;
+
+    // Non-virtual helpers kept for test seeding and internal use.
+    // No longer part of IDatabaseManager — callers that previously used the
+    // interface to call these should use commitSession instead.
+    bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
+                       const std::vector<QString>& removedSegmentIds = {});
+    bool updateDurationsById(const std::deque<TimeDuration>& durations,
+                             const std::vector<QString>& removedSegmentIds = {});
     void flushToDisc() override;
     std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
     bool reconcileUnfinalizedCheckpoints(const std::vector<long long>& finalizeIds, const std::vector<long long>& dropIds) override;

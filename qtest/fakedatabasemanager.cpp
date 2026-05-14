@@ -56,18 +56,6 @@ bool FakeDatabaseManager::commitSession(const Timeline& session)
     return commitSessionResult;
 }
 
-bool FakeDatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode /*mode*/,
-                                         const std::vector<QString>& /*removedSegmentIds*/)
-{
-    callLog.append("saveDurations");
-    if (saveDurationsResult) {
-        for (const auto& d : durations) {
-            storedDurations.push_back(d);
-        }
-    }
-    return saveDurationsResult;
-}
-
 bool FakeDatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
                                                 const std::deque<TimeDuration>& currentSessionDurations)
 {
@@ -104,29 +92,6 @@ bool FakeDatabaseManager::saveCheckpoint(DurationType type, qint64 duration, con
         savedCheckpoints.push_back({type, duration, startTime, endTime, segmentId});
     }
     return saveCheckpointResult;
-}
-
-bool FakeDatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durations,
-                                               const std::vector<QString>& /*removedSegmentIds*/)
-{
-    callLog.append("updateDurationsById");
-    if (updateDurationsByIdResult) {
-        // Upsert semantics: update matching segment_id or append.
-        for (const auto& d : durations) {
-            bool found = false;
-            for (auto& existing : storedDurations) {
-                if (existing.segment_id == d.segment_id) {
-                    existing = d;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                storedDurations.push_back(d);
-            }
-        }
-    }
-    return updateDurationsByIdResult;
 }
 
 bool FakeDatabaseManager::checkSchemaOnStartup()

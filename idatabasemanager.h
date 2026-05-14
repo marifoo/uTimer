@@ -63,16 +63,12 @@ public:
     virtual ~IDatabaseManager() = default;
 
     virtual bool commitSession(const Timeline& session) = 0;
-    virtual bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
-                               const std::vector<QString>& removedSegmentIds = {}) = 0;
     virtual bool replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
                                       const std::deque<TimeDuration>& currentSessionDurations) = 0;
     virtual LoadResult loadDurations() = 0;
     virtual EntriesForDateResult hasEntriesForDate(const QDate& date) = 0;
     virtual bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
                                 const QDateTime& endTime, const QString& segmentId) = 0;
-    virtual bool updateDurationsById(const std::deque<TimeDuration>& durations,
-                                     const std::vector<QString>& removedSegmentIds = {}) = 0;
     virtual bool checkSchemaOnStartup() = 0;
     virtual void flushToDisc() = 0;
     virtual std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() = 0;
