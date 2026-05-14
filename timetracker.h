@@ -177,6 +177,7 @@ public:
     const std::deque<TimeDuration>& getCurrentDurations() const;
     void replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
                                  const std::optional<TimeDuration>& ongoing = std::nullopt);
+    void applyEdits(const Timeline& edited);
     std::deque<TimeDuration> getDurationsHistory();
     std::pair<int, int> getLastHistoryLoadStats() const;
     std::optional<TimeDuration> getOngoingDuration() const;

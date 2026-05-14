@@ -540,7 +540,7 @@ void HistoryDialog::saveChanges()
     // Atomically update TimeTracker's in-memory durations and checkpoint tracking.
     // replaceCurrentDurations couples both operations so callers cannot forget to
     // reset checkpoint tracking after replacing durations — the compiler enforces it.
-    timetracker_.replaceCurrentDurations(currentMemoryDurations, ongoingDurationForSave);
+    timetracker_.applyEdits(Timeline(currentMemoryDurations, ongoingDurationForSave));
     Logger::Log("[HISTORY] Updated TimeTracker current session and checkpoint tracking");
 }
 

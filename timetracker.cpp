@@ -738,6 +738,11 @@ void TimeTracker::replaceCurrentDurations(const std::deque<TimeDuration>& newDur
 #endif
 }
 
+void TimeTracker::applyEdits(const Timeline& edited)
+{
+    replaceCurrentDurations(edited.completed(), edited.ongoing());
+}
+
 std::deque<TimeDuration> TimeTracker::getDurationsHistory()
 {
     QMutexLocker locker(&mutex_);
