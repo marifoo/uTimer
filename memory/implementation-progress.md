@@ -17,8 +17,8 @@ metadata:
 | 1 | Strip TimeTracker pass-throughs | DONE (T1.1–T1.5, test gate, review gate) |
 | 2 | Extract ShutdownCoordinator and HealthMonitor | DONE (T2.1–T2.5+2.6, test gate, review gate, review fixes) |
 | 3 | Timeline value type | DONE (T3.1–T3.7, test gate, review gate — no non-minor findings) |
-| 4 | Collapse the three write methods | Not started — ready to begin T4.1 |
-| 5 | Day-boundary policy into Timer | Not started |
+| 4 | Collapse the three write methods | DONE (T4.1–T4.5, T4.6 review fix, test gate, review gate) |
+| 5 | Day-boundary policy into Timer | DONE (T5.0a–T5.6, test gate, review gate) |
 | 6 | Renames | Not started |
 
 ## Phase 2 — Extract ShutdownCoordinator and HealthMonitor
@@ -76,15 +76,24 @@ metadata:
 
 ## Phase 5 — Day-boundary policy into Timer
 
-- [ ] T5.0a — Add midnight-scenario regression tests
-- [ ] T5.1 — Introduce DayBoundaryWatcher inside TimeTracker
-- [ ] T5.2 — Engine-owned scheduled midnight stop
-- [ ] T5.3 — Engine-owned watchdog
-- [ ] T5.4 — Engine emits stopped(reason) signal
-- [ ] T5.5 — Remove duplicated was_active_before_autopause_
-- [ ] T5.6 — Remove GUI back-channel for stops
-- [ ] T5 Test Gate — Tests Y, Z, AA, AB
-- [ ] T5 Review Gate
+- [x] T5.0a — Add midnight-scenario regression tests (fecba5c)
+- [x] T5.1 — Introduce DayBoundaryWatcher inside TimeTracker (5c8b155)
+- [x] T5.2 — Engine-owned scheduled midnight stop (176d983)
+- [x] T5.3 — Engine-owned watchdog (c6abf45)
+- [x] T5.4 — Engine emits stopped(reason) signal (482dd16)
+- [x] T5.5 — Remove duplicated was_active_before_autopause_ (198ccf5)
+- [x] T5.6 — Remove GUI back-channel for stops (42b080e)
+- [x] T5 Test Gate — Tests Y, Z, AA, AB (6cf3517)
+- [x] T5 Review Gate — no non-minor findings
+
+**Notes:**
+- DayBoundaryWatcher is a nested class inside TimeTracker (header) with implementation in timetracker.cpp. It owns midnight_timer_ (now a value member, not pointer) and all 23:59:59.500 scheduling logic.
+- onMidnightTimerFired() acquires owner_.mutex_ directly (QRecursiveMutex) and calls stopTimer(now, MidnightScheduled); it no longer routes through useTimerViaButton() to preserve the correct StopReason.
+- discardCrossMidnightOngoingAndStop() emits stopped(MidnightWatchdog); both paths are guarded against double-fire (Mode::None check at top).
+- was_active_before_autopause_ removed from MainWin; engine emits modeChanged(PauseCause) for lock-driven autopause/autoresume; reactOnLockState() is now a no-op.
+- stopped(Shutdown) from ~TimeTracker() is safe: MainWin is destroyed first (LIFO), Qt auto-disconnects, and typically returns early anyway (mode_ already None after ShutdownCoordinator).
+- Q_DECLARE_METATYPE added for StopReason and PauseCause to support QSignalSpy in tests.
+- Test AB uses QFINDTESTDATA-style path resolution (applicationDirPath()/../mainwin.h).
 
 ## Phase 6 — Renames
 
