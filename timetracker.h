@@ -88,6 +88,17 @@ struct SessionState {
 class TimeTracker : public QObject
 {
     Q_OBJECT
+public:
+    /// Reason a stop was initiated. Carried by the stopped() signal so
+    /// observers (e.g. MainWin) can distinguish user-driven from engine-driven stops.
+    enum class StopReason {
+        ButtonStop,         ///< User pressed the Stop button.
+        MidnightScheduled,  ///< DayBoundaryWatcher scheduled timer fired at 23:59:59.500.
+        MidnightWatchdog,   ///< Watchdog detected a cross-midnight ongoing segment.
+        Shutdown,           ///< Application shutdown (destructor or ShutdownCoordinator).
+        EditApplied,        ///< Reserved for future use (history edit that stops the engine).
+    };
+
 private:
     enum class Mode {Activity, Pause, None};
 
@@ -137,7 +148,7 @@ private:
     DayBoundaryWatcher day_boundary_watcher_; // Must be last: constructed after all other members
 
     void startTimer(const QDateTime& now);
-    void stopTimer(const QDateTime& now);
+    void stopTimer(const QDateTime& now, StopReason reason);
     void pauseTimer(const QDateTime& now);
     void backpauseTimer(const QDateTime& now);
     void finalizeActivityToPause(const QDateTime& pauseSegmentStart);
@@ -230,6 +241,7 @@ public slots:
 
 signals:
     void userWarning(const QString& text);
+    void stopped(TimeTracker::StopReason reason);
 
 private slots:
     void saveCheckpoint();  // Periodic checkpoint saving every 5 minutes

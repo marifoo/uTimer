@@ -91,10 +91,12 @@ void TimeTracker::DayBoundaryWatcher::cancel()
 void TimeTracker::DayBoundaryWatcher::onMidnightTimerFired()
 {
     Logger::Log("[MIDNIGHT] Scheduled stop: engine forcing timer off at end of day");
-    // Route through the public, mutex-guarded entry point.
-    // discardCrossMidnightOngoingAndStop() will also be checked inside but
-    // should return false since this fires slightly before midnight.
-    owner_.useTimerViaButton(Button::Stop);
+    QMutexLocker locker(&owner_.mutex_);
+    if (owner_.mode_ == Mode::None) {
+        Logger::Log("[MIDNIGHT] Scheduled stop fired but engine already stopped - ignoring");
+        return;
+    }
+    owner_.stopTimer(QDateTime::currentDateTime(), StopReason::MidnightScheduled);
 }
 
 // ============================================================================
@@ -321,7 +323,7 @@ TimeTracker::TimeTracker(const Settings &settings, IDatabaseManager& db, QObject
 
 TimeTracker::~TimeTracker()
 {
-    stopTimer(QDateTime::currentDateTime());
+    stopTimer(QDateTime::currentDateTime(), StopReason::Shutdown);
 }
 
 /**
@@ -552,7 +554,7 @@ void TimeTracker::finalizeActivityToPause(const QDateTime& pauseSegmentStart)
  * 4. Persists the Session to the Database using updateDurationsInDB().
  *    (This updates the existing rows rather than creating new ones, preserving IDs).
  */
-void TimeTracker::stopTimer(const QDateTime& now)
+void TimeTracker::stopTimer(const QDateTime& now, StopReason reason)
 {
     if (mode_ == Mode::None) {
         Logger::Log("[DEBUG] Stop ignored; already stopped");
@@ -585,6 +587,8 @@ void TimeTracker::stopTimer(const QDateTime& now)
         session_.unsaved_durations = session_.durations;
         Logger::Log("[DB] Error updating session durations - data retained for next save attempt");
     }
+
+    emit stopped(reason);
 }
 
 void TimeTracker::useTimerViaButton(Button button)
@@ -608,7 +612,7 @@ void TimeTracker::useTimerViaButton(Button button)
     switch (button) {
         case Button::Start: startTimer(now); break;
         case Button::Pause: pauseTimer(now); break;
-        case Button::Stop:  stopTimer(now);  break;
+        case Button::Stop:  stopTimer(now, StopReason::ButtonStop); break;
     }
 #ifndef QT_NO_DEBUG
     checkDurationInvariants();
@@ -973,6 +977,7 @@ bool TimeTracker::discardCrossMidnightOngoingAndStop(const QDateTime& now)
     checkpointTimer_.stop();
     day_boundary_watcher_.cancel();
     was_active_before_autopause_ = false;
+    emit stopped(StopReason::MidnightWatchdog);
     return true;
 }
 

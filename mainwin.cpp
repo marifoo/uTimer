@@ -42,6 +42,13 @@ MainWin::MainWin(Settings& settings, TimeTracker& timetracker, IDatabaseManager&
 	setWindowFlags(windowFlags() &(~Qt::WindowMaximizeButtonHint));
 
 	connect(health_monitor_, &HealthMonitor::warningTriggered, this, &MainWin::showMsgBox);
+
+	// Engine-driven stop: sync GUI immediately when the engine stops.
+	connect(&timetracker_, &TimeTracker::stopped,
+	        this, [this](TimeTracker::StopReason) {
+		content_widget_->setGUItoStop();
+		was_active_before_autopause_ = false;
+	});
 }
 
 void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
@@ -81,15 +88,6 @@ void MainWin::setupIcon()
 
 void MainWin::update()
 {
-	// GUI-lag sync: engine stopped (by DayBoundaryWatcher or shutdown) but GUI
-	// hasn't caught up yet — sync the GUI to the stopped state.
-	if ((content_widget_->isGUIinActivity() || content_widget_->isGUIinPause())
-	    && !timetracker_.getOngoingDuration().has_value()) {
-		Logger::Log("[MIDNIGHT] GUI sync: TimeTracker stopped but GUI lagged");
-		content_widget_->setGUItoStop();
-		was_active_before_autopause_ = false;
-	}
-
 	content_widget_->updateTimes();
 	tray_icon_->setToolTip(content_widget_->getTooltip());
 
