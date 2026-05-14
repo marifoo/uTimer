@@ -643,6 +643,12 @@ qint64 TimeTracker::getPauseTime() const
     return sum;
 }
 
+Timeline TimeTracker::snapshot() const
+{
+    QMutexLocker lock(&mutex_);
+    return Timeline(session_.durations, getOngoingDuration());
+}
+
 const std::deque<TimeDuration>& TimeTracker::getCurrentDurations() const
 {
     QMutexLocker locker(&mutex_);

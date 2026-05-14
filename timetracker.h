@@ -15,6 +15,7 @@
 #include "settings.h"
 #include "types.h"
 #include "idatabasemanager.h"
+#include "timeline.h"
 
 /**
  * SessionState — groups the mutable per-session data that TimeTracker manages.
@@ -172,6 +173,7 @@ public:
 
     qint64 getActiveTime() const;
     qint64 getPauseTime() const;
+    Timeline snapshot() const;
     const std::deque<TimeDuration>& getCurrentDurations() const;
     void replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
                                  const std::optional<TimeDuration>& ongoing = std::nullopt);
