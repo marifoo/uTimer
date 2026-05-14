@@ -86,9 +86,10 @@ HistoryDialog::HistoryDialog(TimeTracker& timetracker, const Settings& settings,
  */
 void HistoryDialog::createPages()
 {
-    auto currentDurations = timetracker_.getCurrentDurations();
+    Timeline sessionSnapshot = timetracker_.snapshot();
+    const auto& currentDurations = sessionSnapshot.completed();
+    ongoingSnapshot_ = sessionSnapshot.ongoing();
     auto historyDurations = timetracker_.getDurationsHistory();
-    ongoingSnapshot_ = timetracker_.getOngoingDuration();
     const QDate today = QDate::currentDate();
 
     std::vector<TimeDuration> currentComparableDurations;
