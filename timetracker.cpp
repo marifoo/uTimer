@@ -670,10 +670,12 @@ void TimeTracker::useTimerViaLockEvent(LockEvent event)
         was_active_before_autopause_ = (mode_ == Mode::Activity);
         if (was_active_before_autopause_) {
             backpauseTimer(now);
+            emit modeChanged(PauseCause::LockAutopause);
         }
     } else if (event == LockEvent::Unlock) {
         if (was_active_before_autopause_) {
             startTimer(now);
+            emit modeChanged(PauseCause::LockResume);
         }
         was_active_before_autopause_ = false;
     }

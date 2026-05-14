@@ -31,8 +31,7 @@ MainWin::MainWin(Settings& settings, TimeTracker& timetracker, IDatabaseManager&
 	             ShutdownCoordinator& shutdown_coordinator, QWidget *parent)
 	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), db_(db),
 	  shutdown_coordinator_(shutdown_coordinator),
-	  health_monitor_(new HealthMonitor(settings, this)),
-	  was_active_before_autopause_(false)
+	  health_monitor_(new HealthMonitor(settings, this))
 {
 	setupCentralWidget(settings, timetracker);
 
@@ -47,7 +46,16 @@ MainWin::MainWin(Settings& settings, TimeTracker& timetracker, IDatabaseManager&
 	connect(&timetracker_, &TimeTracker::stopped,
 	        this, [this](TimeTracker::StopReason) {
 		content_widget_->setGUItoStop();
-		was_active_before_autopause_ = false;
+	});
+
+	// Engine-driven autopause/autoresume: sync GUI when lock events cause transitions.
+	connect(&timetracker_, &TimeTracker::modeChanged,
+	        this, [this](TimeTracker::PauseCause cause) {
+		if (cause == TimeTracker::PauseCause::LockAutopause) {
+			content_widget_->setGUItoPause();
+		} else if (cause == TimeTracker::PauseCause::LockResume) {
+			content_widget_->setGUItoActivity();
+		}
 	});
 }
 
@@ -62,15 +70,6 @@ void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
 	QObject::connect(content_widget_, SIGNAL(minToTray()), this, SLOT(minToTray()));
 	QObject::connect(content_widget_, SIGNAL(toggleAlwaysOnTop()), this, SLOT(toggleAlwaysOnTop()));
 	
-	QObject::connect(content_widget_, &ContentWidget::pressedButton, this, [this](Button button) {
-		if (button == Button::Stop) {
-			// Any stop (manual, scheduled, or watchdog-driven) must cancel
-			// the pending unlock-restart path. Without this, an unlock that
-			// arrives after Stop while was_active_before_autopause_ is still
-			// true would flip the GUI back to Activity.
-			was_active_before_autopause_ = false;
-		}
-	});
 }
 
 void MainWin::setupIcon()
@@ -122,24 +121,11 @@ void MainWin::showHistoryLoadReconciliation(const QString& text)
 	statusBar()->showMessage(text, 10000);
 }
 
-void MainWin::reactOnLockState(LockEvent event)
+void MainWin::reactOnLockState([[maybe_unused]] LockEvent event)
 {
-	if (settings_.isAutopauseEnabled()) {
-		if (event == LockEvent::LongOngoingLock) {
-			if (content_widget_->isGUIinActivity()) {
-				was_active_before_autopause_ = true;
-				content_widget_->setGUItoPause();
-			}
-			else {
-				was_active_before_autopause_ = false;
-			}
-		}
-		else if (event == LockEvent::Unlock) {
-			if (was_active_before_autopause_)
-				content_widget_->setGUItoActivity();
-			was_active_before_autopause_ = false;
-		}
-	}
+    // GUI transitions for lock/unlock are now driven by TimeTracker::modeChanged()
+    // signal (connected in the constructor). This slot is kept for the signal/slot
+    // wiring in main.cpp but has no work to do.
 }
 
 void MainWin::iconActivated(QSystemTrayIcon::ActivationReason reason)

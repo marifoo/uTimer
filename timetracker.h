@@ -99,6 +99,14 @@ public:
         EditApplied,        ///< Reserved for future use (history edit that stops the engine).
     };
 
+    /// Cause of a pause/resume transition. Carried by modeChanged() so MainWin
+    /// can distinguish lock-driven autopause from user-driven pause.
+    enum class PauseCause {
+        UserAction,    ///< User pressed Pause or Start.
+        LockAutopause, ///< Desktop locked and backpause triggered.
+        LockResume,    ///< Desktop unlocked and timer was auto-resumed.
+    };
+
 private:
     enum class Mode {Activity, Pause, None};
 
@@ -242,6 +250,9 @@ public slots:
 signals:
     void userWarning(const QString& text);
     void stopped(TimeTracker::StopReason reason);
+    /// Emitted when a lock-driven autopause or autoresume occurs so the GUI
+    /// can follow without maintaining its own was_active_before_autopause_ flag.
+    void modeChanged(TimeTracker::PauseCause cause);
 
 private slots:
     void saveCheckpoint();  // Periodic checkpoint saving every 5 minutes

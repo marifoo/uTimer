@@ -23,7 +23,6 @@ private:
 	ShutdownCoordinator& shutdown_coordinator_;
 	HealthMonitor* health_monitor_;
 
-	bool was_active_before_autopause_;
 
 	void showMsgBox(const QString &text);
 	void showMainWin();
