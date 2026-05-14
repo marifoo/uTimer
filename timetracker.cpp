@@ -43,6 +43,36 @@ constexpr qint64 kOrphanStaleAgeMs = 24LL * 60LL * 60LL * 1000LL;
 }
 
 // ============================================================================
+// DayBoundaryWatcher implementation
+// ============================================================================
+
+TimeTracker::DayBoundaryWatcher::DayBoundaryWatcher(TimeTracker& owner)
+    : owner_(owner)
+{
+    midnight_timer_.setSingleShot(true);
+}
+
+void TimeTracker::DayBoundaryWatcher::tick([[maybe_unused]] const QDateTime& now)
+{
+    // T5.3 will fill this with the watchdog logic.
+}
+
+void TimeTracker::DayBoundaryWatcher::armScheduledStop([[maybe_unused]] const QDateTime& now)
+{
+    // T5.2 will fill this with the 23:59:59.500 scheduling logic.
+}
+
+void TimeTracker::DayBoundaryWatcher::cancel()
+{
+    // T5.2 will fill this.
+}
+
+void TimeTracker::DayBoundaryWatcher::onMidnightTimerFired()
+{
+    // T5.2 will fill this.
+}
+
+// ============================================================================
 // SessionState transition methods
 // ============================================================================
 
@@ -245,7 +275,8 @@ TimeTracker::TimeTracker(const Settings &settings, IDatabaseManager& db, QObject
       checkpoints_paused_(false), db_(db),
       checkpoint_interval_msec_(settings.getCheckpointIntervalMsec()),
       last_history_load_skipped_(0), last_history_load_repaired_(0),
-      startup_recovered_seconds_(0), startup_recovery_notification_needed_(false)
+      startup_recovered_seconds_(0), startup_recovery_notification_needed_(false),
+      day_boundary_watcher_(*this)
 {
     // Setup checkpoint timer (disabled if interval is 0)
     if (checkpoint_interval_msec_ > 0) {

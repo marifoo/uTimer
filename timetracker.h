@@ -91,6 +91,34 @@ class TimeTracker : public QObject
 private:
     enum class Mode {Activity, Pause, None};
 
+    /**
+     * DayBoundaryWatcher — owns the 23:59:59.500 single-shot QTimer and the
+     * cross-midnight watchdog logic.
+     *
+     * T5.1: skeleton with tick(). Arms/cancels the internal timer.
+     * T5.2: timer fires and calls the engine's stop path.
+     * T5.3: tick() contains the watchdog poll (moved from MainWin::update()).
+     */
+    class DayBoundaryWatcher {
+    public:
+        explicit DayBoundaryWatcher(TimeTracker& owner);
+
+        /// Called on every 100 ms heartbeat. Runs the cross-midnight watchdog.
+        void tick(const QDateTime& now);
+
+        /// Arms the single-shot timer to fire at 23:59:59.500 today.
+        void armScheduledStop(const QDateTime& now);
+
+        /// Cancels the single-shot timer (call on any stop).
+        void cancel();
+
+    private:
+        TimeTracker& owner_;
+        QTimer midnight_timer_;
+
+        void onMidnightTimerFired();
+    };
+
     const Settings & settings_;
     QElapsedTimer timer_;
     SessionState session_;
@@ -106,6 +134,7 @@ private:
     int last_history_load_repaired_;
     qint64 startup_recovered_seconds_;
     bool startup_recovery_notification_needed_;
+    DayBoundaryWatcher day_boundary_watcher_; // Must be last: constructed after all other members
 
     void startTimer(const QDateTime& now);
     void stopTimer(const QDateTime& now);
