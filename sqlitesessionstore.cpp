@@ -937,7 +937,15 @@ LoadResult SqliteSessionStore::loadDurations()
         }
 
         // Create TimeDuration with explicit start/end times
-        result.durations.emplace_back(TimeDuration(type, startDateTime, endDateTime, segmentId));
+        auto seg = TimeDuration::create(type, startDateTime, endDateTime, segmentId);
+        if (!seg.has_value()) {
+            Logger::Log(QString("[DB] Dropped cross-midnight row at load: %1 → %2")
+                .arg(startDateTime.toString(Qt::ISODateWithMs))
+                .arg(endDateTime.toString(Qt::ISODateWithMs)));
+            result.skipped++;
+            continue;
+        }
+        result.durations.emplace_back(std::move(*seg));
     }
 
     // Rollback is idiomatic for read-only transactions: no writes were made,

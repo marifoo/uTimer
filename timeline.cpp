@@ -1,4 +1,5 @@
 #include "timeline.h"
+#include "logger.h"
 #include <algorithm>
 #include <cmath>
 #include <cassert>
@@ -11,6 +12,9 @@ Timeline::Timeline(std::deque<TimeDuration> completed,
                    std::optional<TimeDuration> ongoing)
     : completed_(std::move(completed)), ongoing_(std::move(ongoing))
 {
+#ifndef QT_NO_DEBUG
+    assertSameDayInvariant();
+#endif
 }
 
 const std::deque<TimeDuration>& Timeline::completed() const
@@ -74,15 +78,32 @@ Timeline Timeline::withSplit(size_t index, QDateTime at,
     QDateTime origEnd = original.endTime;
     QString origId = original.segment_id;
 
-    TimeDuration firstHalf(first, origStart, at, origId);
-    TimeDuration secondHalf(second, at, origEnd, TimeDuration::createSegmentId());
+    auto firstHalf = TimeDuration::create(first, origStart, at, origId);
+    if (!firstHalf.has_value()) {
+        Logger::Log("[SPLIT] Cross-day first half, aborting split");
+        return *this;
+    }
+    auto secondHalf = TimeDuration::create(second, at, origEnd, TimeDuration::createSegmentId());
+    if (!secondHalf.has_value()) {
+        Logger::Log("[SPLIT] Cross-day second half, aborting split");
+        return *this;
+    }
 
     copy.completed_.erase(copy.completed_.begin() + static_cast<std::ptrdiff_t>(index));
-    copy.completed_.insert(copy.completed_.begin() + static_cast<std::ptrdiff_t>(index), secondHalf);
-    copy.completed_.insert(copy.completed_.begin() + static_cast<std::ptrdiff_t>(index), firstHalf);
+    copy.completed_.insert(copy.completed_.begin() + static_cast<std::ptrdiff_t>(index), std::move(*secondHalf));
+    copy.completed_.insert(copy.completed_.begin() + static_cast<std::ptrdiff_t>(index), std::move(*firstHalf));
 
     return copy;
 }
+
+#ifndef QT_NO_DEBUG
+void Timeline::assertSameDayInvariant() const
+{
+    for (const auto& d : completed_) {
+        Q_ASSERT(d.startTime.date() == d.endTime.date());
+    }
+}
+#endif
 
 Timeline Timeline::normalized() const
 {
@@ -156,8 +177,10 @@ Timeline Timeline::normalized() const
                 continue;
             }
 
+            const bool crossesDay = (prevIt->endTime.date() != it->startTime.date());
+
             // Branch 6: small gap merge
-            if (gap >= 0 && gap < 500) {
+            if (!crossesDay && gap >= 0 && gap < 500) {
                 prevIt->endTime = it->endTime;
                 prevIt->duration = prevIt->startTime.msecsTo(prevIt->endTime);
                 it = durations.erase(it);
@@ -165,7 +188,7 @@ Timeline Timeline::normalized() const
             }
 
             // Branch 7: slight overlap merge
-            if (gap < 0 && std::abs(gap) < 100) {
+            if (!crossesDay && gap < 0 && std::abs(gap) < 100) {
                 prevIt->endTime = it->endTime;
                 prevIt->duration = prevIt->startTime.msecsTo(prevIt->endTime);
                 it = durations.erase(it);
@@ -175,5 +198,9 @@ Timeline Timeline::normalized() const
         ++it;
     }
 
-    return Timeline(durations, ongoing_);
+    Timeline result(durations, ongoing_);
+#ifndef QT_NO_DEBUG
+    result.assertSameDayInvariant();
+#endif
+    return result;
 }

@@ -105,6 +105,9 @@ void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_
 
 void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midnight_row_by_start_date()
 {
+    // Updated for Task 0: cross-midnight rows are now dropped at load time by
+    // TimeDuration::create(). This test verifies that a stale cross-midnight row
+    // injected directly into the DB is silently dropped when HistoryDialog loads.
     resetDatabaseFile();
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
@@ -112,25 +115,61 @@ void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midn
     SqliteSessionStore db(settings);
     Timer tracker(settings, db);
 
+    // Inject a cross-midnight row directly into the DB via raw SQL,
+    // bypassing Timeline so we don't trip assertSameDayInvariant().
     const QDate startDate = QDate::currentDate().addDays(-1);
     const QDateTime crossMidnightStart(startDate, QTime(23, 59, 50));
     const QDateTime crossMidnightEnd = crossMidnightStart.addSecs(20);
 
-    std::deque<TimeDuration> dbDurations;
-    dbDurations.emplace_back(DurationType::Activity, crossMidnightStart, crossMidnightEnd);
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    // First, trigger DB creation by saving a valid row (then we'll replace it).
+    {
+        const QDate yesterday = QDate::currentDate().addDays(-1);
+        const QDateTime validStart(yesterday, QTime(10, 0, 0));
+        const QDateTime validEnd(yesterday, QTime(10, 30, 0));
+        auto validSeg = TimeDuration::create(DurationType::Activity, validStart, validEnd);
+        QVERIFY(validSeg.has_value());
+        std::deque<TimeDuration> init;
+        init.push_back(std::move(*validSeg));
+        QVERIFY(tracker.replaceAll(Timeline(std::move(init), std::nullopt), Timeline({}, std::nullopt)));
+    }
 
+    // Now insert the cross-midnight row directly via SQL.
+    {
+        const QString connName = QString("test_cross_midnight_%1").arg(
+            reinterpret_cast<quintptr>(&db));
+        QSqlDatabase rawDb = QSqlDatabase::addDatabase("QSQLITE", connName);
+        rawDb.setDatabaseName(db_path_);
+        QVERIFY(rawDb.open());
+        QSqlQuery q(rawDb);
+        q.prepare(
+            "INSERT INTO durations "
+            "(segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:sid, 0, :dur, :sd, :st, :ed, :et, 1)"
+        );
+        q.bindValue(":sid", TimeDuration::createSegmentId());
+        q.bindValue(":dur", crossMidnightStart.msecsTo(crossMidnightEnd));
+        const QDateTime sUtc = crossMidnightStart.toUTC();
+        const QDateTime eUtc = crossMidnightEnd.toUTC();
+        q.bindValue(":sd", sUtc.date().toString(Qt::ISODate));
+        q.bindValue(":st", sUtc.time().toString("HH:mm:ss.zzz"));
+        q.bindValue(":ed", eUtc.date().toString(Qt::ISODate));
+        q.bindValue(":et", eUtc.time().toString("HH:mm:ss.zzz"));
+        QVERIFY(q.exec());
+        rawDb.close();
+        rawDb = QSqlDatabase();
+        QSqlDatabase::removeDatabase(connName);
+    }
+
+    // HistoryDialog loads durations — loadDurations() drops cross-midnight rows.
     HistoryDialog dialog(tracker, settings);
 
+    // The cross-midnight row is dropped. The valid same-day row remains, so the
+    // dialog shows 2 pages: today (current, empty) and yesterday (with 1 valid row).
     QCOMPARE(dialog.pages_.size(), static_cast<size_t>(2));
     QCOMPARE(dialog.pages_[0].isCurrent, true);
     QCOMPARE(dialog.pages_[0].durations.size(), static_cast<size_t>(0));
-
     QCOMPARE(dialog.pages_[1].isCurrent, false);
     QCOMPARE(dialog.pages_[1].durations.size(), static_cast<size_t>(1));
-    QCOMPARE(dialog.pages_[1].durations[0].startTime, crossMidnightStart);
-    QCOMPARE(dialog.pages_[1].durations[0].endTime, crossMidnightEnd);
-    QVERIFY(dialog.pages_[1].title.startsWith(startDate.toString("yyyy-MM-dd")));
 }
 
 void HistoryDialogTest::test_historydialog_checkbox_toggle_updates_pending_and_totals()

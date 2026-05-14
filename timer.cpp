@@ -846,7 +846,8 @@ std::optional<TimeDuration> Timer::getOngoingDuration() const
     const QString segmentId = session_.current_checkpoint_segment_id.isEmpty()
         ? TimeDuration::createSegmentId()
         : session_.current_checkpoint_segment_id;
-    return TimeDuration(type, session_.segment_start_time, now, segmentId);
+    // transient — may be cross-day
+    return TimeDuration::fromTrusted(type, session_.segment_start_time, now, segmentId);
 }
 
 qint64 Timer::getStartupRecoveredSeconds() const
@@ -910,24 +911,18 @@ void Timer::addDuration(DurationType type,
                               const QDateTime& endTime,
                               const QString& segmentId)
 {
-    const qint64 duration = startTime.msecsTo(endTime);
-    if (duration <= 0) {
-        Logger::Log("[DEBUG] Ignoring non-positive duration");
-        return;
-    }
-    if (startTime.date() != endTime.date()) {
-        Logger::Log(QString("[MIDNIGHT] Discarding cross-midnight segment "
-                            "(type=%1, start=%2, end=%3, duration=%4 ms)")
-            .arg(type == DurationType::Activity ? "Activity" : "Pause")
+    auto seg = TimeDuration::create(type, startTime, endTime, segmentId);
+    if (!seg.has_value()) {
+        Logger::Log(QString("[MIDNIGHT] Discarding cross-midnight segment: %1 → %2")
             .arg(startTime.toString(Qt::ISODateWithMs))
-            .arg(endTime.toString(Qt::ISODateWithMs))
-            .arg(duration));
+            .arg(endTime.toString(Qt::ISODateWithMs)));
         return;
     }
-    session_.durations.emplace_back(TimeDuration(type, startTime, endTime, segmentId));
+    const qint64 dur = seg->duration;
+    session_.durations.emplace_back(std::move(*seg));
     Logger::Log(QString("[DEBUG] Added duration (%1, %2 ms)")
         .arg(type == DurationType::Activity ? "Activity" : "Pause")
-        .arg(duration));
+        .arg(dur));
 }
 
 bool Timer::isOngoingSegmentCrossMidnight() const

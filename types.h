@@ -1,6 +1,7 @@
 #ifndef TYPES_H
 #define TYPES_H
 
+#include <optional>
 #include <QDateTime>
 #include <QString>
 #include <QUuid>
@@ -23,11 +24,33 @@ struct TimeDuration {
         return QUuid::createUuid().toString(QUuid::WithoutBraces);
     }
 
-    // Primary constructor: explicit start and end times
+    // Factory: returns nullopt for cross-midnight, zero/negative duration, or invalid timestamps.
+    static std::optional<TimeDuration> create(DurationType type, QDateTime start, QDateTime end,
+                                              const QString& segmentId = QString())
+    {
+        if (!start.isValid() || !end.isValid())
+            return std::nullopt;
+        if (start.msecsTo(end) <= 0)
+            return std::nullopt;
+        if (start.date() != end.date())
+            return std::nullopt;
+        return TimeDuration(type, start, end, segmentId);
+    }
+
+    // For transient (non-stored) durations that may legitimately cross day boundaries.
+    static TimeDuration fromTrusted(DurationType type, QDateTime start, QDateTime end,
+                                    const QString& segmentId = QString())
+    {
+        return TimeDuration(type, start, end, segmentId);
+    }
+
+private:
+    // Raw constructor — use create() or fromTrusted() at call sites.
     TimeDuration(DurationType type, QDateTime start, QDateTime end, const QString& segmentId = QString())
         : segment_id(segmentId.isEmpty() ? createSegmentId() : segmentId),
           type(type), duration(start.msecsTo(end)), startTime(start), endTime(end) {
     }
+
 };
 
 /**

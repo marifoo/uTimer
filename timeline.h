@@ -33,6 +33,10 @@ public:
     // Normalization: equivalent to cleanDurations from helpers.cpp
     Timeline normalized() const;
 
+#ifndef QT_NO_DEBUG
+    void assertSameDayInvariant() const;
+#endif
+
 private:
     std::deque<TimeDuration> completed_;
     std::optional<TimeDuration> ongoing_;

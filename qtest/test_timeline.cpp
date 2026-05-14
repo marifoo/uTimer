@@ -157,6 +157,95 @@ void TimelineTest::test_P_normalized_matches_cleanDurations()
 }
 
 // ============================================================================
+// Test R — TimeDuration::create factory invariants
+// ============================================================================
+
+void TimelineTest::test_R_factory_rejects_cross_midnight()
+{
+    QDateTime start(QDate(2025, 6, 15), QTime(23, 30, 0), Qt::LocalTime);
+    QDateTime end(QDate(2025, 6, 16), QTime(0, 30, 0), Qt::LocalTime);
+    auto result = TimeDuration::create(DurationType::Activity, start, end);
+    QVERIFY(!result.has_value());
+}
+
+void TimelineTest::test_R_factory_accepts_same_day()
+{
+    QDateTime start(QDate(2025, 6, 15), QTime(9, 0, 0), Qt::LocalTime);
+    QDateTime end(QDate(2025, 6, 15), QTime(10, 0, 0), Qt::LocalTime);
+    auto result = TimeDuration::create(DurationType::Activity, start, end);
+    QVERIFY(result.has_value());
+    QVERIFY(result->duration > 0);
+}
+
+void TimelineTest::test_R_factory_rejects_zero_duration()
+{
+    QDateTime dt(QDate(2025, 6, 15), QTime(9, 0, 0), Qt::LocalTime);
+    auto result = TimeDuration::create(DurationType::Activity, dt, dt);
+    QVERIFY(!result.has_value());
+}
+
+void TimelineTest::test_R_factory_rejects_negative_duration()
+{
+    QDateTime start(QDate(2025, 6, 15), QTime(10, 0, 0), Qt::LocalTime);
+    QDateTime end(QDate(2025, 6, 15), QTime(9, 0, 0), Qt::LocalTime);
+    auto result = TimeDuration::create(DurationType::Activity, start, end);
+    QVERIFY(!result.has_value());
+}
+
+// ============================================================================
+// Test S — normalized() cross-day merge guard
+// ============================================================================
+
+void TimelineTest::test_S_normalized_no_cross_day_merge()
+{
+    // Segment A ends at 2025-06-15 23:59:59.500, segment B starts at 2025-06-16 00:00:00.000.
+    // Each is individually same-day (assertSameDayInvariant passes for both).
+    // Branch 6 (gap = 500ms) should NOT merge them because they cross a day boundary.
+    QDateTime aStart(QDate(2025, 6, 15), QTime(23, 0, 0), Qt::LocalTime);
+    QDateTime aEnd(QDate(2025, 6, 15), QTime(23, 59, 59, 500), Qt::LocalTime);
+    QDateTime bStart(QDate(2025, 6, 16), QTime(0, 0, 0), Qt::LocalTime);
+    QDateTime bEnd(QDate(2025, 6, 16), QTime(1, 0, 0), Qt::LocalTime);
+
+    auto segA = TimeDuration::create(DurationType::Activity, aStart, aEnd);
+    auto segB = TimeDuration::create(DurationType::Activity, bStart, bEnd);
+    QVERIFY(segA.has_value());
+    QVERIFY(segB.has_value());
+
+    std::deque<TimeDuration> comp;
+    comp.push_back(std::move(*segA));
+    comp.push_back(std::move(*segB));
+
+    Timeline t(std::move(comp), std::nullopt);
+    Timeline normed = t.normalized();
+
+    QCOMPARE(normed.completed().size(), static_cast<size_t>(2));
+}
+
+void TimelineTest::test_S_normalized_same_day_still_merges()
+{
+    // Two same-type segments on the same day with gap = 100ms < 500ms — should merge.
+    // aEnd = 10:00:01.000, bStart = 10:00:01.100, gap = 100ms
+    QDateTime aStart(QDate(2025, 6, 15), QTime(10, 0, 0), Qt::LocalTime);
+    QDateTime aEnd(QDate(2025, 6, 15), QTime(10, 0, 1, 0), Qt::LocalTime);
+    QDateTime bStart(QDate(2025, 6, 15), QTime(10, 0, 1, 100), Qt::LocalTime);
+    QDateTime bEnd(QDate(2025, 6, 15), QTime(10, 30, 0), Qt::LocalTime);
+
+    auto segA = TimeDuration::create(DurationType::Activity, aStart, aEnd);
+    auto segB = TimeDuration::create(DurationType::Activity, bStart, bEnd);
+    QVERIFY(segA.has_value());
+    QVERIFY(segB.has_value());
+
+    std::deque<TimeDuration> comp;
+    comp.push_back(std::move(*segA));
+    comp.push_back(std::move(*segB));
+
+    Timeline t(std::move(comp), std::nullopt);
+    Timeline normed = t.normalized();
+
+    QCOMPARE(normed.completed().size(), static_cast<size_t>(1));
+}
+
+// ============================================================================
 // Test Q — groupByDate assigns segments to correct dates
 // ============================================================================
 
