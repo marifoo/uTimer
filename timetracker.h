@@ -162,9 +162,8 @@ private:
     void finalizeActivityToPause(const QDateTime& pauseSegmentStart);
     // Appends a single same-day segment to session_.durations.
     // Silently discards segments where startTime.date() != endTime.date()
-    // (last-line defence for cross-midnight). The scheduled stop in MainWin
-    // and the watchdog in MainWin::update() are supposed to make
-    // cross-midnight inputs unreachable here.
+    // (last-line defence for cross-midnight). DayBoundaryWatcher's scheduled
+    // stop and watchdog are supposed to make cross-midnight inputs unreachable.
     void addDuration(DurationType type,
                      const QDateTime& startTime,
                      const QDateTime& endTime,

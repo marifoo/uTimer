@@ -9,14 +9,14 @@
  * - Thread-safe via QRecursiveMutex; per-session mutable state grouped
  *   in SessionState with explicit logged transitions.
  *
- * Day-boundary policy (see plan.md §3 for the formal contract):
+ * Day-boundary policy (Phase 5):
  * - TimeTracker NEVER stores or persists a segment whose
  *   startTime.date() != endTime.date(). Such segments are silently
  *   discarded by addDuration() and refused by saveCheckpointInternal().
- * - The owner of the day boundary is MainWin: a scheduled stop at
- *   23:59:59.500 and a 100 ms watchdog drive the standard Stop
- *   pipeline. TimeTracker itself never schedules timers for the day
- *   boundary and never splits a segment at midnight.
+ * - The day-boundary rule is owned entirely by DayBoundaryWatcher: a
+ *   scheduled stop at 23:59:59.500 and a 100 ms watchdog (via onTick())
+ *   drive the engine stop path. MainWin has no midnight logic.
+ * - Stops emit stopped(StopReason) so the GUI syncs without polling.
  *
  * Checkpoint behavior:
  * - Only saved during Activity mode (not Pause or Stopped)
@@ -900,9 +900,8 @@ EntriesForDateResult TimeTracker::hasEntriesForDate(const QDate& date)
  * Appends a single same-day segment to session_.durations.
  *
  * Cross-midnight inputs are silently discarded (with a [MIDNIGHT] log line).
- * The scheduled stop in MainWin at 23:59:59.500 and the watchdog in
- * MainWin::update() prevent cross-midnight inputs from reaching here;
- * this discard is a last-line defence.
+ * DayBoundaryWatcher's scheduled stop and watchdog prevent cross-midnight
+ * inputs from reaching here; this discard is a last-line defence.
  *
  * Zero-duration and negative-duration inputs are also dropped.
  */
@@ -946,10 +945,8 @@ bool TimeTracker::isOngoingSegmentCrossMidnight() const
  * Returns true when it fired (telling the caller to abandon any pending
  * transition). Safe to call multiple times; only the first call does real work.
  *
- * This does NOT touch midnight_timer_ in MainWin or the GUI. Those are kept
- * in sync because the watchdog in MainWin::update() polls
- * isOngoingSegmentCrossMidnight() every 100 ms and, on a true result,
- * routes through content_widget_->pressedStopButton().
+ * Emits stopped(MidnightWatchdog). The GUI is updated via the stopped() signal
+ * connection in MainWin (established in Phase 5).
  */
 bool TimeTracker::discardCrossMidnightOngoingAndStop(const QDateTime& now)
 {
