@@ -1,15 +1,15 @@
 /**
  * SessionStore — Abstract interface for time-duration persistence.
  *
- * Extracted from the concrete SqliteSessionStore class so that TimeTracker
+ * Extracted from the concrete SqliteSessionStore class so that Timer
  * (and anything else that needs DB access) can depend on an abstraction
  * rather than the SQLite implementation.  This enables:
  *
  *   - FakeSessionStore in tests: records every call, returns
  *     configurable success/failure, stores data in memory (no SQLite).
- *   - Easier reasoning about which DB operations TimeTracker actually needs.
+ *   - Easier reasoning about which DB operations Timer actually needs.
  *
- * Every public method that TimeTracker calls on SqliteSessionStore is
+ * Every public method that Timer calls on SqliteSessionStore is
  * represented here as a pure virtual.  Internal helpers (lazyOpen,
  * createBackup, etc.) remain private implementation details of the
  * concrete class.

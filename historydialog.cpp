@@ -3,7 +3,7 @@
  *
  * Architecture:
  * - Transactional Editing: All changes (type toggling, splitting) are performed
- *   on local copies (`pendingTimelines_`). The actual database and TimeTracker
+ *   on local copies (`pendingTimelines_`). The actual database and Timer
  *   are only updated when the user clicks "OK".
  * - Paging Model: Data is grouped by Date (Pages). Page 0 is always "Today"
  *   (in-memory + today's DB + ongoing), while subsequent pages are historical (DB).
@@ -454,7 +454,7 @@ void HistoryDialog::onNewer()
  * Strategy:
  * 1. Applies in-memory changes to the page models.
  * 2. Aggregates historical + current-session rows and rewrites DB atomically.
- * 3. Updates TimeTracker runtime state only after persistence succeeds.
+ * 3. Updates Timer runtime state only after persistence succeeds.
  *
  * Note: replaceDurationsInDB() rewrites the full durations table. Historical
  * rows are written as finalized, while current-session rows keep DB backing as
@@ -522,11 +522,11 @@ void HistoryDialog::saveChanges()
         return;
     }
 
-    // Atomically update TimeTracker's in-memory durations and checkpoint tracking.
+    // Atomically update Timer's in-memory durations and checkpoint tracking.
     // replaceCurrentDurations couples both operations so callers cannot forget to
     // reset checkpoint tracking after replacing durations — the compiler enforces it.
     timetracker_.applyEdits(Timeline(currentMemoryDurations, ongoingDurationForSave));
-    Logger::Log("[HISTORY] Updated TimeTracker current session and checkpoint tracking");
+    Logger::Log("[HISTORY] Updated Timer current session and checkpoint tracking");
 }
 
 void HistoryDialog::showContextMenu(const QPoint& pos)

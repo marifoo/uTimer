@@ -7,7 +7,7 @@
  *
  * Typical usage:
  *     FakeSessionStore fakeDb;
- *     TimeTracker tracker(settings, fakeDb);
+ *     Timer tracker(settings, fakeDb);
  *     // ... exercise tracker ...
  *     QCOMPARE(fakeDb.callLog.count("saveCheckpoint"), 1);
  *     QCOMPARE(fakeDb.storedDurations.size(), 3);

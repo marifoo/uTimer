@@ -23,7 +23,7 @@ private slots:
     void initTestCase();
     void cleanupTestCase();
     
-    // Existing TimeTracker tests
+    // Existing Timer tests
     void test_timetracker_start_pause_resume_stop_and_checkpoints();
     void test_timetracker_backpause_resets_checkpoint_and_splits();
     void test_timetracker_lock_events_checkpoint_and_resume();
@@ -40,7 +40,7 @@ private slots:
     void test_session_state_reset_for_new_session();
     void test_session_state_adopt_ongoing_segment();
 
-    // State transition tests for public TimeTracker methods
+    // State transition tests for public Timer methods
     void test_session_state_start_to_pause_transition();
     void test_session_state_pause_to_activity_transition();
     void test_session_state_stop_clears_segment();

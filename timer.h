@@ -18,9 +18,9 @@
 #include "timeline.h"
 
 /**
- * SessionState — groups the mutable per-session data that TimeTracker manages.
+ * SessionState — groups the mutable per-session data that Timer manages.
  *
- * Previously these fields were scattered as raw members on TimeTracker,
+ * Previously these fields were scattered as raw members on Timer,
  * making it easy for code paths to mutate them as side effects without the
  * caller being aware. Grouping them into a struct with explicit transition
  * methods ensures:
@@ -29,7 +29,7 @@
  *   - Callers like addDuration can compute results without touching the struct
  *     directly, and the caller applies changes explicitly
  *
- * The struct is intentionally not a class — TimeTracker is its sole owner
+ * The struct is intentionally not a class — Timer is its sole owner
  * and accesses fields directly. The transition methods are convenience
  * helpers that enforce logging discipline, not access control.
  */

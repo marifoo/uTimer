@@ -840,7 +840,7 @@ void HistoryDialogTest::test_splitdialog_setters_affect_types()
 }
 
 // ============================================================================
-// Test R — round-trip type toggle via accept updates TimeTracker
+// Test R — round-trip type toggle via accept updates Timer
 // ============================================================================
 
 void HistoryDialogTest::test_R_round_trip_type_toggle_via_accept()
@@ -868,7 +868,7 @@ void HistoryDialogTest::test_R_round_trip_type_toggle_via_accept()
         dialog.saveChanges();
     }
 
-    // TimeTracker reflects the change
+    // Timer reflects the change
     QCOMPARE(tracker.getCurrentDurations().size(), static_cast<size_t>(1));
     QCOMPARE(tracker.getCurrentDurations()[0].type, DurationType::Pause);
 }
@@ -899,7 +899,7 @@ void HistoryDialogTest::test_S_cancel_preserves_state()
         dialog.saveChanges();  // saveChanges checks result() and returns early when Rejected
     }
 
-    // TimeTracker is unchanged — still Activity
+    // Timer is unchanged — still Activity
     QCOMPARE(tracker.getCurrentDurations().size(), static_cast<size_t>(1));
     QCOMPARE(tracker.getCurrentDurations()[0].type, DurationType::Activity);
 }

@@ -17,29 +17,29 @@ uTimer follows a component-based architecture using Qt's Signal/Slot mechanism. 
 
 ### Core Components
 
-*   **`TimeTracker` (`timetracker.cpp`)**: The central engine. It manages the state machine (Activity, Pause, Stopped) and accumulates time durations. It handles the backpause logic (retroactively converting lock time to pause) and periodic checkpoints. It uses `QElapsedTimer` for elapsed time and a `std::deque<TimeDuration>` for completed segments, guarded by `QRecursiveMutex`.
+*   **`Timer` (`timer.cpp`)**: The central engine. It manages the state machine (Activity, Pause, Stopped) and accumulates time durations. It handles the backpause logic (retroactively converting lock time to pause) and periodic checkpoints. It uses `QElapsedTimer` for elapsed time and a `std::deque<TimeDuration>` for completed segments, guarded by `QRecursiveMutex`. It owns the **day-boundary policy** via its nested `DayBoundaryWatcher`:
+    - A scheduled `QTimer` fires at 23:59:59.500 and forces the timer off via the normal Stop pipeline. There is no automatic restart on the new day.
+    - A 100 ms watchdog in `onTick()` detects cross-midnight ongoing segments. If the scheduled stop is missed (sleep/hibernate, modal dialog blocking the event loop), the watchdog drives the same Stop pipeline. The cross-midnight span of time is discarded — never stored, never persisted.
 *   **`LockStateWatcher` (`lockstatewatcher.cpp`)**: Handles platform-specific lock detection.
     *   **Windows**: Uses `WtsApi32.dll` to query session state.
     *   **Linux**: Probes DBus services in order: `systemd-logind` → `freedesktop.ScreenSaver` → `GNOME` → `KDE`.
     *   Uses a 5-sample buffer to debounce lock state changes.
-*   **`DatabaseManager` (`databasemanager.cpp`)**: Manages SQLite persistence.
+*   **`SqliteSessionStore` (`sqlitesessionstore.cpp`)**: Manages SQLite persistence via the `SessionStore` interface.
     *   Uses a **Lazy-Open** pattern (`lazyOpen()`/`lazyClose()`) to prevent file locking issues.
     *   Schema: `durations` table (id, type, duration, end_date, end_time).
     *   Creates timestamped backups (`.backup` files) before major write operations.
     *   Manages "Checkpoints" (lightweight updates) vs "Full Saves" (transactional replaces).
     *   `history_days_to_keep_ = 0` disables database entirely.
-*   **`MainWin` (`mainwin.cpp`)**: The orchestrator. Manages the system tray, window state, and the **day-boundary policy**:
-    - A scheduled `QTimer` fires at 23:59:59.500 and forces the timer off via the normal Stop pipeline. There is no automatic restart on the new day.
-    - A 100 ms watchdog in `update()` checks `TimeTracker::isOngoingSegmentCrossMidnight()`. If the scheduled stop is missed (sleep/hibernate, modal dialog blocking the event loop) and the ongoing segment is observed to cross midnight, the watchdog drives the same Stop pipeline. The cross-midnight span of time is discarded — never stored, never persisted.
+*   **`MainWin` (`mainwin.cpp`)**: The orchestrator. Manages the system tray, window state, and user interaction. Day-boundary policy is owned by `Timer`.
 *   **`HistoryDialog` (`historydialog.cpp`)**: Editable history view. It pauses checkpoints while open to prevent race conditions.
 
 ### Key Data Flow
 
-1. Lock events or button presses trigger `TimeTracker` state changes.
-2. `TimeTracker` accumulates completed `TimeDuration` entries in `durations_`.
+1. Lock events or button presses trigger `Timer` state changes.
+2. `Timer` accumulates completed `TimeDuration` entries in `durations_`.
 3. The ongoing segment is tracked separately by `timer_.elapsed()` and `current_checkpoint_id_`.
 4. Checkpoints periodically sync the ongoing segment to the DB.
-5. On stop, durations are cleaned (deduplicated/merged) and saved via `saveDurations()`.
+5. On stop, durations are cleaned (deduplicated/merged) and saved via `commitSession()`.
 6. `HistoryDialog` can edit both the current session and historical data.
 
 ### Checkpoints (Crash Recovery)
@@ -55,9 +55,9 @@ To prevent data loss during power failures or crashes, the app saves a "Checkpoi
 
 When the computer is locked:
 1. `LockStateWatcher` detects the lock and emits `LockEvent::Lock`.
-2. `TimeTracker` saves a final checkpoint and sets `is_locked_ = true`.
+2. `Timer` saves a final checkpoint and sets `is_locked_ = true`.
 3. If the lock duration exceeds the threshold (default 15 minutes), a `LockEvent::LongOngoingLock` is emitted.
-4. `backpauseTimer()` retroactively converts the last N minutes from Activity to Pause, splits the duration segments, and syncs the correction to the DB via `updateDurationsInDB()`.
+4. `backpauseTimer()` retroactively converts the last N minutes from Activity to Pause, splits the duration segments, and syncs the correction to the DB via `commitSession()`.
 
 ### Linux Signal Handling
 

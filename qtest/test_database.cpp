@@ -1261,7 +1261,7 @@ void DatabaseTest::test_retention_cleanup_retries_after_failure()
 }
 
 /**
- * T25: Verifies that connection names are unique even when DatabaseManagers
+ * T25: Verifies that connection names are unique even when SqliteSessionStores
  * are repeatedly created and destroyed in a loop.
  *
  * The old implementation used reinterpret_cast<quintptr>(this) for connection
@@ -1278,7 +1278,7 @@ void DatabaseTest::test_connection_names_unique_across_100_instances()
 
     QSet<QString> connectionNames;
 
-    // Act: create and destroy 100 DatabaseManagers, collecting connection names.
+    // Act: create and destroy 100 SqliteSessionStores, collecting connection names.
     // With reinterpret_cast<quintptr>(this), the allocator frequently reuses the
     // same address, causing name collisions. With an atomic counter, every name
     // is guaranteed unique.

@@ -1,5 +1,5 @@
 /**
- * DatabaseManager - SQLite persistence for time duration data.
+ * SqliteSessionStore - SQLite persistence for time duration data.
  *
  * Connection pattern:
  * - Lazy-open: Database opened on first operation, closed after each operation
@@ -45,7 +45,7 @@ const char* kLastCleanShutdownKey = "last_clean_shutdown";
 
 // Monotonically increasing counter used to mint unique SQLite connection names.
 // Using a counter instead of the object address (reinterpret_cast<quintptr>(this))
-// avoids name collisions when a DatabaseManager is destroyed and a new one is
+// avoids name collisions when a SqliteSessionStore is destroyed and a new one is
 // allocated at the same address — which is perfectly legal and surprisingly common
 // in loops or test harnesses.
 std::atomic<uint64_t> s_connection_seq{0};
@@ -531,7 +531,7 @@ bool SqliteSessionStore::ensureSettingsTable()
  * Concurrency:
  * - This method closes and reopens the database to ensure a clean file copy.
  *   The caller (a public method) must already hold db_mutex_, which prevents
- *   any other DatabaseManager operation from seeing the closed connection.
+ *   any other SqliteSessionStore operation from seeing the closed connection.
  *   QRecursiveMutex allows re-entrant calls within the same thread.
  */
 bool SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
@@ -999,7 +999,7 @@ EntriesForDateResult SqliteSessionStore::hasEntriesForDate(const QDate& date)
  * - Uses segment_id to update existing row instead of inserting new one
  * - Stores the actual segment_start_time_ (preserves original start, only updates end/duration)
  *
- * The caller (TimeTracker) rotates current_checkpoint_segment_id_ on mode changes,
+ * The caller (Timer) rotates current_checkpoint_segment_id_ on mode changes,
  * causing the next checkpoint to create a new row for the new segment.
  */
 bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId)

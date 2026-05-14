@@ -28,7 +28,7 @@ void ShutdownCoordinator::run(bool forceDirectPath)
             // During Windows shutdown, use direct call - event loop may not work
             timetracker_.useTimerViaButton(Button::Stop);
         } else {
-            // Normal shutdown - stop via TimeTracker directly then pump the event loop
+            // Normal shutdown - stop via Timer directly then pump the event loop
             // so any connected signals (GUI sync, checkpoint flush) can fire
             timetracker_.useTimerViaButton(Button::Stop);
 

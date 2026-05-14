@@ -375,7 +375,7 @@ void IntegrationTest::test_F_shutdown_sequence_stop_flush_marker()
     //   2. db_.flushToDisc()                             — durability flush
     //   3. db_.setLastCleanShutdownMarker(...)           — if canMarkCleanShutdown()
     //
-    // This test drives all three steps through TimeTracker + FakeSessionStore
+    // This test drives all three steps through Timer + FakeSessionStore
     // and asserts each side-effect happened in the correct order, mimicking
     // what MainWin::shutdown() does after Phase 1.
 

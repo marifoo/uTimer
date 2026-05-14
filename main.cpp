@@ -79,7 +79,7 @@ static bool setupUnixSignalHandlers()
  * 3. Instantiate Core Components:
  *    - Settings (Configuration)
  *    - LockStateWatcher (Hardware abstraction)
- *    - TimeTracker (Business Logic)
+ *    - Timer (Business Logic)
  *    - MainWin (Presentation)
  * 4. Wire up Signals/Slots to connect the components.
  * 5. Start the main event loop.

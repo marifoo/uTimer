@@ -955,7 +955,7 @@ void TimerTest::test_getOngoingDuration_returns_nullopt_when_cross_midnight()
 
 void TimerTest::test_D_timetracker_public_surface_regression()
 {
-    // Test D: Construct a TimeTracker and exercise every remaining public
+    // Test D: Construct a Timer and exercise every remaining public
     // method to confirm none were accidentally removed during Phase 1.
     // This is a regression guard — it would fail to compile if a method
     // disappeared from the header.

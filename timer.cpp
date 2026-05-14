@@ -1,5 +1,5 @@
 /**
- * TimeTracker — Core timing engine managing Activity/Pause/None states.
+ * Timer — Core timing engine managing Activity/Pause/None states.
  *
  * Architecture:
  * - State machine with three modes: Activity, Pause, None.
@@ -9,8 +9,8 @@
  * - Thread-safe via QRecursiveMutex; per-session mutable state grouped
  *   in SessionState with explicit logged transitions.
  *
- * Day-boundary policy (Phase 5):
- * - TimeTracker NEVER stores or persists a segment whose
+ * Day-boundary policy:
+ * - Timer NEVER stores or persists a segment whose
  *   startTime.date() != endTime.date(). Such segments are silently
  *   discarded by addDuration() and refused by saveCheckpointInternal().
  * - The day-boundary rule is owned entirely by DayBoundaryWatcher: a
@@ -293,7 +293,7 @@ void Timer::checkDurationInvariants() const
 #endif // QT_NO_DEBUG
 
 // ============================================================================
-// TimeTracker implementation
+// Timer implementation
 // ============================================================================
 
 Timer::Timer(const Settings &settings, SessionStore& db, QObject *parent)
@@ -748,7 +748,7 @@ void Timer::setDurationType(size_t idx, DurationType type)
  * Atomically replaces the in-memory durations and resets checkpoint tracking.
  *
  * This is the sole external entry point for overwriting session_.durations from outside
- * TimeTracker (e.g., when HistoryDialog saves edits). It couples the two operations
+ * Timer (e.g., when HistoryDialog saves edits). It couples the two operations
  * that must always happen together:
  *   1. Replace the completed-segment deque.
  *   2. Re-anchor checkpoint tracking so the next checkpoint targets the correct

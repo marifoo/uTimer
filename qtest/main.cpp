@@ -14,6 +14,7 @@ class HistoryDialogTest;
 class ShutdownCoordinatorTest;
 class HealthMonitorTest;
 class TimelineTest;
+class RenamesTest;
 
 // Include test class headers
 #include "test_logger.h"
@@ -28,6 +29,7 @@ class TimelineTest;
 #include "test_shutdowncoordinator.h"
 #include "test_healthmonitor.h"
 #include "test_timeline.h"
+#include "test_renames.h"
 
 // Test runner main function
 // Executes all test suites sequentially using QTest::qExec()
@@ -61,6 +63,7 @@ int main(int argc, char *argv[])
     runTest(new ShutdownCoordinatorTest, "ShutdownCoordinatorTest");
     runTest(new HealthMonitorTest, "HealthMonitorTest");
     runTest(new TimelineTest, "TimelineTest");
+    runTest(new RenamesTest, "RenamesTest");
 
     qDebug() << "\n================ All Tests Complete ================";
     return status;
