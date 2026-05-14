@@ -1,5 +1,5 @@
 #include "test_integration.h"
-#include "fakedatabasemanager.h"
+#include "fakesessionstore.h"
 #include <QtTest>
 #include <QSignalSpy>
 
@@ -375,7 +375,7 @@ void IntegrationTest::test_F_shutdown_sequence_stop_flush_marker()
     //   2. db_.flushToDisc()                             — durability flush
     //   3. db_.setLastCleanShutdownMarker(...)           — if canMarkCleanShutdown()
     //
-    // This test drives all three steps through TimeTracker + FakeDatabaseManager
+    // This test drives all three steps through TimeTracker + FakeSessionStore
     // and asserts each side-effect happened in the correct order, mimicking
     // what MainWin::shutdown() does after Phase 1.
 
@@ -383,7 +383,7 @@ void IntegrationTest::test_F_shutdown_sequence_stop_flush_marker()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     // Start the timer so there is something to stop.
@@ -435,7 +435,7 @@ void IntegrationTest::test_5_0a_normal_same_day_no_discard()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     // Start with a same-day segment_start_time (current real time is fine).
@@ -462,7 +462,7 @@ void IntegrationTest::test_5_0a_cross_midnight_ongoing_discarded_completed_prese
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     // Arrange: start the timer, add a completed same-day segment manually,
@@ -509,7 +509,7 @@ void IntegrationTest::test_5_0a_discard_is_idempotent()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);
@@ -538,7 +538,7 @@ void IntegrationTest::test_5_0a_watchdog_helper_returns_false_when_not_crossed()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     // Stopped: must be false.
@@ -611,7 +611,7 @@ void IntegrationTest::test_Y_engine_scheduled_stop_emits_MidnightScheduled()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     // Start the engine (Activity mode).
@@ -659,7 +659,7 @@ void IntegrationTest::test_Z_engine_watchdog_emits_MidnightWatchdog()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);
@@ -694,7 +694,7 @@ void IntegrationTest::test_AA_no_duplicate_stop_signal()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);

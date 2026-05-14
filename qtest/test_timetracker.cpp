@@ -1,5 +1,5 @@
 #include "test_timetracker.h"
-#include "fakedatabasemanager.h"
+#include "fakesessionstore.h"
 #include <QtTest>
 
 using TestCommon::createSettingsFile;
@@ -303,7 +303,7 @@ void TimeTrackerTest::test_session_state_begin_new_segment()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     QDateTime startTime = QDateTime::currentDateTime();
@@ -324,7 +324,7 @@ void TimeTrackerTest::test_session_state_clear_segment()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
     tracker.session_.beginNewSegment(QDateTime::currentDateTime(), settings);
     QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
@@ -343,7 +343,7 @@ void TimeTrackerTest::test_session_state_mark_and_clear_unsaved()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
     QVERIFY(!tracker.session_.has_unsaved_data);
 
@@ -367,7 +367,7 @@ void TimeTrackerTest::test_session_state_reset_for_new_session()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
     QDateTime now = QDateTime::currentDateTime();
     tracker.session_.durations.emplace_back(DurationType::Activity, now.addSecs(-10), now);
@@ -389,7 +389,7 @@ void TimeTrackerTest::test_session_state_adopt_ongoing_segment()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
     QDateTime start = QDateTime::currentDateTime().addSecs(-30);
     QDateTime end = QDateTime::currentDateTime();
@@ -409,7 +409,7 @@ void TimeTrackerTest::test_session_state_start_to_pause_transition()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     // Act: start
@@ -440,7 +440,7 @@ void TimeTrackerTest::test_session_state_pause_to_activity_transition()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(10);
@@ -466,7 +466,7 @@ void TimeTrackerTest::test_session_state_stop_clears_segment()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(10);
@@ -670,7 +670,7 @@ void TimeTrackerTest::test_addduration_appends_single_same_day_segment()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     QDateTime start = QDateTime::currentDateTime().addSecs(-60);
@@ -692,7 +692,7 @@ void TimeTrackerTest::test_addduration_discards_cross_midnight_segment()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     QDate yesterday = QDate::currentDate().addDays(-1);
@@ -712,7 +712,7 @@ void TimeTrackerTest::test_addduration_discards_zero_and_negative_duration()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
     QDateTime now = QDateTime::currentDateTime();
 
@@ -731,7 +731,7 @@ void TimeTrackerTest::test_isOngoingSegmentCrossMidnight_returns_false_when_stop
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     // mode_ == None by default
@@ -744,7 +744,7 @@ void TimeTrackerTest::test_isOngoingSegmentCrossMidnight_returns_false_for_same_
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     tracker.mode_ = TimeTracker::Mode::Activity;
@@ -760,7 +760,7 @@ void TimeTrackerTest::test_isOngoingSegmentCrossMidnight_returns_true_when_segme
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     tracker.mode_ = TimeTracker::Mode::Activity;
@@ -777,7 +777,7 @@ void TimeTrackerTest::test_useTimerViaButton_force_stops_on_cross_midnight_ongoi
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     tracker.mode_ = TimeTracker::Mode::Activity;
@@ -792,7 +792,7 @@ void TimeTrackerTest::test_useTimerViaButton_force_stops_on_cross_midnight_ongoi
     QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
     QVERIFY(!tracker.session_.segment_start_time.isValid());
     QVERIFY(!tracker.was_active_before_autopause_);
-    // FakeDatabaseManager captures writes; no duration should have been written
+    // FakeSessionStore captures writes; no duration should have been written
     // with a cross-midnight segment (the in-flight segment is discarded)
     for (const auto& d : fakeDb.storedDurations) {
         QVERIFY(d.startTime.date() == d.endTime.date());
@@ -805,7 +805,7 @@ void TimeTrackerTest::test_useTimerViaButton_pause_event_is_dropped_when_cross_m
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     tracker.mode_ = TimeTracker::Mode::Activity;
@@ -832,7 +832,7 @@ void TimeTrackerTest::test_useTimerViaLockEvent_unlock_does_not_restart_after_cr
     writer.sync();
 
     Settings settings(settingsPath);
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     tracker.mode_ = TimeTracker::Mode::Pause;
@@ -860,7 +860,7 @@ void TimeTrackerTest::test_saveCheckpointInternal_does_not_write_cross_midnight_
     writer.sync();
 
     Settings settings(settingsPath);
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     tracker.mode_ = TimeTracker::Mode::Activity;
@@ -883,7 +883,7 @@ void TimeTrackerTest::test_stop_clears_was_active_before_autopause()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);
@@ -935,7 +935,7 @@ void TimeTrackerTest::test_getOngoingDuration_returns_nullopt_when_cross_midnigh
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     tracker.mode_ = TimeTracker::Mode::Activity;
@@ -964,7 +964,7 @@ void TimeTrackerTest::test_D_timetracker_public_surface_regression()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     QDateTime now = QDateTime::currentDateTime();
@@ -1052,7 +1052,7 @@ void TimeTrackerTest::test_E_boot_time_gate_entries_yes_skips_boot_time()
     writer.sync();
 
     Settings settings(settingsPath);
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     fakeDb.entriesForDateResult = EntriesForDateResult::Yes;
     TimeTracker tracker(settings, fakeDb);
 
@@ -1085,7 +1085,7 @@ void TimeTrackerTest::test_E_boot_time_gate_entries_no_adds_boot_time()
     writer.sync();
 
     Settings settings(settingsPath);
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     fakeDb.entriesForDateResult = EntriesForDateResult::No;
     TimeTracker tracker(settings, fakeDb);
 
@@ -1118,7 +1118,7 @@ void TimeTrackerTest::test_E_boot_time_gate_entries_unknown_skips_boot_time()
     writer.sync();
 
     Settings settings(settingsPath);
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     fakeDb.entriesForDateResult = EntriesForDateResult::Unknown;
     TimeTracker tracker(settings, fakeDb);
 
@@ -1144,7 +1144,7 @@ void TimeTrackerTest::test_E_boot_time_gate_entries_unknown_skips_boot_time()
 /**
  * X: Stop persists state via commitSession only.
  *
- * After a start→stop cycle, the FakeDatabaseManager's callLog must contain
+ * After a start→stop cycle, the FakeSessionStore's callLog must contain
  * "commitSession" for the stop write, and must NOT contain "saveDurations"
  * or "updateDurationsById" as write paths (those are no longer in the
  * interface; any occurrence would indicate a regression to the old paths).
@@ -1156,7 +1156,7 @@ void TimeTrackerTest::test_X_stop_persists_via_commitSession_only()
     QVERIFY(tempDir.isValid());
     QString settingsPath = createSettingsFile(tempDir.path(), 7);
     Settings settings(settingsPath);
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
 
     // Act

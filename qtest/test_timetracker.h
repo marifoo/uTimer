@@ -78,7 +78,7 @@ private slots:
     // Phase 1 test gate (T1)
     // Test D: regression guard — exercises all remaining public methods.
     void test_D_timetracker_public_surface_regression();
-    // Test E: boot-time gate via FakeDatabaseManager for each tri-state result.
+    // Test E: boot-time gate via FakeSessionStore for each tri-state result.
     void test_E_boot_time_gate_entries_yes_skips_boot_time();
     void test_E_boot_time_gate_entries_no_adds_boot_time();
     void test_E_boot_time_gate_entries_unknown_skips_boot_time();

@@ -1,20 +1,20 @@
 /**
- * FakeDatabaseManager -- in-memory test double for IDatabaseManager.
+ * FakeSessionStore -- in-memory test double for SessionStore.
  *
  * Records every call made to it so tests can assert which operations were
  * performed and in what order.  Return values are configurable per-method
  * so tests can simulate failures.  Data is stored in-memory (no SQLite).
  *
  * Typical usage:
- *     FakeDatabaseManager fakeDb;
+ *     FakeSessionStore fakeDb;
  *     TimeTracker tracker(settings, fakeDb);
  *     // ... exercise tracker ...
  *     QCOMPARE(fakeDb.callLog.count("saveCheckpoint"), 1);
  *     QCOMPARE(fakeDb.storedDurations.size(), 3);
  */
 
-#ifndef FAKEDATABASEMANAGER_H
-#define FAKEDATABASEMANAGER_H
+#ifndef FAKESESSIONSTORE_H
+#define FAKESESSIONSTORE_H
 
 #include "sessionstore.h"
 #include "timeline.h"
@@ -23,11 +23,11 @@
 #include <optional>
 #include <vector>
 
-class FakeDatabaseManager : public SessionStore
+class FakeSessionStore : public SessionStore
 {
 public:
-    FakeDatabaseManager();
-    ~FakeDatabaseManager() override = default;
+    FakeSessionStore();
+    ~FakeSessionStore() override = default;
 
     // ---- SessionStore interface ----
 
@@ -87,4 +87,4 @@ public:
     std::optional<QDateTime> cleanShutdownMarker;
 };
 
-#endif // FAKEDATABASEMANAGER_H
+#endif // FAKESESSIONSTORE_H

@@ -16,7 +16,7 @@ INCLUDEPATH += $$PWD/..
 SOURCES += \
     main.cpp \
     testcommon.cpp \
-    fakedatabasemanager.cpp \
+    fakesessionstore.cpp \
     test_logger.cpp \
     test_settings.cpp \
     test_helpers.cpp \
@@ -43,7 +43,7 @@ SOURCES += \
 HEADERS += \
     testcommon.h \
     fakeclock.h \
-    fakedatabasemanager.h \
+    fakesessionstore.h \
     test_logger.h \
     test_settings.h \
     test_helpers.h \

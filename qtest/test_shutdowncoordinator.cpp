@@ -1,5 +1,5 @@
 #include "test_shutdowncoordinator.h"
-#include "fakedatabasemanager.h"
+#include "fakesessionstore.h"
 #include "shutdowncoordinator.h"
 #include <QtTest>
 
@@ -14,7 +14,7 @@ void ShutdownCoordinatorTest::test_G_happy_path_stop_flush_marker()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
     ShutdownCoordinator coordinator(tracker, fakeDb);
 
@@ -44,7 +44,7 @@ void ShutdownCoordinatorTest::test_H_idempotent_second_run_is_noop()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
     ShutdownCoordinator coordinator(tracker, fakeDb);
 
@@ -70,7 +70,7 @@ void ShutdownCoordinatorTest::test_I_force_direct_skips_retry_loop()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    FakeDatabaseManager fakeDb;
+    FakeSessionStore fakeDb;
     TimeTracker tracker(settings, fakeDb);
     ShutdownCoordinator coordinator(tracker, fakeDb);
 

@@ -1,18 +1,18 @@
 /**
- * FakeDatabaseManager -- implementation of the in-memory test double.
+ * FakeSessionStore -- implementation of the in-memory test double.
  *
  * Every method records its name in callLog and operates on in-memory data
  * structures.  No SQLite is involved.  Return values come from the
  * configurable *Result members set by the test.
  */
 
-#include "fakedatabasemanager.h"
+#include "fakesessionstore.h"
 
-FakeDatabaseManager::FakeDatabaseManager()
+FakeSessionStore::FakeSessionStore()
 {
 }
 
-bool FakeDatabaseManager::commitSession(const Timeline& session)
+bool FakeSessionStore::commitSession(const Timeline& session)
 {
     callLog.append("commitSession");
     if (commitSessionResult) {
@@ -56,7 +56,7 @@ bool FakeDatabaseManager::commitSession(const Timeline& session)
     return commitSessionResult;
 }
 
-bool FakeDatabaseManager::replaceAll(const Timeline& history, const Timeline& session)
+bool FakeSessionStore::replaceAll(const Timeline& history, const Timeline& session)
 {
     callLog.append("replaceAll");
     if (replaceDurationsResult) {
@@ -71,19 +71,19 @@ bool FakeDatabaseManager::replaceAll(const Timeline& history, const Timeline& se
     return replaceDurationsResult;
 }
 
-LoadResult FakeDatabaseManager::loadDurations()
+LoadResult FakeSessionStore::loadDurations()
 {
     callLog.append("loadDurations");
     return loadDurationsResult;
 }
 
-EntriesForDateResult FakeDatabaseManager::hasEntriesForDate(const QDate& /*date*/)
+EntriesForDateResult FakeSessionStore::hasEntriesForDate(const QDate& /*date*/)
 {
     callLog.append("hasEntriesForDate");
     return entriesForDateResult;
 }
 
-bool FakeDatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
+bool FakeSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
                                           const QDateTime& endTime, const QString& segmentId)
 {
     callLog.append("saveCheckpoint");
@@ -93,37 +93,37 @@ bool FakeDatabaseManager::saveCheckpoint(DurationType type, qint64 duration, con
     return saveCheckpointResult;
 }
 
-bool FakeDatabaseManager::checkSchemaOnStartup()
+bool FakeSessionStore::checkSchemaOnStartup()
 {
     callLog.append("checkSchemaOnStartup");
     return checkSchemaResult;
 }
 
-void FakeDatabaseManager::flushToDisc()
+void FakeSessionStore::flushToDisc()
 {
     callLog.append("flushToDisc");
 }
 
-std::deque<OrphanCheckpoint> FakeDatabaseManager::loadUnfinalizedCheckpoints()
+std::deque<OrphanCheckpoint> FakeSessionStore::loadUnfinalizedCheckpoints()
 {
     callLog.append("loadUnfinalizedCheckpoints");
     return orphanCheckpoints;
 }
 
-bool FakeDatabaseManager::reconcileUnfinalizedCheckpoints(const std::vector<long long>& /*finalizeIds*/,
+bool FakeSessionStore::reconcileUnfinalizedCheckpoints(const std::vector<long long>& /*finalizeIds*/,
                                                            const std::vector<long long>& /*dropIds*/)
 {
     callLog.append("reconcileUnfinalizedCheckpoints");
     return reconcileResult;
 }
 
-bool FakeDatabaseManager::setLastCleanShutdownMarker(const QDateTime& /*timestamp*/)
+bool FakeSessionStore::setLastCleanShutdownMarker(const QDateTime& /*timestamp*/)
 {
     callLog.append("setLastCleanShutdownMarker");
     return setMarkerResult;
 }
 
-std::optional<QDateTime> FakeDatabaseManager::consumeLastCleanShutdownMarker()
+std::optional<QDateTime> FakeSessionStore::consumeLastCleanShutdownMarker()
 {
     callLog.append("consumeLastCleanShutdownMarker");
     auto result = cleanShutdownMarker;
