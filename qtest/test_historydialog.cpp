@@ -632,9 +632,9 @@ void HistoryDialogTest::test_historydialog_save_uses_ongoing_snapshot_endtime_af
     QTest::qWait(30);
 
     HistoryDialog dialog(tracker, settings);
-    QVERIFY(dialog.ongoingSnapshot_.has_value());
-    const QDateTime snapshotEnd = dialog.ongoingSnapshot_->endTime;
-    const QDateTime snapshotStart = dialog.ongoingSnapshot_->startTime;
+    QVERIFY(dialog.pendingTimelines_[0].ongoing().has_value());
+    const QDateTime snapshotEnd = dialog.pendingTimelines_[0].ongoing()->endTime;
+    const QDateTime snapshotStart = dialog.pendingTimelines_[0].ongoing()->startTime;
 
     QTest::qWait(200);
 

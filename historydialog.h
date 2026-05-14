@@ -25,7 +25,6 @@ class HistoryDialog : public QDialog
     Q_OBJECT
 
 private:
-    enum class RowOrigin {CurrentMemory, CurrentDatabase, HistoricalDatabase, Ongoing};
     struct Page {
         QString title;
         std::deque<TimeDuration> durations;
@@ -37,7 +36,6 @@ private:
     std::vector<Page> pages_;
     std::vector<Timeline> pendingTimelines_;
     std::vector<std::vector<bool>> isMemoryRow_;  // true = originated from session_.durations
-    std::optional<TimeDuration> ongoingSnapshot_;
     uint pageIndex_;
     int contextMenuRow_ = -1;
     int contextMenuPage_ = -1;
@@ -52,7 +50,6 @@ private:
     void createPages();
     void updateTotalsLabel(uint idx);
     void updateTable(uint idx);
-    std::pair<qint64, qint64> calculateTotals(const std::deque<TimeDuration>& durations);
     void assertPendingOriginsInvariant() const;
     void saveChanges();
     void showContextMenu(const QPoint& pos);

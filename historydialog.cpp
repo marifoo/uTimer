@@ -3,7 +3,7 @@
  *
  * Architecture:
  * - Transactional Editing: All changes (type toggling, splitting) are performed
- *   on a local copy (`pendingChanges_`). The actual database and TimeTracker
+ *   on local copies (`pendingTimelines_`). The actual database and TimeTracker
  *   are only updated when the user clicks "OK".
  * - Paging Model: Data is grouped by Date (Pages). Page 0 is always "Today"
  *   (in-memory + today's DB + ongoing), while subsequent pages are historical (DB).
@@ -88,15 +88,15 @@ void HistoryDialog::createPages()
 {
     Timeline sessionSnapshot = timetracker_.snapshot();
     const auto& currentDurations = sessionSnapshot.completed();
-    ongoingSnapshot_ = sessionSnapshot.ongoing();
+    const auto& ongoingOpt = sessionSnapshot.ongoing();
     auto historyDurations = timetracker_.getDurationsHistory();
     const QDate today = QDate::currentDate();
 
     std::vector<TimeDuration> currentComparableDurations;
-    currentComparableDurations.reserve(currentDurations.size() + (ongoingSnapshot_.has_value() ? 1 : 0));
+    currentComparableDurations.reserve(currentDurations.size() + (ongoingOpt.has_value() ? 1 : 0));
     currentComparableDurations.insert(currentComparableDurations.end(), currentDurations.begin(), currentDurations.end());
-    if (ongoingSnapshot_.has_value()) {
-        currentComparableDurations.push_back(ongoingSnapshot_.value());
+    if (ongoingOpt.has_value()) {
+        currentComparableDurations.push_back(ongoingOpt.value());
     }
 
     // Group historical durations by date
@@ -131,8 +131,8 @@ void HistoryDialog::createPages()
 
     // Build currentPageDurations for the Page struct (includes ongoing for title count)
     std::deque<TimeDuration> currentPageDurations = currentPageCompleted;
-    if (ongoingSnapshot_.has_value()) {
-        currentPageDurations.push_back(ongoingSnapshot_.value());
+    if (ongoingOpt.has_value()) {
+        currentPageDurations.push_back(ongoingOpt.value());
     }
 
     // Add today page (current session + today's DB + ongoing)
@@ -158,8 +158,8 @@ void HistoryDialog::createPages()
     pendingTimelines_.reserve(pages_.size());
     isMemoryRow_.reserve(pages_.size());
 
-    // Page 0: completed = currentPageCompleted (no ongoing), ongoing = ongoingSnapshot_
-    pendingTimelines_.push_back(Timeline(currentPageCompleted, ongoingSnapshot_));
+    // Page 0: completed = currentPageCompleted (no ongoing), ongoing = sessionSnapshot.ongoing()
+    pendingTimelines_.push_back(Timeline(currentPageCompleted, ongoingOpt));
     isMemoryRow_.push_back(currentPageIsMemory);
 
     for (size_t i = 1; i < pages_.size(); ++i) {
@@ -268,19 +268,6 @@ QString HistoryDialog::getLoadReconciliationMessage() const
     return buildLoadReconciliationMessage();
 }
 
-std::pair<qint64, qint64> HistoryDialog::calculateTotals(const std::deque<TimeDuration>& durations)
-{
-    qint64 totalActivity = 0;
-    qint64 totalPause = 0;
-    for (const auto& duration : durations) {
-        if (duration.type == DurationType::Activity)
-            totalActivity += duration.duration;
-        else
-            totalPause += duration.duration;
-    }
-    return std::make_pair(totalActivity, totalPause);
-}
-
 void HistoryDialog::assertPendingOriginsInvariant() const
 {
 #ifndef QT_NO_DEBUG
@@ -348,7 +335,7 @@ void HistoryDialog::updateTable(uint idx)
     const auto& originalDurations = pages_[idx].durations;
     // For page 0, original durations includes the ongoing row at the end; compare only completed
     size_t originalCompletedSize = originalDurations.size();
-    if (idx == 0 && ongoingSnapshot_.has_value()) {
+    if (idx == 0 && pendingTimelines_[0].ongoing().has_value()) {
         originalCompletedSize = originalDurations.size() > 0 ? originalDurations.size() - 1 : 0;
     }
     bool pageModified = false;
@@ -505,10 +492,6 @@ void HistoryDialog::saveChanges()
     }
 
     // Save historical + current-session durations to DB
-    if (!ongoingDurationForSave.has_value() && ongoingSnapshot_.has_value()) {
-        ongoingDurationForSave = ongoingSnapshot_.value();
-    }
-
     if (ongoingDurationForSave.has_value()) {
         currentSessionDurations.push_back(ongoingDurationForSave.value());
     }
