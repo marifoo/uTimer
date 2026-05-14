@@ -1,6 +1,7 @@
 #include "test_integration.h"
 #include "fakedatabasemanager.h"
 #include <QtTest>
+#include <QSignalSpy>
 
 using TestCommon::createSettingsFile;
 using TestCommon::mk;
@@ -590,4 +591,152 @@ void IntegrationTest::test_integration_backpause_db_update()
     DatabaseManager db2(settings);
     auto loaded = db2.loadDurations();
     QVERIFY(loaded.size() >= 1);
+}
+
+// ============================================================================
+// Phase 5 test gate (Tests Y–AB)
+// ============================================================================
+
+/**
+ * Test Y — Engine-driven scheduled stop.
+ *
+ * Arm DayBoundaryWatcher with a fake "now" that is past 23:59:59.500 so the
+ * single-shot timer fires after 1 ms.  Assert:
+ *   - stopped(MidnightScheduled) is emitted exactly once.
+ *   - Engine reaches Mode::None.
+ *   - Same-day completed segments were committed to the fake DB.
+ */
+void IntegrationTest::test_Y_engine_scheduled_stop_emits_MidnightScheduled()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    // Start the engine (Activity mode).
+    tracker.useTimerViaButton(Button::Start);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+
+    // Add a completed same-day segment so we can verify it is preserved.
+    const QDateTime segStart = QDateTime::currentDateTime().addSecs(-30);
+    const QDateTime segEnd   = QDateTime::currentDateTime().addSecs(-5);
+    tracker.addDuration(DurationType::Activity, segStart, segEnd);
+    QVERIFY(!tracker.session_.durations.empty());
+    fakeDb.callLog.clear();
+
+    // Spy on the stopped() signal.
+    QSignalSpy stoppedSpy(&tracker, &TimeTracker::stopped);
+    QVERIFY(stoppedSpy.isValid());
+
+    // Arm the watcher with a time past 23:59:59.500 — timer fires in 1 ms.
+    const QDateTime pastStop(QDate::currentDate(), QTime(23, 59, 59, 600));
+    tracker.day_boundary_watcher_.armScheduledStop(pastStop);
+
+    // Wait long enough for the single-shot timer to fire.
+    QTest::qWait(100);
+
+    // Assert: exactly one stopped signal, with MidnightScheduled reason.
+    QCOMPARE(stoppedSpy.count(), 1);
+    const auto reason = stoppedSpy.at(0).at(0).value<TimeTracker::StopReason>();
+    QCOMPARE(reason, TimeTracker::StopReason::MidnightScheduled);
+
+    // Engine must be stopped.
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+
+    // Completed segments must have been committed to the DB.
+    QVERIFY(fakeDb.callLog.contains("commitSession"));
+}
+
+/**
+ * Test Z — Engine-driven watchdog.
+ *
+ * With FakeClock jumped past midnight (no scheduled stop fired), the next
+ * onTick() call emits stopped(MidnightWatchdog).
+ */
+void IntegrationTest::test_Z_engine_watchdog_emits_MidnightWatchdog()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+
+    // Simulate sleep through midnight: backdate segment_start_time to yesterday.
+    tracker.session_.segment_start_time = QDateTime::currentDateTime().addDays(-1);
+
+    QSignalSpy stoppedSpy(&tracker, &TimeTracker::stopped);
+    QVERIFY(stoppedSpy.isValid());
+
+    // Simulate the 100 ms heartbeat with today's "now".
+    tracker.onTick(QDateTime::currentDateTime());
+
+    // Engine must have stopped and emitted MidnightWatchdog.
+    QCOMPARE(stoppedSpy.count(), 1);
+    const auto reason = stoppedSpy.at(0).at(0).value<TimeTracker::StopReason>();
+    QCOMPARE(reason, TimeTracker::StopReason::MidnightWatchdog);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+}
+
+/**
+ * Test AA — No duplicate stop.
+ *
+ * If both the scheduled stop timer and the watchdog would fire (race), only
+ * one stopped() signal is emitted.  Simulate by: arming the timer (1 ms fire),
+ * backdating the segment, then calling onTick() to let the watchdog win — the
+ * timer fires afterward but the engine is already stopped so it no-ops.
+ */
+void IntegrationTest::test_AA_no_duplicate_stop_signal()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+
+    // Arm the scheduled stop (fires in 1 ms).
+    const QDateTime pastStop(QDate::currentDate(), QTime(23, 59, 59, 600));
+    tracker.day_boundary_watcher_.armScheduledStop(pastStop);
+
+    // Backdate segment so the watchdog also wants to fire.
+    tracker.session_.segment_start_time = QDateTime::currentDateTime().addDays(-1);
+
+    QSignalSpy stoppedSpy(&tracker, &TimeTracker::stopped);
+    QVERIFY(stoppedSpy.isValid());
+
+    // Watchdog fires first (synchronous call).
+    tracker.onTick(QDateTime::currentDateTime());
+    QCOMPARE(stoppedSpy.count(), 1); // watchdog stopped it
+
+    // Now let the scheduled-stop timer fire.
+    QTest::qWait(100);
+
+    // Must still be exactly one emission.
+    QCOMPARE(stoppedSpy.count(), 1);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+}
+
+/**
+ * Test AB — scheduleMidnightStop is gone.
+ *
+ * Verify that the symbol scheduleMidnightStop no longer appears in mainwin.h.
+ * The test binary lives in qtest/; mainwin.h is one directory up.
+ */
+void IntegrationTest::test_AB_scheduleMidnightStop_is_gone()
+{
+    const QString mainwinHPath =
+        QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../mainwin.h");
+    QFile mainwinH(mainwinHPath);
+    QVERIFY2(mainwinH.open(QIODevice::ReadOnly | QIODevice::Text),
+             qPrintable("Cannot open mainwin.h: " + mainwinHPath));
+    const QString content = QString::fromUtf8(mainwinH.readAll());
+    mainwinH.close();
+    QVERIFY2(!content.contains("scheduleMidnightStop"),
+             "scheduleMidnightStop should not appear in mainwin.h");
 }

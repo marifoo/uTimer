@@ -44,6 +44,12 @@ private slots:
     void test_5_0a_cross_midnight_ongoing_discarded_completed_preserved();
     void test_5_0a_discard_is_idempotent();
     void test_5_0a_watchdog_helper_returns_false_when_not_crossed();
+
+    // Phase 5 test gate (Tests Y–AB)
+    void test_Y_engine_scheduled_stop_emits_MidnightScheduled();
+    void test_Z_engine_watchdog_emits_MidnightWatchdog();
+    void test_AA_no_duplicate_stop_signal();
+    void test_AB_scheduleMidnightStop_is_gone();
 };
 
 #endif // TEST_INTEGRATION_H

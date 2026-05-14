@@ -257,4 +257,7 @@ private slots:
     void saveCheckpoint();  // Periodic checkpoint saving every 5 minutes
 };
 
+Q_DECLARE_METATYPE(TimeTracker::StopReason)
+Q_DECLARE_METATYPE(TimeTracker::PauseCause)
+
 #endif // TIMETRACKER_H
