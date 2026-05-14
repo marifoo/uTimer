@@ -28,7 +28,7 @@
  * - Triggered by LockEvent::LongOngoingLock from LockStateWatcher
  */
 
-#include "timetracker.h"
+#include "timer.h"
 #include <QtDebug>
 #include <QDateTime>
 #include <QMutexLocker>
@@ -46,21 +46,21 @@ constexpr qint64 kOrphanStaleAgeMs = 24LL * 60LL * 60LL * 1000LL;
 // DayBoundaryWatcher implementation
 // ============================================================================
 
-TimeTracker::DayBoundaryWatcher::DayBoundaryWatcher(TimeTracker& owner)
+Timer::DayBoundaryWatcher::DayBoundaryWatcher(Timer& owner)
     : owner_(owner)
 {
     midnight_timer_.setSingleShot(true);
 }
 
-void TimeTracker::DayBoundaryWatcher::tick(const QDateTime& now)
+void Timer::DayBoundaryWatcher::tick(const QDateTime& now)
 {
     // Watchdog: if the ongoing segment has crossed midnight (e.g. due to sleep
     // bypassing the scheduled stop), force the engine to stopped state.
-    // The mutex is already held by the caller (TimeTracker::onTick).
+    // The mutex is already held by the caller (Timer::onTick).
     owner_.discardCrossMidnightOngoingAndStop(now);
 }
 
-void TimeTracker::DayBoundaryWatcher::armScheduledStop(const QDateTime& now)
+void Timer::DayBoundaryWatcher::armScheduledStop(const QDateTime& now)
 {
     QTime current_time = now.time();
     QTime midnight_stop_time(23, 59, 59, 500);
@@ -82,13 +82,13 @@ void TimeTracker::DayBoundaryWatcher::armScheduledStop(const QDateTime& now)
     midnight_timer_.start(static_cast<int>(msecs_until_stop));
 }
 
-void TimeTracker::DayBoundaryWatcher::cancel()
+void Timer::DayBoundaryWatcher::cancel()
 {
     midnight_timer_.stop();
     Logger::Log("[MIDNIGHT] Scheduled stop timer cancelled");
 }
 
-void TimeTracker::DayBoundaryWatcher::onMidnightTimerFired()
+void Timer::DayBoundaryWatcher::onMidnightTimerFired()
 {
     Logger::Log("[MIDNIGHT] Scheduled stop: engine forcing timer off at end of day");
     QMutexLocker locker(&owner_.mutex_);
@@ -187,7 +187,7 @@ void SessionState::adoptOngoingSegment(const TimeDuration& ongoing, const Settin
 
 #ifndef QT_NO_DEBUG
 
-TimeTracker::StateSnapshot TimeTracker::takeStateSnapshot() const
+Timer::StateSnapshot Timer::takeStateSnapshot() const
 {
     return {
         session_.durations.size(),
@@ -197,12 +197,12 @@ TimeTracker::StateSnapshot TimeTracker::takeStateSnapshot() const
     };
 }
 
-TimeTracker::StateGuard::StateGuard(const TimeTracker& tracker, const char* methodName)
+Timer::StateGuard::StateGuard(const Timer& tracker, const char* methodName)
     : tracker_(tracker), method_(methodName), entry_(tracker.takeStateSnapshot())
 {
 }
 
-TimeTracker::StateGuard::~StateGuard()
+Timer::StateGuard::~StateGuard()
 {
     if (transitioned_) {
         return; // Caller acknowledged the mutation
@@ -224,7 +224,7 @@ TimeTracker::StateGuard::~StateGuard()
     }
 }
 
-void TimeTracker::StateGuard::markTransitioned()
+void Timer::StateGuard::markTransitioned()
 {
     transitioned_ = true;
 }
@@ -242,7 +242,7 @@ void TimeTracker::StateGuard::markTransitioned()
  *   2. No overlapping segments of the same type on the same day.
  *   3. All segment_ids must be non-empty.
  */
-void TimeTracker::checkDurationInvariants() const
+void Timer::checkDurationInvariants() const
 {
     const auto& durations = session_.durations;
     if (durations.empty()) {
@@ -296,7 +296,7 @@ void TimeTracker::checkDurationInvariants() const
 // TimeTracker implementation
 // ============================================================================
 
-TimeTracker::TimeTracker(const Settings &settings, SessionStore& db, QObject *parent)
+Timer::Timer(const Settings &settings, SessionStore& db, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), session_(), mode_(Mode::None),
       was_active_before_autopause_(false), is_locked_(false),
       checkpoints_paused_(false), db_(db),
@@ -310,7 +310,7 @@ TimeTracker::TimeTracker(const Settings &settings, SessionStore& db, QObject *pa
         checkpointTimer_.setInterval(checkpoint_interval_msec_);
     }
     checkpointTimer_.setSingleShot(false);
-    connect(&checkpointTimer_, &QTimer::timeout, this, &TimeTracker::saveCheckpoint);
+    connect(&checkpointTimer_, &QTimer::timeout, this, &Timer::saveCheckpoint);
 
     // Log when checkpoints are disabled
     if (checkpoint_interval_msec_ == 0) {
@@ -321,7 +321,7 @@ TimeTracker::TimeTracker(const Settings &settings, SessionStore& db, QObject *pa
     startup_recovered_seconds_ = reconcileOrphanCheckpoints(db_.loadUnfinalizedCheckpoints(), cleanShutdownMarker);
 }
 
-TimeTracker::~TimeTracker()
+Timer::~Timer()
 {
     stopTimer(QDateTime::currentDateTime(), StopReason::Shutdown);
 }
@@ -339,7 +339,7 @@ TimeTracker::~TimeTracker()
  *             clock skew between successive QDateTime::currentDateTime()
  *             calls.
  */
-void TimeTracker::startTimer(const QDateTime& now)
+void Timer::startTimer(const QDateTime& now)
 {
     if (mode_ == Mode::Pause) {
         Logger::Log("[DEBUG] Starting Timer from Pause - D=" + QString::number(session_.durations.size()));
@@ -430,7 +430,7 @@ void TimeTracker::startTimer(const QDateTime& now)
     Logger::Log("[DEBUG] Trying to Start Timer from Mode Activity - D=" + QString::number(session_.durations.size()));
 }
 
-void TimeTracker::pauseTimer(const QDateTime& now)
+void Timer::pauseTimer(const QDateTime& now)
 {
     if (mode_ != Mode::Activity) {
         Logger::Log("[DEBUG] Pause ignored; not in Activity");
@@ -456,7 +456,7 @@ void TimeTracker::pauseTimer(const QDateTime& now)
  * since checkpoints are suspended while locked but the time before lock detection
  * may have been saved as Activity.
  */
-void TimeTracker::backpauseTimer(const QDateTime& now)
+void Timer::backpauseTimer(const QDateTime& now)
 {
     if (mode_ != Mode::Activity) {
         Logger::Log("[DEBUG] Backpause ignored; not in Activity");
@@ -528,7 +528,7 @@ void TimeTracker::backpauseTimer(const QDateTime& now)
  *                           backpauseTimer it is also "now" (the retroactive
  *                           Pause segment was already added to session_.durations).
  */
-void TimeTracker::finalizeActivityToPause(const QDateTime& pauseSegmentStart)
+void Timer::finalizeActivityToPause(const QDateTime& pauseSegmentStart)
 {
     mode_ = Mode::Pause;
     session_.updateSegmentStartTime(pauseSegmentStart, settings_);
@@ -554,7 +554,7 @@ void TimeTracker::finalizeActivityToPause(const QDateTime& pauseSegmentStart)
  * 4. Persists the Session to the Database using updateDurationsInDB().
  *    (This updates the existing rows rather than creating new ones, preserving IDs).
  */
-void TimeTracker::stopTimer(const QDateTime& now, StopReason reason)
+void Timer::stopTimer(const QDateTime& now, StopReason reason)
 {
     if (mode_ == Mode::None) {
         Logger::Log("[DEBUG] Stop ignored; already stopped");
@@ -591,7 +591,7 @@ void TimeTracker::stopTimer(const QDateTime& now, StopReason reason)
     emit stopped(reason);
 }
 
-void TimeTracker::useTimerViaButton(Button button)
+void Timer::useTimerViaButton(Button button)
 {
     QMutexLocker locker(&mutex_);
 #ifndef QT_NO_DEBUG
@@ -630,7 +630,7 @@ void TimeTracker::useTimerViaButton(Button button)
  * Note: Lock/Unlock events for checkpoint control are always processed.
  * Autopause behavior (LongOngoingLock handling) respects isAutopauseEnabled().
  */
-void TimeTracker::useTimerViaLockEvent(LockEvent event)
+void Timer::useTimerViaLockEvent(LockEvent event)
 {
     QMutexLocker locker(&mutex_);
 #ifndef QT_NO_DEBUG
@@ -684,13 +684,13 @@ void TimeTracker::useTimerViaLockEvent(LockEvent event)
 #endif
 }
 
-void TimeTracker::onTick(const QDateTime& now)
+void Timer::onTick(const QDateTime& now)
 {
     QMutexLocker locker(&mutex_);
     day_boundary_watcher_.tick(now);
 }
 
-qint64 TimeTracker::getActiveTime() const
+qint64 Timer::getActiveTime() const
 {
     QMutexLocker locker(&mutex_);
     qint64 sum = 0;
@@ -702,7 +702,7 @@ qint64 TimeTracker::getActiveTime() const
     return sum;
 }
 
-qint64 TimeTracker::getPauseTime() const
+qint64 Timer::getPauseTime() const
 {
     QMutexLocker locker(&mutex_);
     qint64 sum = 0;
@@ -714,19 +714,19 @@ qint64 TimeTracker::getPauseTime() const
     return sum;
 }
 
-Timeline TimeTracker::snapshot() const
+Timeline Timer::snapshot() const
 {
     QMutexLocker lock(&mutex_);
     return Timeline(session_.durations, getOngoingDuration());
 }
 
-const std::deque<TimeDuration>& TimeTracker::getCurrentDurations() const
+const std::deque<TimeDuration>& Timer::getCurrentDurations() const
 {
     QMutexLocker locker(&mutex_);
     return session_.durations;
 }
 
-void TimeTracker::setDurationType(size_t idx, DurationType type)
+void Timer::setDurationType(size_t idx, DurationType type)
 {
     QMutexLocker locker(&mutex_);
 #ifndef QT_NO_DEBUG
@@ -765,7 +765,7 @@ void TimeTracker::setDurationType(size_t idx, DurationType type)
  *                      tracking state is left unchanged (appropriate when the timer
  *                      is stopped and there is no ongoing segment).
  */
-void TimeTracker::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
+void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
                                           const std::optional<TimeDuration>& ongoing)
 {
     QMutexLocker locker(&mutex_);
@@ -809,12 +809,12 @@ void TimeTracker::replaceCurrentDurations(const std::deque<TimeDuration>& newDur
 #endif
 }
 
-void TimeTracker::applyEdits(const Timeline& edited)
+void Timer::applyEdits(const Timeline& edited)
 {
     replaceCurrentDurations(edited.completed(), edited.ongoing());
 }
 
-std::deque<TimeDuration> TimeTracker::getDurationsHistory()
+std::deque<TimeDuration> Timer::getDurationsHistory()
 {
     QMutexLocker locker(&mutex_);
     auto loadResult = db_.loadDurations();
@@ -823,13 +823,13 @@ std::deque<TimeDuration> TimeTracker::getDurationsHistory()
     return loadResult.durations;
 }
 
-std::pair<int, int> TimeTracker::getLastHistoryLoadStats() const
+std::pair<int, int> Timer::getLastHistoryLoadStats() const
 {
     QMutexLocker locker(&mutex_);
     return std::make_pair(last_history_load_skipped_, last_history_load_repaired_);
 }
 
-std::optional<TimeDuration> TimeTracker::getOngoingDuration() const
+std::optional<TimeDuration> Timer::getOngoingDuration() const
 {
     QMutexLocker locker(&mutex_);
     if (mode_ == Mode::None) return std::nullopt;
@@ -849,49 +849,49 @@ std::optional<TimeDuration> TimeTracker::getOngoingDuration() const
     return TimeDuration(type, session_.segment_start_time, now, segmentId);
 }
 
-qint64 TimeTracker::getStartupRecoveredSeconds() const
+qint64 Timer::getStartupRecoveredSeconds() const
 {
     QMutexLocker locker(&mutex_);
     return startup_recovered_seconds_;
 }
 
-bool TimeTracker::shouldShowStartupRecoveryNotification() const
+bool Timer::shouldShowStartupRecoveryNotification() const
 {
     QMutexLocker locker(&mutex_);
     return startup_recovery_notification_needed_;
 }
 
-bool TimeTracker::canMarkCleanShutdown() const
+bool Timer::canMarkCleanShutdown() const
 {
     QMutexLocker locker(&mutex_);
     return mode_ == Mode::None && !session_.has_unsaved_data;
 }
 
-bool TimeTracker::appendDurationsToDB()
+bool Timer::appendDurationsToDB()
 {
     return appendDurationsChunkToDB(session_.durations);
 }
 
-bool TimeTracker::appendDurationsChunkToDB(const std::deque<TimeDuration>& durations)
+bool Timer::appendDurationsChunkToDB(const std::deque<TimeDuration>& durations)
 {
     if (durations.empty())
         return true;
     return db_.commitSession(Timeline(durations, std::nullopt));
 }
 
-bool TimeTracker::updateDurationsInDB()
+bool Timer::updateDurationsInDB()
 {
     if (session_.durations.empty())
         return true;
     return db_.commitSession(Timeline(session_.durations, std::nullopt));
 }
 
-bool TimeTracker::replaceAll(const Timeline& history, const Timeline& session)
+bool Timer::replaceAll(const Timeline& history, const Timeline& session)
 {
     return db_.replaceAll(history, session);
 }
 
-EntriesForDateResult TimeTracker::hasEntriesForDate(const QDate& date)
+EntriesForDateResult Timer::hasEntriesForDate(const QDate& date)
 {
     return db_.hasEntriesForDate(date);
 }
@@ -905,7 +905,7 @@ EntriesForDateResult TimeTracker::hasEntriesForDate(const QDate& date)
  *
  * Zero-duration and negative-duration inputs are also dropped.
  */
-void TimeTracker::addDuration(DurationType type,
+void Timer::addDuration(DurationType type,
                               const QDateTime& startTime,
                               const QDateTime& endTime,
                               const QString& segmentId)
@@ -930,7 +930,7 @@ void TimeTracker::addDuration(DurationType type,
         .arg(duration));
 }
 
-bool TimeTracker::isOngoingSegmentCrossMidnight() const
+bool Timer::isOngoingSegmentCrossMidnight() const
 {
     QMutexLocker locker(&mutex_);
     if (mode_ == Mode::None) return false;
@@ -948,7 +948,7 @@ bool TimeTracker::isOngoingSegmentCrossMidnight() const
  * Emits stopped(MidnightWatchdog). The GUI is updated via the stopped() signal
  * connection in MainWin (established in Phase 5).
  */
-bool TimeTracker::discardCrossMidnightOngoingAndStop(const QDateTime& now)
+bool Timer::discardCrossMidnightOngoingAndStop(const QDateTime& now)
 {
     if (mode_ == Mode::None) return false;
     if (!session_.segment_start_time.isValid()) return false;
@@ -980,7 +980,7 @@ bool TimeTracker::discardCrossMidnightOngoingAndStop(const QDateTime& now)
     return true;
 }
 
-void TimeTracker::saveCheckpoint()
+void Timer::saveCheckpoint()
 {
     QMutexLocker locker(&mutex_);
 
@@ -1001,7 +1001,7 @@ void TimeTracker::saveCheckpoint()
     saveCheckpointInternal(now);
 }
 
-void TimeTracker::saveCheckpointInternal(const QDateTime& now)
+void Timer::saveCheckpointInternal(const QDateTime& now)
 {
     // NOTE: This function assumes the mutex is already held by the caller
 
@@ -1035,7 +1035,7 @@ void TimeTracker::saveCheckpointInternal(const QDateTime& now)
     }
 }
 
-void TimeTracker::pauseCheckpoints()
+void Timer::pauseCheckpoints()
 {
     QMutexLocker locker(&mutex_);
     checkpoints_paused_ = true;
@@ -1043,7 +1043,7 @@ void TimeTracker::pauseCheckpoints()
     Logger::Log("[CHECKPOINT] Checkpoints paused");
 }
 
-void TimeTracker::resumeCheckpoints()
+void Timer::resumeCheckpoints()
 {
     QMutexLocker locker(&mutex_);
     checkpoints_paused_ = false;
@@ -1053,7 +1053,7 @@ void TimeTracker::resumeCheckpoints()
     Logger::Log("[CHECKPOINT] Checkpoints resumed");
 }
 
-qint64 TimeTracker::reconcileOrphanCheckpoints(
+qint64 Timer::reconcileOrphanCheckpoints(
     const std::deque<OrphanCheckpoint>& orphans,
     const std::optional<QDateTime>& cleanShutdownMarker)
 {

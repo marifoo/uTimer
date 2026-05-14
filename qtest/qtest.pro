@@ -22,7 +22,7 @@ SOURCES += \
     test_helpers.cpp \
     test_lockstatewatcher.cpp \
     test_cleanduration.cpp \
-    test_timetracker.cpp \
+    test_timer.cpp \
     test_database.cpp \
     test_integration.cpp \
     test_historydialog.cpp \
@@ -32,7 +32,7 @@ SOURCES += \
     $$PWD/../healthmonitor.cpp \
     $$PWD/../historydialog.cpp \
     $$PWD/../shutdowncoordinator.cpp \
-    $$PWD/../timetracker.cpp \
+    $$PWD/../timer.cpp \
     $$PWD/../lockstatewatcher.cpp \
     $$PWD/../sqlitesessionstore.cpp \
     $$PWD/../helpers.cpp \
@@ -49,7 +49,7 @@ HEADERS += \
     test_helpers.h \
     test_lockstatewatcher.h \
     test_cleanduration.h \
-    test_timetracker.h \
+    test_timer.h \
     test_database.h \
     test_integration.h \
     test_historydialog.h \
@@ -58,7 +58,7 @@ HEADERS += \
     test_timeline.h \
     $$PWD/../healthmonitor.h \
     $$PWD/../shutdowncoordinator.h \
-    $$PWD/../timetracker.h \
+    $$PWD/../timer.h \
     $$PWD/../lockstatewatcher.h \
     $$PWD/../sqlitesessionstore.h \
     $$PWD/../sessionstore.h \

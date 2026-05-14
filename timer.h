@@ -1,5 +1,5 @@
-#ifndef TIMETRACKER_H
-#define TIMETRACKER_H
+#ifndef TIMER_H
+#define TIMER_H
 
 #include <QObject>
 #include <QtGlobal>
@@ -85,7 +85,7 @@ struct SessionState {
 };
 
 
-class TimeTracker : public QObject
+class Timer : public QObject
 {
     Q_OBJECT
 public:
@@ -120,7 +120,7 @@ private:
      */
     class DayBoundaryWatcher {
     public:
-        explicit DayBoundaryWatcher(TimeTracker& owner);
+        explicit DayBoundaryWatcher(Timer& owner);
 
         /// Called on every 100 ms heartbeat. Runs the cross-midnight watchdog.
         void tick(const QDateTime& now);
@@ -132,7 +132,7 @@ private:
         void cancel();
 
     private:
-        TimeTracker& owner_;
+        Timer& owner_;
         QTimer midnight_timer_;
 
         void onMidnightTimerFired();
@@ -194,12 +194,12 @@ private:
     /// for unexpected mutations on exit. Only active in debug builds.
     class StateGuard {
     public:
-        StateGuard(const TimeTracker& tracker, const char* methodName);
+        StateGuard(const Timer& tracker, const char* methodName);
         ~StateGuard();
         /// Call this to acknowledge that the method intentionally modified state.
         void markTransitioned();
     private:
-        const TimeTracker& tracker_;
+        const Timer& tracker_;
         const char* method_;
         StateSnapshot entry_;
         bool transitioned_ = false;
@@ -215,8 +215,8 @@ private:
 #endif // QT_NO_DEBUG
 
 public:
-    explicit TimeTracker(const Settings & settings, SessionStore& db, QObject *parent = nullptr);
-    ~TimeTracker();
+    explicit Timer(const Settings & settings, SessionStore& db, QObject *parent = nullptr);
+    ~Timer();
 
     qint64 getActiveTime() const;
     qint64 getPauseTime() const;
@@ -248,16 +248,16 @@ public slots:
 
 signals:
     void userWarning(const QString& text);
-    void stopped(TimeTracker::StopReason reason);
+    void stopped(Timer::StopReason reason);
     /// Emitted when a lock-driven autopause or autoresume occurs so the GUI
     /// can follow without maintaining its own was_active_before_autopause_ flag.
-    void modeChanged(TimeTracker::PauseCause cause);
+    void modeChanged(Timer::PauseCause cause);
 
 private slots:
     void saveCheckpoint();  // Periodic checkpoint saving every 5 minutes
 };
 
-Q_DECLARE_METATYPE(TimeTracker::StopReason)
-Q_DECLARE_METATYPE(TimeTracker::PauseCause)
+Q_DECLARE_METATYPE(Timer::StopReason)
+Q_DECLARE_METATYPE(Timer::PauseCause)
 
-#endif // TIMETRACKER_H
+#endif // TIMER_H

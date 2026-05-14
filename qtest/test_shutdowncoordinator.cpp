@@ -15,7 +15,7 @@ void ShutdownCoordinatorTest::test_G_happy_path_stop_flush_marker()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    TimeTracker tracker(settings, fakeDb);
+    Timer tracker(settings, fakeDb);
     ShutdownCoordinator coordinator(tracker, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);
@@ -45,7 +45,7 @@ void ShutdownCoordinatorTest::test_H_idempotent_second_run_is_noop()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    TimeTracker tracker(settings, fakeDb);
+    Timer tracker(settings, fakeDb);
     ShutdownCoordinator coordinator(tracker, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);
@@ -71,7 +71,7 @@ void ShutdownCoordinatorTest::test_I_force_direct_skips_retry_loop()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    TimeTracker tracker(settings, fakeDb);
+    Timer tracker(settings, fakeDb);
     ShutdownCoordinator coordinator(tracker, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);

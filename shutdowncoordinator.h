@@ -1,18 +1,18 @@
 #ifndef SHUTDOWNCOORDINATOR_H
 #define SHUTDOWNCOORDINATOR_H
 
-class TimeTracker;
+class Timer;
 class SessionStore;
 
 class ShutdownCoordinator
 {
 public:
-    ShutdownCoordinator(TimeTracker& timetracker, SessionStore& db);
+    ShutdownCoordinator(Timer& timetracker, SessionStore& db);
 
     void run(bool forceDirectPath = false);
 
 private:
-    TimeTracker& timetracker_;
+    Timer& timetracker_;
     SessionStore& db_;
     bool shutdown_completed_;
 };

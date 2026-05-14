@@ -17,7 +17,7 @@
 #include "settings.h"
 #include "mainwin.h"
 #include "shutdowncoordinator.h"
-#include "timetracker.h"
+#include "timer.h"
 #include "sqlitesessionstore.h"
 #include "lockstatewatcher.h"
 #include "logger.h"
@@ -105,7 +105,7 @@ int main(int argc, char *argv[])
 	Logger::registerSettings(&settings);
 	LockStateWatcher lockstate_watcher(settings);
 	SqliteSessionStore database_manager(settings);
-	TimeTracker time_tracker(settings, database_manager);
+	Timer time_tracker(settings, database_manager);
 
 	// Check database schema before starting the UI
 	if (!database_manager.checkSchemaOnStartup()) {
@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
 	QObject::connect(&timer, SIGNAL(timeout()), &lockstate_watcher, SLOT(update()));
 	QObject::connect(&lockstate_watcher, SIGNAL(desktopLockEvent(LockEvent)),	&time_tracker, SLOT(useTimerViaLockEvent(LockEvent)));
 	QObject::connect(&lockstate_watcher, SIGNAL(desktopLockEvent(LockEvent)), &main_win, SLOT(reactOnLockState(LockEvent)));
-	QObject::connect(&time_tracker, &TimeTracker::userWarning, &main_win, &MainWin::showUserWarning);
+	QObject::connect(&time_tracker, &Timer::userWarning, &main_win, &MainWin::showUserWarning);
 
 	QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &main_win, &MainWin::onAboutToQuit);
 

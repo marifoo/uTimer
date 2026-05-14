@@ -40,7 +40,7 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
         // First session: Start timer and save checkpoint
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
-        TimeTracker tracker(settings, db);
+        Timer tracker(settings, db);
         
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
@@ -51,7 +51,7 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
         orphanSegmentId = tracker.session_.current_checkpoint_segment_id;
 
         // Simulate an unclean shutdown: keep checkpoint row, skip graceful stop.
-        tracker.mode_ = TimeTracker::Mode::None;
+        tracker.mode_ = Timer::Mode::None;
         tracker.session_.current_checkpoint_segment_id.clear();
 
         // Simulate crash (tracker destroyed without stopping)
@@ -61,7 +61,7 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
         // Second session: startup reconciliation finalizes orphan checkpoint
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
-        TimeTracker tracker(settings, db);
+        Timer tracker(settings, db);
         QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
 
         SqliteSessionStore db2(settings);
@@ -91,26 +91,26 @@ void IntegrationTest::test_integration_orphan_reconciliation_is_idempotent()
     {
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
-        TimeTracker tracker(settings, db);
+        Timer tracker(settings, db);
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal(QDateTime::currentDateTime());
         QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
         tracker.session_.current_checkpoint_segment_id.clear();
-        tracker.mode_ = TimeTracker::Mode::None;
+        tracker.mode_ = Timer::Mode::None;
     }
 
     {
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
-        TimeTracker tracker(settings, db);
+        Timer tracker(settings, db);
         QCOMPARE(tracker.getStartupRecoveredSeconds() >= 1, true);
     }
 
     {
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
-        TimeTracker tracker(settings, db);
+        Timer tracker(settings, db);
         QCOMPARE(tracker.getStartupRecoveredSeconds(), static_cast<qint64>(0));
         SqliteSessionStore db2(settings);
         auto loaded = db2.loadDurations();
@@ -170,7 +170,7 @@ void IntegrationTest::test_integration_orphan_reconciliation_drops_stale_and_too
     db.lazyClose();
 
     SqliteSessionStore db2(settings);
-    TimeTracker tracker(settings, db2);
+    Timer tracker(settings, db2);
     QCOMPARE(tracker.getStartupRecoveredSeconds(), static_cast<qint64>(0));
 
     auto loaded = db.loadDurations();
@@ -187,13 +187,13 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_present_is_s
     {
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
-        TimeTracker tracker(settings, db);
+        Timer tracker(settings, db);
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal(QDateTime::currentDateTime());
         QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
         tracker.session_.current_checkpoint_segment_id.clear();
-        tracker.mode_ = TimeTracker::Mode::None;
+        tracker.mode_ = Timer::Mode::None;
     }
 
     {
@@ -205,7 +205,7 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_present_is_s
     {
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
-        TimeTracker tracker(settings, db);
+        Timer tracker(settings, db);
         QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
         QVERIFY(!tracker.shouldShowStartupRecoveryNotification());
     }
@@ -221,19 +221,19 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_absent_shows
     {
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
-        TimeTracker tracker(settings, db);
+        Timer tracker(settings, db);
         tracker.useTimerViaButton(Button::Start);
         QTest::qWait(1200);
         tracker.saveCheckpointInternal(QDateTime::currentDateTime());
         QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
         tracker.session_.current_checkpoint_segment_id.clear();
-        tracker.mode_ = TimeTracker::Mode::None;
+        tracker.mode_ = Timer::Mode::None;
     }
 
     {
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
-        TimeTracker tracker(settings, db);
+        Timer tracker(settings, db);
         QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
         QVERIFY(tracker.shouldShowStartupRecoveryNotification());
     }
@@ -246,7 +246,7 @@ void IntegrationTest::test_integration_memory_db_consistency()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore db(settings);
-    TimeTracker tracker(settings, db);
+    Timer tracker(settings, db);
 
     // Start -> Activity for 50ms
     tracker.useTimerViaButton(Button::Start);
@@ -384,12 +384,12 @@ void IntegrationTest::test_F_shutdown_sequence_stop_flush_marker()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    TimeTracker tracker(settings, fakeDb);
+    Timer tracker(settings, fakeDb);
 
     // Start the timer so there is something to stop.
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
 
     // Clear the call log captured during startup / start so the assertion
     // below only sees the shutdown sequence.
@@ -398,7 +398,7 @@ void IntegrationTest::test_F_shutdown_sequence_stop_flush_marker()
     // Act — replicate MainWin::shutdown() logic (Phase 1 version):
     // Step 1: stop timer
     tracker.useTimerViaButton(Button::Stop);
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QCOMPARE(tracker.mode_, Timer::Mode::None);
 
     // Step 2: flush DB to disc
     fakeDb.flushToDisc();   // calls db_.flushToDisc() as MainWin does
@@ -436,11 +436,11 @@ void IntegrationTest::test_5_0a_normal_same_day_no_discard()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    TimeTracker tracker(settings, fakeDb);
+    Timer tracker(settings, fakeDb);
 
     // Start with a same-day segment_start_time (current real time is fine).
     tracker.useTimerViaButton(Button::Start);
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
 
     // Watchdog predicate must be false for a fresh same-day session.
     QVERIFY(!tracker.isOngoingSegmentCrossMidnight());
@@ -450,7 +450,7 @@ void IntegrationTest::test_5_0a_normal_same_day_no_discard()
     QVERIFY(!tracker.discardCrossMidnightOngoingAndStop(sameDay));
 
     // Engine must still be in Activity.
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
 }
 
 /**
@@ -463,12 +463,12 @@ void IntegrationTest::test_5_0a_cross_midnight_ongoing_discarded_completed_prese
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    TimeTracker tracker(settings, fakeDb);
+    Timer tracker(settings, fakeDb);
 
     // Arrange: start the timer, add a completed same-day segment manually,
     // then rewind segment_start_time to yesterday to simulate cross-midnight.
     tracker.useTimerViaButton(Button::Start);
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
 
     // Insert a completed segment via direct addDuration() so we control the
     // timestamps and guarantee a positive duration independent of wall-clock.
@@ -492,7 +492,7 @@ void IntegrationTest::test_5_0a_cross_midnight_ongoing_discarded_completed_prese
 
     // Assert: helper fired, engine stopped, completed segments were committed.
     QVERIFY(fired);
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QCOMPARE(tracker.mode_, Timer::Mode::None);
     QVERIFY(fakeDb.callLog.contains("commitSession"));
     // The completed segments must NOT be in session_.durations any more
     // (they were flushed and resetForNewSession was called).
@@ -510,17 +510,17 @@ void IntegrationTest::test_5_0a_discard_is_idempotent()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    TimeTracker tracker(settings, fakeDb);
+    Timer tracker(settings, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
 
     // Force segment to yesterday.
     tracker.session_.segment_start_time = QDateTime::currentDateTime().addDays(-1);
 
     const QDateTime today = QDateTime::currentDateTime();
     QVERIFY(tracker.discardCrossMidnightOngoingAndStop(today));
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QCOMPARE(tracker.mode_, Timer::Mode::None);
 
     // Second call must return false (engine already stopped).
     fakeDb.callLog.clear();
@@ -539,10 +539,10 @@ void IntegrationTest::test_5_0a_watchdog_helper_returns_false_when_not_crossed()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    TimeTracker tracker(settings, fakeDb);
+    Timer tracker(settings, fakeDb);
 
     // Stopped: must be false.
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QCOMPARE(tracker.mode_, Timer::Mode::None);
     QVERIFY(!tracker.isOngoingSegmentCrossMidnight());
 
     // Running with same-day start: must be false.
@@ -564,7 +564,7 @@ void IntegrationTest::test_integration_backpause_db_update()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore db(settings);
-    TimeTracker tracker(settings, db);
+    Timer tracker(settings, db);
 
     // Start activity
     tracker.useTimerViaButton(Button::Start);
@@ -612,11 +612,11 @@ void IntegrationTest::test_Y_engine_scheduled_stop_emits_MidnightScheduled()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    TimeTracker tracker(settings, fakeDb);
+    Timer tracker(settings, fakeDb);
 
     // Start the engine (Activity mode).
     tracker.useTimerViaButton(Button::Start);
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
 
     // Add a completed same-day segment so we can verify it is preserved.
     const QDateTime segStart = QDateTime::currentDateTime().addSecs(-30);
@@ -626,7 +626,7 @@ void IntegrationTest::test_Y_engine_scheduled_stop_emits_MidnightScheduled()
     fakeDb.callLog.clear();
 
     // Spy on the stopped() signal.
-    QSignalSpy stoppedSpy(&tracker, &TimeTracker::stopped);
+    QSignalSpy stoppedSpy(&tracker, &Timer::stopped);
     QVERIFY(stoppedSpy.isValid());
 
     // Arm the watcher with a time past 23:59:59.500 — timer fires in 1 ms.
@@ -638,11 +638,11 @@ void IntegrationTest::test_Y_engine_scheduled_stop_emits_MidnightScheduled()
 
     // Assert: exactly one stopped signal, with MidnightScheduled reason.
     QCOMPARE(stoppedSpy.count(), 1);
-    const auto reason = stoppedSpy.at(0).at(0).value<TimeTracker::StopReason>();
-    QCOMPARE(reason, TimeTracker::StopReason::MidnightScheduled);
+    const auto reason = stoppedSpy.at(0).at(0).value<Timer::StopReason>();
+    QCOMPARE(reason, Timer::StopReason::MidnightScheduled);
 
     // Engine must be stopped.
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QCOMPARE(tracker.mode_, Timer::Mode::None);
 
     // Completed segments must have been committed to the DB.
     QVERIFY(fakeDb.callLog.contains("commitSession"));
@@ -660,15 +660,15 @@ void IntegrationTest::test_Z_engine_watchdog_emits_MidnightWatchdog()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    TimeTracker tracker(settings, fakeDb);
+    Timer tracker(settings, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
 
     // Simulate sleep through midnight: backdate segment_start_time to yesterday.
     tracker.session_.segment_start_time = QDateTime::currentDateTime().addDays(-1);
 
-    QSignalSpy stoppedSpy(&tracker, &TimeTracker::stopped);
+    QSignalSpy stoppedSpy(&tracker, &Timer::stopped);
     QVERIFY(stoppedSpy.isValid());
 
     // Simulate the 100 ms heartbeat with today's "now".
@@ -676,9 +676,9 @@ void IntegrationTest::test_Z_engine_watchdog_emits_MidnightWatchdog()
 
     // Engine must have stopped and emitted MidnightWatchdog.
     QCOMPARE(stoppedSpy.count(), 1);
-    const auto reason = stoppedSpy.at(0).at(0).value<TimeTracker::StopReason>();
-    QCOMPARE(reason, TimeTracker::StopReason::MidnightWatchdog);
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    const auto reason = stoppedSpy.at(0).at(0).value<Timer::StopReason>();
+    QCOMPARE(reason, Timer::StopReason::MidnightWatchdog);
+    QCOMPARE(tracker.mode_, Timer::Mode::None);
 }
 
 /**
@@ -695,10 +695,10 @@ void IntegrationTest::test_AA_no_duplicate_stop_signal()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    TimeTracker tracker(settings, fakeDb);
+    Timer tracker(settings, fakeDb);
 
     tracker.useTimerViaButton(Button::Start);
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
 
     // Arm the scheduled stop (fires in 1 ms).
     const QDateTime pastStop(QDate::currentDate(), QTime(23, 59, 59, 600));
@@ -707,7 +707,7 @@ void IntegrationTest::test_AA_no_duplicate_stop_signal()
     // Backdate segment so the watchdog also wants to fire.
     tracker.session_.segment_start_time = QDateTime::currentDateTime().addDays(-1);
 
-    QSignalSpy stoppedSpy(&tracker, &TimeTracker::stopped);
+    QSignalSpy stoppedSpy(&tracker, &Timer::stopped);
     QVERIFY(stoppedSpy.isValid());
 
     // Watchdog fires first (synchronous call).
@@ -719,7 +719,7 @@ void IntegrationTest::test_AA_no_duplicate_stop_signal()
 
     // Must still be exactly one emission.
     QCOMPARE(stoppedSpy.count(), 1);
-    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QCOMPARE(tracker.mode_, Timer::Mode::None);
 }
 
 /**

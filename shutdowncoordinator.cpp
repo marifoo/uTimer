@@ -1,5 +1,5 @@
 #include "shutdowncoordinator.h"
-#include "timetracker.h"
+#include "timer.h"
 #include "sessionstore.h"
 #include "types.h"
 #include "logger.h"
@@ -7,7 +7,7 @@
 #include <QTime>
 #include <QCoreApplication>
 
-ShutdownCoordinator::ShutdownCoordinator(TimeTracker& timetracker, SessionStore& db)
+ShutdownCoordinator::ShutdownCoordinator(Timer& timetracker, SessionStore& db)
     : timetracker_(timetracker), db_(db), shutdown_completed_(false)
 {
 }

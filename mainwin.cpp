@@ -6,7 +6,7 @@
  * - Global event handling (Shutdown, Sleep/Wake)
  * - User warning system (Health checks for too much work / no pause)
  *
- * Day-boundary policy (Phase 5): owned by TimeTracker::DayBoundaryWatcher.
+ * Day-boundary policy (Phase 5): owned by Timer::DayBoundaryWatcher.
  * MainWin only syncs the GUI when it observes the engine has stopped.
  */
 
@@ -27,7 +27,7 @@
 #endif
 
 
-MainWin::MainWin(Settings& settings, TimeTracker& timetracker, SessionStore& db,
+MainWin::MainWin(Settings& settings, Timer& timetracker, SessionStore& db,
 	             ShutdownCoordinator& shutdown_coordinator, QWidget *parent)
 	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), db_(db),
 	  shutdown_coordinator_(shutdown_coordinator),
@@ -43,23 +43,23 @@ MainWin::MainWin(Settings& settings, TimeTracker& timetracker, SessionStore& db,
 	connect(health_monitor_, &HealthMonitor::warningTriggered, this, &MainWin::showMsgBox);
 
 	// Engine-driven stop: sync GUI immediately when the engine stops.
-	connect(&timetracker_, &TimeTracker::stopped,
-	        this, [this](TimeTracker::StopReason) {
+	connect(&timetracker_, &Timer::stopped,
+	        this, [this](Timer::StopReason) {
 		content_widget_->setGUItoStop();
 	});
 
 	// Engine-driven autopause/autoresume: sync GUI when lock events cause transitions.
-	connect(&timetracker_, &TimeTracker::modeChanged,
-	        this, [this](TimeTracker::PauseCause cause) {
-		if (cause == TimeTracker::PauseCause::LockAutopause) {
+	connect(&timetracker_, &Timer::modeChanged,
+	        this, [this](Timer::PauseCause cause) {
+		if (cause == Timer::PauseCause::LockAutopause) {
 			content_widget_->setGUItoPause();
-		} else if (cause == TimeTracker::PauseCause::LockResume) {
+		} else if (cause == Timer::PauseCause::LockResume) {
 			content_widget_->setGUItoActivity();
 		}
 	});
 }
 
-void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
+void MainWin::setupCentralWidget(Settings& settings, Timer& timetracker)
 {
 	content_widget_ = new ContentWidget(settings, timetracker, this);
 
@@ -123,7 +123,7 @@ void MainWin::showHistoryLoadReconciliation(const QString& text)
 
 void MainWin::reactOnLockState([[maybe_unused]] LockEvent event)
 {
-    // GUI transitions for lock/unlock are now driven by TimeTracker::modeChanged()
+    // GUI transitions for lock/unlock are now driven by Timer::modeChanged()
     // signal (connected in the constructor). This slot is kept for the signal/slot
     // wiring in main.cpp but has no work to do.
 }

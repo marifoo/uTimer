@@ -7,7 +7,7 @@ HEADERS = \
    $$PWD/sessionstore.h \
    $$PWD/mainwin.h \
    $$PWD/shutdowncoordinator.h \
-   $$PWD/timetracker.h \
+   $$PWD/timer.h \
    $$PWD/lockstatewatcher.h \
    $$PWD/settings.h \
    $$PWD/types.h \
@@ -23,7 +23,7 @@ SOURCES = \
    $$PWD/main.cpp \
    $$PWD/mainwin.cpp \
    $$PWD/shutdowncoordinator.cpp \
-   $$PWD/timetracker.cpp \
+   $$PWD/timer.cpp \
    $$PWD/lockstatewatcher.cpp \
    $$PWD/historydialog.cpp \
    $$PWD/settings.cpp \

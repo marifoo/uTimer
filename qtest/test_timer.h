@@ -1,10 +1,10 @@
-#ifndef TEST_TIMETRACKER_H
-#define TEST_TIMETRACKER_H
+#ifndef TEST_TIMER_H
+#define TEST_TIMER_H
 
 #include <QObject>
 #include "testcommon.h"
 
-class TimeTrackerTest : public QObject
+class TimerTest : public QObject
 {
     Q_OBJECT
 
@@ -88,4 +88,4 @@ private slots:
     void test_X_stop_persists_via_commitSession_only();
 };
 
-#endif // TEST_TIMETRACKER_H
+#endif // TEST_TIMER_H

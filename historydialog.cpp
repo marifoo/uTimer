@@ -44,7 +44,7 @@ bool isSameSegmentId(const TimeDuration& a, const TimeDuration& b)
 }
 }
 
-HistoryDialog::HistoryDialog(TimeTracker& timetracker, const Settings& settings, QWidget* parent)
+HistoryDialog::HistoryDialog(Timer& timetracker, const Settings& settings, QWidget* parent)
     : QDialog(parent), timetracker_(timetracker), settings_(settings), pageIndex_(0)
 {
     // Pause checkpoints while dialog is open to prevent race conditions

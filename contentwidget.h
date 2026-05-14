@@ -9,7 +9,7 @@
 #include <QPushButton>
 #include "settings.h"
 #include "types.h"
-#include "timetracker.h"
+#include "timer.h"
 
 
 class ContentWidget : public QWidget
@@ -18,7 +18,7 @@ class ContentWidget : public QWidget
 
 private:
 	Settings &settings_;
-	TimeTracker &timetracker_;
+	Timer &timetracker_;
 
 	QVBoxLayout *rows_;
 	QHBoxLayout *activity_row_;
@@ -54,7 +54,7 @@ private:
 	void manageTooltipsForActivity();
         
 public:
-	explicit ContentWidget(Settings &settings, TimeTracker& timetracker, QWidget *parent = nullptr);
+	explicit ContentWidget(Settings &settings, Timer& timetracker, QWidget *parent = nullptr);
 	void updateTimes();
 	QString getTooltip();
 	bool isGUIinActivity();

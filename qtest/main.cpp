@@ -7,7 +7,7 @@ class SettingsTest;
 class HelpersTest;
 class LockStateWatcherTest;
 class CleanDurationsTest;
-class TimeTrackerTest;
+class TimerTest;
 class DatabaseTest;
 class IntegrationTest;
 class HistoryDialogTest;
@@ -21,7 +21,7 @@ class TimelineTest;
 #include "test_helpers.h"
 #include "test_lockstatewatcher.h"
 #include "test_cleanduration.h"
-#include "test_timetracker.h"
+#include "test_timer.h"
 #include "test_database.h"
 #include "test_integration.h"
 #include "test_historydialog.h"
@@ -54,7 +54,7 @@ int main(int argc, char *argv[])
     runTest(new HelpersTest, "HelpersTest");
     runTest(new LockStateWatcherTest, "LockStateWatcherTest");
     runTest(new CleanDurationsTest, "CleanDurationsTest");
-    runTest(new TimeTrackerTest, "TimeTrackerTest");
+    runTest(new TimerTest, "TimerTest");
     runTest(new DatabaseTest, "DatabaseTest");
     runTest(new IntegrationTest, "IntegrationTest");
     runTest(new HistoryDialogTest, "HistoryDialogTest");

@@ -9,7 +9,7 @@
 #include <deque>
 #include <set>
 #include "types.h"
-#include "timetracker.h"
+#include "timer.h"
 #include "timeline.h"
 
 class QLabel;
@@ -31,7 +31,7 @@ private:
         bool isCurrent;
     };
 
-    TimeTracker& timetracker_;
+    Timer& timetracker_;
     const Settings& settings_;
     std::vector<Page> pages_;
     std::vector<Timeline> pendingTimelines_;
@@ -61,7 +61,7 @@ private slots:
     void onSplitRow();
 
 public:
-    explicit HistoryDialog(TimeTracker& timetracker, const Settings& settings, QWidget* parent = nullptr);
+    explicit HistoryDialog(Timer& timetracker, const Settings& settings, QWidget* parent = nullptr);
     ~HistoryDialog();
     QString getLoadReconciliationMessage() const;
 
