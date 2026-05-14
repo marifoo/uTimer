@@ -720,10 +720,10 @@ Timeline Timer::snapshot() const
     return Timeline(session_.durations, getOngoingDuration());
 }
 
-const std::deque<TimeDuration>& Timer::getCurrentDurations() const
+std::deque<TimeDuration> Timer::getCurrentDurations() const
 {
     QMutexLocker locker(&mutex_);
-    return session_.durations;
+    return session_.durations;  // copy under lock
 }
 
 void Timer::setDurationType(size_t idx, DurationType type)
