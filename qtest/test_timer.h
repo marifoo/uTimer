@@ -24,14 +24,14 @@ private slots:
     void cleanupTestCase();
     
     // Existing Timer tests
-    void test_timetracker_start_pause_resume_stop_and_checkpoints();
-    void test_timetracker_backpause_resets_checkpoint_and_splits();
-    void test_timetracker_lock_events_checkpoint_and_resume();
-    void test_timetracker_ongoing_duration();
-    void test_timetracker_set_duration_type();
-    void test_timetracker_checkpoints_paused();
-    void test_timetracker_retry_append_failure_then_success_preserves_segments();
-    void test_timetracker_retry_failure_keeps_unsaved_state_and_durations();
+    void test_timer_start_pause_resume_stop_and_checkpoints();
+    void test_timer_backpause_resets_checkpoint_and_splits();
+    void test_timer_lock_events_checkpoint_and_resume();
+    void test_timer_ongoing_duration();
+    void test_timer_set_duration_type();
+    void test_timer_checkpoints_paused();
+    void test_timer_retry_append_failure_then_success_preserves_segments();
+    void test_timer_retry_failure_keeps_unsaved_state_and_durations();
 
     // SessionState transition tests
     void test_session_state_begin_new_segment();

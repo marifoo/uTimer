@@ -26,7 +26,7 @@ void TimerTest::cleanupTestCase()
     }
 }
 
-void TimerTest::test_timetracker_start_pause_resume_stop_and_checkpoints()
+void TimerTest::test_timer_start_pause_resume_stop_and_checkpoints()
 {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
@@ -66,7 +66,7 @@ void TimerTest::test_timetracker_start_pause_resume_stop_and_checkpoints()
     QVERIFY(tracker.session_.current_checkpoint_segment_id.isEmpty());
 }
 
-void TimerTest::test_timetracker_backpause_resets_checkpoint_and_splits()
+void TimerTest::test_timer_backpause_resets_checkpoint_and_splits()
 {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
@@ -97,7 +97,7 @@ void TimerTest::test_timetracker_backpause_resets_checkpoint_and_splits()
 }
 
 
-void TimerTest::test_timetracker_lock_events_checkpoint_and_resume()
+void TimerTest::test_timer_lock_events_checkpoint_and_resume()
 {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
@@ -115,7 +115,7 @@ void TimerTest::test_timetracker_lock_events_checkpoint_and_resume()
     QVERIFY(!tracker.is_locked_);
 }
 
-void TimerTest::test_timetracker_ongoing_duration()
+void TimerTest::test_timer_ongoing_duration()
 {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
@@ -145,7 +145,7 @@ void TimerTest::test_timetracker_ongoing_duration()
     QCOMPARE(tracker.getOngoingDuration(), std::nullopt);
 }
 
-void TimerTest::test_timetracker_set_duration_type()
+void TimerTest::test_timer_set_duration_type()
 {
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
@@ -168,7 +168,7 @@ void TimerTest::test_timetracker_set_duration_type()
     QCOMPARE(tracker.session_.durations[0].type, DurationType::Pause); // Unchanged
 }
 
-void TimerTest::test_timetracker_checkpoints_paused()
+void TimerTest::test_timer_checkpoints_paused()
 {
     resetDatabaseFile();
     QTemporaryDir tempDir;
@@ -211,7 +211,7 @@ void TimerTest::test_timetracker_checkpoints_paused()
     db.lazyClose();
 }
 
-void TimerTest::test_timetracker_retry_append_failure_then_success_preserves_segments()
+void TimerTest::test_timer_retry_append_failure_then_success_preserves_segments()
 {
     resetDatabaseFile();
     QTemporaryDir tempDir;
@@ -259,7 +259,7 @@ void TimerTest::test_timetracker_retry_append_failure_then_success_preserves_seg
     }
 }
 
-void TimerTest::test_timetracker_retry_failure_keeps_unsaved_state_and_durations()
+void TimerTest::test_timer_retry_failure_keeps_unsaved_state_and_durations()
 {
     resetDatabaseFile();
     QTemporaryDir tempDir;
