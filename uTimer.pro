@@ -3,6 +3,7 @@ TARGET = uTimer
 HEADERS = \
    $$PWD/contentwidget.h \
    $$PWD/databasemanager.h \
+   $$PWD/healthmonitor.h \
    $$PWD/idatabasemanager.h \
    $$PWD/mainwin.h \
    $$PWD/shutdowncoordinator.h \
@@ -17,6 +18,7 @@ HEADERS = \
 SOURCES = \
    $$PWD/contentwidget.cpp \
    $$PWD/databasemanager.cpp \
+   $$PWD/healthmonitor.cpp \
    $$PWD/main.cpp \
    $$PWD/mainwin.cpp \
    $$PWD/shutdowncoordinator.cpp \
