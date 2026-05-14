@@ -31,7 +31,7 @@ void DatabaseTest::test_database_backups_and_retention_and_disable()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 2));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // history_days_to_keep>0 => lazyOpen creates DB
     QVERIFY(manager.saveDurations({}, TransactionMode::Append)); // no-op but should succeed
@@ -49,7 +49,7 @@ void DatabaseTest::test_database_backups_and_retention_and_disable()
 
     // history_days_to_keep=0 disables db
     Settings disabled(createSettingsFile(tempDir.path(), 0));
-    DatabaseManager managerDisabled(disabled);
+    SqliteSessionStore managerDisabled(disabled);
     QVERIFY(managerDisabled.saveDurations(durations, TransactionMode::Append));
     auto loadedDisabled = managerDisabled.loadDurations();
     QCOMPARE(static_cast<int>(loadedDisabled.size()), 0);
@@ -182,7 +182,7 @@ void DatabaseTest::test_schemaValidation_missingStartColumns()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QVERIFY(!manager.checkSchemaOnStartup());
 }
@@ -196,7 +196,7 @@ void DatabaseTest::test_exactMatching_upsertReplacesById()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 30000));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime start = QDateTime::fromMSecsSinceEpoch(1'000'000, Qt::UTC);
     QDateTime end1 = start.addSecs(10);
@@ -241,7 +241,7 @@ void DatabaseTest::test_checkpointPreservesStartTimeOnUpdateBySegmentId()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 30000));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime start = QDateTime::fromMSecsSinceEpoch(2'000'000, Qt::UTC);
     QDateTime end1 = start.addSecs(5);
@@ -281,7 +281,7 @@ void DatabaseTest::test_clockDriftResilience_durationStoredFromElapsed()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 30000));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime start = QDateTime::fromMSecsSinceEpoch(3'000'000, Qt::UTC);
     QDateTime end = start.addSecs(3600);
@@ -315,7 +315,7 @@ void DatabaseTest::test_loadDurations_skipsNegativeDurationRows()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 30000));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime start = QDateTime::fromMSecsSinceEpoch(4'000'000, Qt::UTC);
     QDateTime end = start.addSecs(10);
@@ -355,7 +355,7 @@ void DatabaseTest::test_databasemanager_write_failure()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Create DB first
     QVERIFY(manager.saveDurations({}, TransactionMode::Append));
@@ -385,7 +385,7 @@ void DatabaseTest::test_database_transaction_rollback_on_insert_failure()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Create valid database first
     QDateTime now = QDateTime::currentDateTime();
@@ -421,7 +421,7 @@ void DatabaseTest::test_database_transaction_rollback_on_replace_failure()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Create initial data
     QDateTime now = QDateTime::currentDateTime();
@@ -457,7 +457,7 @@ void DatabaseTest::test_database_checkpoint_single_row_per_segment()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime start = QDateTime::currentDateTime();
     QDateTime end = start.addSecs(10);
@@ -489,7 +489,7 @@ void DatabaseTest::test_database_checkpoint_missing_segment_reinserts_same_segme
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime start = QDateTime::currentDateTime();
     QDateTime end = start.addSecs(10);
@@ -529,7 +529,7 @@ void DatabaseTest::test_database_checkpoint_preserves_start_time()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime originalStart = QDateTime::currentDateTime();
     QDateTime firstEnd = originalStart.addSecs(10);
@@ -564,7 +564,7 @@ void DatabaseTest::test_database_update_by_id_insert_mode()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime now = QDateTime::currentDateTime();
     std::deque<TimeDuration> durations;
@@ -584,7 +584,7 @@ void DatabaseTest::test_database_update_by_id_updates_existing_row_on_start_drif
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime now = QDateTime::currentDateTime();
     QDateTime start1 = now.addSecs(-100);
@@ -619,7 +619,7 @@ void DatabaseTest::test_database_update_by_id_different_segments_same_start_both
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime now = QDateTime::currentDateTime();
     QDateTime start = now.addSecs(-100);
@@ -645,7 +645,7 @@ void DatabaseTest::test_database_update_by_id_empty_deque()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     std::deque<TimeDuration> empty;
     QVERIFY(manager.updateDurationsById(empty)); // Should succeed as no-op
@@ -657,7 +657,7 @@ void DatabaseTest::test_database_load_negative_duration()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Manually insert negative duration
     QVERIFY(manager.lazyOpen());
@@ -686,7 +686,7 @@ void DatabaseTest::test_database_load_start_after_end()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Manually insert start > end
     QVERIFY(manager.lazyOpen());
@@ -716,7 +716,7 @@ void DatabaseTest::test_database_load_invalid_enum_type()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Manually insert invalid type (valid are 0=Activity, 1=Pause)
     QVERIFY(manager.lazyOpen());
@@ -745,7 +745,7 @@ void DatabaseTest::test_database_load_duration_mismatch_tolerance()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime start = QDateTime::currentDateTimeUtc();
     QDateTime end = start.addMSecs(1000); // Actual duration: 1000ms
@@ -775,7 +775,7 @@ void DatabaseTest::test_database_timezone_roundtrip()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Create duration in local time
     QDateTime localStart = QDateTime::currentDateTime();
@@ -800,7 +800,7 @@ void DatabaseTest::test_database_load_invalid_type_increments_skipped_and_omits_
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QVERIFY(manager.lazyOpen());
     QSqlQuery query(manager.db);
@@ -827,7 +827,7 @@ void DatabaseTest::test_database_load_200ms_mismatch_increments_repaired_and_use
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QVERIFY(manager.lazyOpen());
     QSqlQuery query(manager.db);
@@ -855,7 +855,7 @@ void DatabaseTest::test_database_millisecond_precision()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Create timestamps with millisecond precision
     QDateTime start = QDateTime::currentDateTime();
@@ -899,11 +899,11 @@ void DatabaseTest::test_database_schema_validation_missing_start_date()
     db.close();
     QSqlDatabase::removeDatabase("schema_test");
     
-    // Now try to use DatabaseManager
+    // Now try to use SqliteSessionStore
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
     
     // checkSchemaOnStartup should detect outdated schema
     QVERIFY(!manager.checkSchemaOnStartup());
@@ -917,7 +917,7 @@ void DatabaseTest::test_database_schema_validation_fresh_database()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
     
     // Should return true (will create fresh schema)
     QVERIFY(manager.checkSchemaOnStartup());
@@ -964,7 +964,7 @@ void DatabaseTest::test_database_schema_migration_adds_is_finalized_and_segment_
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QVERIFY(manager.loadDurations().size() == static_cast<size_t>(1));
 
@@ -1000,7 +1000,7 @@ void DatabaseTest::test_database_backup_file_creation()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Create initial data
     QDateTime now = QDateTime::currentDateTime();
@@ -1029,7 +1029,7 @@ void DatabaseTest::test_database_backup_preserves_data()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Create data
     QDateTime now = QDateTime::currentDateTime();
@@ -1072,7 +1072,7 @@ void DatabaseTest::test_hasEntriesForDate_returns_unknown_when_history_disabled(
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 0));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Act
     EntriesForDateResult result = manager.hasEntriesForDate(QDate::currentDate());
@@ -1090,7 +1090,7 @@ void DatabaseTest::test_hasEntriesForDate_returns_no_on_empty_database()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Act
     EntriesForDateResult result = manager.hasEntriesForDate(QDate::currentDate());
@@ -1106,7 +1106,7 @@ void DatabaseTest::test_hasEntriesForDate_returns_yes_when_entries_exist()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime now = QDateTime::currentDateTimeUtc();
     std::deque<TimeDuration> durations;
@@ -1127,9 +1127,9 @@ void DatabaseTest::test_hasEntriesForDate_returns_yes_when_entries_exist()
 void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
 {
     // The retention DELETE in lazyOpen() should execute at most once per
-    // DatabaseManager lifetime.  We verify this by seeding the DB with an
+    // SqliteSessionStore lifetime.  We verify this by seeding the DB with an
     // old entry via direct SQL (bypassing lazyOpen's cleanup), then using
-    // a fresh DatabaseManager whose first lazyOpen runs the cleanup.
+    // a fresh SqliteSessionStore whose first lazyOpen runs the cleanup.
     // After that, ten more open/close cycles must not re-run the DELETE.
 
     // Arrange: create the database and seed entries via a raw connection
@@ -1141,7 +1141,7 @@ void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
 
     // Use a first manager just to create the schema.
     {
-        DatabaseManager bootstrap(settings);
+        SqliteSessionStore bootstrap(settings);
         std::deque<TimeDuration> empty;
         QVERIFY(bootstrap.saveDurations(empty, TransactionMode::Append));
     }
@@ -1186,7 +1186,7 @@ void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
     QSqlDatabase::removeDatabase(connName);
 
     // Act: create a fresh manager.  Its first lazyOpen should run cleanup.
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
     QVERIFY(!manager.retention_cleanup_done_); // flag starts false
 
     QVERIFY(manager.lazyOpen());
@@ -1221,7 +1221,7 @@ void DatabaseTest::test_retention_cleanup_retries_after_failure()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 2));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     // Create the database and seed an old entry.
     QDateTime now = QDateTime::currentDateTimeUtc();
@@ -1283,7 +1283,7 @@ void DatabaseTest::test_connection_names_unique_across_100_instances()
     // same address, causing name collisions. With an atomic counter, every name
     // is guaranteed unique.
     for (int i = 0; i < 100; ++i) {
-        auto* mgr = new DatabaseManager(settings);
+        auto* mgr = new SqliteSessionStore(settings);
         QString name = mgr->db.connectionName();
         connectionNames.insert(name);
         delete mgr;
@@ -1308,7 +1308,7 @@ void DatabaseTest::test_T_commitSession_upserts_by_segment_id()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime now = QDateTime::currentDateTime();
     QString segId = TimeDuration::createSegmentId();
@@ -1341,7 +1341,7 @@ void DatabaseTest::test_U_commitSession_orphan_cleanup_is_internal()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime now = QDateTime::currentDateTime();
     QString segA = TimeDuration::createSegmentId();
@@ -1384,7 +1384,7 @@ void DatabaseTest::test_V_replaceAll_wipes_and_rewrites()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDateTime now = QDateTime::currentDateTime();
 
@@ -1418,7 +1418,7 @@ void DatabaseTest::test_W_backup_created_before_replaceAll_not_commitSession()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager manager(settings);
+    SqliteSessionStore manager(settings);
 
     QDir appDir(QCoreApplication::applicationDirPath());
     QStringList before = appDir.entryList(QStringList() << "*.backup", QDir::Files);

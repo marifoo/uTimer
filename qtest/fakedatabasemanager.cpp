@@ -16,7 +16,7 @@ bool FakeDatabaseManager::commitSession(const Timeline& session)
 {
     callLog.append("commitSession");
     if (commitSessionResult) {
-        // Mirror DatabaseManager: normalize internally, compute orphans, then upsert.
+        // Mirror SqliteSessionStore: normalize internally, compute orphans, then upsert.
         std::vector<QString> beforeIds;
         for (const auto& d : session.completed())
             beforeIds.push_back(d.segment_id);

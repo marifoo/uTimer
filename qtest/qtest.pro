@@ -34,7 +34,7 @@ SOURCES += \
     $$PWD/../shutdowncoordinator.cpp \
     $$PWD/../timetracker.cpp \
     $$PWD/../lockstatewatcher.cpp \
-    $$PWD/../databasemanager.cpp \
+    $$PWD/../sqlitesessionstore.cpp \
     $$PWD/../helpers.cpp \
     $$PWD/../settings.cpp \
     $$PWD/../logger.cpp \
@@ -60,7 +60,7 @@ HEADERS += \
     $$PWD/../shutdowncoordinator.h \
     $$PWD/../timetracker.h \
     $$PWD/../lockstatewatcher.h \
-    $$PWD/../databasemanager.h \
+    $$PWD/../sqlitesessionstore.h \
     $$PWD/../sessionstore.h \
     $$PWD/../helpers.h \
     $$PWD/../settings.h \

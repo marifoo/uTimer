@@ -1,5 +1,5 @@
-#ifndef DATABASEMANAGER_H
-#define DATABASEMANAGER_H
+#ifndef SQLITESESSIONSTORE_H
+#define SQLITESESSIONSTORE_H
 
 #include <QObject>
 #include <QSqlDatabase>
@@ -17,12 +17,12 @@
 // so it can be removed from types.h.
 enum class TransactionMode { Append, Replace };
 
-class DatabaseManager : public QObject, public SessionStore
+class SqliteSessionStore : public QObject, public SessionStore
 {
     Q_OBJECT
 public:
-    explicit DatabaseManager(const Settings& settings, QObject *parent = nullptr);
-    ~DatabaseManager();
+    explicit SqliteSessionStore(const Settings& settings, QObject *parent = nullptr);
+    ~SqliteSessionStore();
 
     bool commitSession(const Timeline& session) override;
     bool replaceAll(const Timeline& history, const Timeline& session) override;
@@ -78,4 +78,4 @@ private:
     bool retention_cleanup_done_ = false;
 };
 
-#endif // DATABASEMANAGER_H
+#endif // SQLITESESSIONSTORE_H

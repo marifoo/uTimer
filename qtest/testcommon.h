@@ -20,7 +20,7 @@
 #define protected public
 #include "timetracker.h"
 #include "lockstatewatcher.h"
-#include "databasemanager.h"
+#include "sqlitesessionstore.h"
 #undef private
 #undef protected
 

@@ -27,7 +27,7 @@
  * - Old entries automatically purged once per session on the first successful lazyOpen()
  */
 
-#include "databasemanager.h"
+#include "sqlitesessionstore.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QMutexLocker>
@@ -51,7 +51,7 @@ const char* kLastCleanShutdownKey = "last_clean_shutdown";
 std::atomic<uint64_t> s_connection_seq{0};
 }
 
-DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
+SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent)
     : QObject(parent), history_days_to_keep_(std::max(settings.getHistoryDays(), 0))
 {
     // Mint a unique connection name using a monotonic counter.
@@ -68,7 +68,7 @@ DatabaseManager::DatabaseManager(const Settings& settings, QObject *parent)
     }
 }
 
-DatabaseManager::~DatabaseManager()
+SqliteSessionStore::~SqliteSessionStore()
 {
     lazyClose();
     
@@ -102,7 +102,7 @@ DatabaseManager::~DatabaseManager()
  *
  * Returns true if the database is ready for use.
  */
-bool DatabaseManager::lazyOpen()
+bool SqliteSessionStore::lazyOpen()
 {
     // Don't open database if history storage is disabled
     if (history_days_to_keep_ == 0) {
@@ -235,7 +235,7 @@ bool DatabaseManager::lazyOpen()
     return true;
 }
 
-void DatabaseManager::lazyClose()
+void SqliteSessionStore::lazyClose()
 {
     if (db.isOpen()) {
         db.close();
@@ -260,7 +260,7 @@ void DatabaseManager::lazyClose()
  * The database must be open when this is called.  Violations are logged
  * via qWarning (not fatal) so they surface in test output.
  */
-void DatabaseManager::checkSegmentIdUniqueness()
+void SqliteSessionStore::checkSegmentIdUniqueness()
 {
     if (!db.isOpen()) {
         return;
@@ -299,7 +299,7 @@ void DatabaseManager::checkSegmentIdUniqueness()
  * Returns false if:
  * - Database exists but schema is outdated
  */
-bool DatabaseManager::checkSchemaOnStartup()
+bool SqliteSessionStore::checkSchemaOnStartup()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -334,7 +334,7 @@ bool DatabaseManager::checkSchemaOnStartup()
  *
  * Returns true if schema is valid, false if outdated.
  */
-bool DatabaseManager::validateSchema()
+bool SqliteSessionStore::validateSchema()
 {
     QSqlQuery query(db);
     if (!query.exec("PRAGMA table_info(durations)")) {
@@ -368,7 +368,7 @@ bool DatabaseManager::validateSchema()
     return true;
 }
 
-bool DatabaseManager::ensureIsFinalizedColumn()
+bool SqliteSessionStore::ensureIsFinalizedColumn()
 {
     QSqlQuery tableInfo(db);
     if (!tableInfo.exec("PRAGMA table_info(durations)")) {
@@ -405,7 +405,7 @@ bool DatabaseManager::ensureIsFinalizedColumn()
     return true;
 }
 
-bool DatabaseManager::ensureSegmentIdColumn()
+bool SqliteSessionStore::ensureSegmentIdColumn()
 {
     QSqlQuery tableInfo(db);
     if (!tableInfo.exec("PRAGMA table_info(durations)")) {
@@ -500,7 +500,7 @@ bool DatabaseManager::ensureSegmentIdColumn()
     return true;
 }
 
-bool DatabaseManager::ensureSettingsTable()
+bool SqliteSessionStore::ensureSettingsTable()
 {
     QSqlQuery query(db);
     if (!query.exec(
@@ -534,7 +534,7 @@ bool DatabaseManager::ensureSettingsTable()
  *   any other DatabaseManager operation from seeing the closed connection.
  *   QRecursiveMutex allows re-entrant calls within the same thread.
  */
-bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
+bool SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
     // Don't create backup if database doesn't exist
     if (!QFile::exists(db.databaseName())) {
@@ -603,7 +603,7 @@ bool DatabaseManager::createBackup(const std::deque<TimeDuration>& durations, Tr
  * computes orphaned segment IDs, and delegates to updateDurationsById()
  * with the clean deque and orphan list. Callers never see removedSegmentIds.
  */
-bool DatabaseManager::commitSession(const Timeline& session)
+bool SqliteSessionStore::commitSession(const Timeline& session)
 {
     // Collect before-normalization segment IDs
     std::vector<QString> beforeIds;
@@ -638,7 +638,7 @@ bool DatabaseManager::commitSession(const Timeline& session)
  * - Creates a file-level backup before starting.
  * - Rolls back the transaction on any error.
  */
-bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
+bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
                                      const std::vector<QString>& removedSegmentIds)
 {
     QMutexLocker locker(&db_mutex_);
@@ -736,7 +736,7 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
     return commitSuccessful;
 }
 
-bool DatabaseManager::replaceAll(const Timeline& history, const Timeline& session)
+bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& session)
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -853,7 +853,7 @@ bool DatabaseManager::replaceAll(const Timeline& history, const Timeline& sessio
  *   - Corrupted/Invalid rows are skipped and logged.
  * - Timestamps are stored in UTC and converted to local time on load.
  */
-LoadResult DatabaseManager::loadDurations()
+LoadResult SqliteSessionStore::loadDurations()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -965,7 +965,7 @@ LoadResult DatabaseManager::loadDurations()
  *            Callers should treat Unknown conservatively — e.g. do NOT assume
  *            "no entries exist" when the answer is actually unknowable.
  */
-EntriesForDateResult DatabaseManager::hasEntriesForDate(const QDate& date)
+EntriesForDateResult SqliteSessionStore::hasEntriesForDate(const QDate& date)
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1002,7 +1002,7 @@ EntriesForDateResult DatabaseManager::hasEntriesForDate(const QDate& date)
  * The caller (TimeTracker) rotates current_checkpoint_segment_id_ on mode changes,
  * causing the next checkpoint to create a new row for the new segment.
  */
-bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId)
+bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId)
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1098,7 +1098,7 @@ bool DatabaseManager::saveCheckpoint(DurationType type, qint64 duration, const Q
  * - When the timer stops or pauses, we update existing segment rows by segment_id.
  * - If a segment row is missing, it is inserted with the same segment_id.
  */
-bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durations,
+bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& durations,
                                            const std::vector<QString>& removedSegmentIds)
 {
     QMutexLocker locker(&db_mutex_);
@@ -1227,7 +1227,7 @@ bool DatabaseManager::updateDurationsById(const std::deque<TimeDuration>& durati
  * See the comment in lazyOpen() for the rationale. In rollback journal mode,
  * promoting synchronous to FULL is sufficient to guarantee durability.
  */
-void DatabaseManager::flushToDisc()
+void SqliteSessionStore::flushToDisc()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1258,7 +1258,7 @@ void DatabaseManager::flushToDisc()
     Logger::Log("[DB] Flush to disc completed");
 }
 
-std::deque<OrphanCheckpoint> DatabaseManager::loadUnfinalizedCheckpoints()
+std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1305,7 +1305,7 @@ std::deque<OrphanCheckpoint> DatabaseManager::loadUnfinalizedCheckpoints()
     return orphans;
 }
 
-bool DatabaseManager::reconcileUnfinalizedCheckpoints(const std::vector<long long>& finalizeIds, const std::vector<long long>& dropIds)
+bool SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::vector<long long>& finalizeIds, const std::vector<long long>& dropIds)
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1353,7 +1353,7 @@ bool DatabaseManager::reconcileUnfinalizedCheckpoints(const std::vector<long lon
     return committed;
 }
 
-bool DatabaseManager::setLastCleanShutdownMarker(const QDateTime& timestamp)
+bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1391,7 +1391,7 @@ bool DatabaseManager::setLastCleanShutdownMarker(const QDateTime& timestamp)
     return committed;
 }
 
-std::optional<QDateTime> DatabaseManager::consumeLastCleanShutdownMarker()
+std::optional<QDateTime> SqliteSessionStore::consumeLastCleanShutdownMarker()
 {
     QMutexLocker locker(&db_mutex_);
 

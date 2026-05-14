@@ -2,7 +2,7 @@ TARGET = uTimer
 
 HEADERS = \
    $$PWD/contentwidget.h \
-   $$PWD/databasemanager.h \
+   $$PWD/sqlitesessionstore.h \
    $$PWD/healthmonitor.h \
    $$PWD/sessionstore.h \
    $$PWD/mainwin.h \
@@ -18,7 +18,7 @@ HEADERS = \
 
 SOURCES = \
    $$PWD/contentwidget.cpp \
-   $$PWD/databasemanager.cpp \
+   $$PWD/sqlitesessionstore.cpp \
    $$PWD/healthmonitor.cpp \
    $$PWD/main.cpp \
    $$PWD/mainwin.cpp \

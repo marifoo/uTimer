@@ -33,7 +33,7 @@ void TimeTrackerTest::test_timetracker_start_pause_resume_stop_and_checkpoints()
     QString settingsPath = createSettingsFile(tempDir.path(), 7);
 
     Settings settings(settingsPath);
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
 
     // Start -> Activity
@@ -78,7 +78,7 @@ void TimeTrackerTest::test_timetracker_backpause_resets_checkpoint_and_splits()
     writer.sync();
 
     Settings settings(settingsPath);
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
     tracker.useTimerViaButton(Button::Start);
 
@@ -103,7 +103,7 @@ void TimeTrackerTest::test_timetracker_lock_events_checkpoint_and_resume()
     QVERIFY(tempDir.isValid());
     QString settingsPath = createSettingsFile(tempDir.path(), 7);
     Settings settings(settingsPath);
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
 
     tracker.useTimerViaButton(Button::Start);
@@ -120,7 +120,7 @@ void TimeTrackerTest::test_timetracker_ongoing_duration()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
 
     // Initially stopped
@@ -150,7 +150,7 @@ void TimeTrackerTest::test_timetracker_set_duration_type()
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
 
     // Add a duration manually
@@ -180,7 +180,7 @@ void TimeTrackerTest::test_timetracker_checkpoints_paused()
     writer.sync();
 
     Settings settings(settingsPath);
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
     
     // Must be in Activity to save checkpoints
@@ -218,9 +218,9 @@ void TimeTrackerTest::test_timetracker_retry_append_failure_then_success_preserv
     QVERIFY(tempDir.isValid());
     QString settingsPath = createSettingsFile(tempDir.path(), 7);
     Settings settings(settingsPath);
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
-    DatabaseManager db2(settings);
+    SqliteSessionStore db2(settings);
     QVERIFY(db2.saveDurations({}, TransactionMode::Append));
 
     tracker.useTimerViaButton(Button::Start);
@@ -266,9 +266,9 @@ void TimeTrackerTest::test_timetracker_retry_failure_keeps_unsaved_state_and_dur
     QVERIFY(tempDir.isValid());
     QString settingsPath = createSettingsFile(tempDir.path(), 7);
     Settings settings(settingsPath);
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
-    DatabaseManager db2(settings);
+    SqliteSessionStore db2(settings);
     QVERIFY(db2.saveDurations({}, TransactionMode::Append));
 
     tracker.useTimerViaButton(Button::Start);
@@ -504,7 +504,7 @@ void TimeTrackerTest::test_boot_time_not_added_when_history_disabled()
     writer.sync();
 
     Settings settings(settingsPath);
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
 
     // Act: start timer twice (simulating a second start on the same day)
@@ -543,7 +543,7 @@ void TimeTrackerTest::test_boot_time_added_once_on_empty_db()
     writer.sync();
 
     Settings settings(settingsPath);
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
 
     // Act: start the timer (first session today, empty DB)
@@ -574,16 +574,16 @@ void TimeTrackerTest::test_boot_time_not_added_when_db_has_entries_for_today()
 
     Settings settings(settingsPath);
 
-    // Use a separate DatabaseManager to seed an entry for today
+    // Use a separate SqliteSessionStore to seed an entry for today
     {
-        DatabaseManager seeder(settings);
+        SqliteSessionStore seeder(settings);
         QDateTime now = QDateTime::currentDateTimeUtc();
         std::deque<TimeDuration> durations;
         durations.emplace_back(DurationType::Activity, now.addSecs(-3600), now.addSecs(-3540));
         QVERIFY(seeder.saveDurations(durations, TransactionMode::Append));
     }
 
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
 
     // Act: start the timer (DB already has entries for today)
@@ -617,7 +617,7 @@ void TimeTrackerTest::test_pause_row_persisted_immediately_on_resume()
     Settings settings(settingsPath);
 
     {
-        DatabaseManager db(settings);
+        SqliteSessionStore db(settings);
         TimeTracker tracker(settings, db);
 
         // Start -> Activity
@@ -639,7 +639,7 @@ void TimeTrackerTest::test_pause_row_persisted_immediately_on_resume()
     }
 
     // Assert: re-read the DB and verify the Pause row survived the crash.
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     auto loaded = db.loadDurations();
 
     // We expect at least one Activity row (from the finalizeActivityToPause
@@ -914,7 +914,7 @@ void TimeTrackerTest::test_startTimer_drops_cross_midnight_boot_time_entry()
     writer.sync();
 
     Settings settings(settingsPath);
-    DatabaseManager db(settings);
+    SqliteSessionStore db(settings);
     TimeTracker tracker(settings, db);
 
     // Act
