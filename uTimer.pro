@@ -13,7 +13,8 @@ HEADERS = \
    $$PWD/types.h \
    $$PWD/helpers.h \
    $$PWD/logger.h \
-   $$PWD/historydialog.h
+   $$PWD/historydialog.h \
+   $$PWD/timeline.h
 
 SOURCES = \
    $$PWD/contentwidget.cpp \
@@ -27,7 +28,8 @@ SOURCES = \
    $$PWD/historydialog.cpp \
    $$PWD/settings.cpp \
    $$PWD/helpers.cpp \
-   $$PWD/logger.cpp
+   $$PWD/logger.cpp \
+   $$PWD/timeline.cpp
 
 INCLUDEPATH = \
     $$PWD/.

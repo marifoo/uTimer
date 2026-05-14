@@ -36,7 +36,8 @@ SOURCES += \
     $$PWD/../databasemanager.cpp \
     $$PWD/../helpers.cpp \
     $$PWD/../settings.cpp \
-    $$PWD/../logger.cpp
+    $$PWD/../logger.cpp \
+    $$PWD/../timeline.cpp
 
 HEADERS += \
     testcommon.h \
@@ -63,4 +64,5 @@ HEADERS += \
     $$PWD/../settings.h \
     $$PWD/../logger.h \
     $$PWD/../types.h \
-    $$PWD/../historydialog.h
+    $$PWD/../historydialog.h \
+    $$PWD/../timeline.h
