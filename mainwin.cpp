@@ -41,7 +41,8 @@ MainWin::MainWin(Settings& settings, TimeTracker& timetracker, IDatabaseManager&
 	             ShutdownCoordinator& shutdown_coordinator, QWidget *parent)
 	: QMainWindow(parent), settings_(settings), timetracker_(timetracker), db_(db),
 	  shutdown_coordinator_(shutdown_coordinator),
-	  warning_pause_shown_(false), was_active_before_autopause_(false)
+	  health_monitor_(new HealthMonitor(settings, this)),
+	  was_active_before_autopause_(false)
 {
 	setupCentralWidget(settings, timetracker);
 
@@ -49,10 +50,12 @@ MainWin::MainWin(Settings& settings, TimeTracker& timetracker, IDatabaseManager&
 
 	setWindowTitle("µTimer");
 	setWindowFlags(windowFlags() &(~Qt::WindowMaximizeButtonHint));
-	
+
 	midnight_timer_ = new QTimer(this);
 	midnight_timer_->setSingleShot(true);
 	// Connection is made dynamically in scheduleMidnightStop.
+
+	connect(health_monitor_, &HealthMonitor::warningTriggered, this, &MainWin::showMsgBox);
 }
 
 void MainWin::setupCentralWidget(Settings& settings, TimeTracker& timetracker)
@@ -114,36 +117,9 @@ void MainWin::update()
 	content_widget_->updateTimes();
 	tray_icon_->setToolTip(content_widget_->getTooltip());
 
-	if ((content_widget_->isGUIinActivity())
-	    && (settings_.showTooMuchActivityWarning() || settings_.showNoPauseWarning()))
-		showActivityWarnings();
-}
-
-/**
- * Health Check: Evaluates current user activity against health thresholds.
- *
- * Checks two conditions:
- * 1. Total daily activity exceeds limit (e.g., 9h 45m).
- * 2. Activity without sufficient pause (e.g., 6h worked with < 30m break).
- *
- * Shows a warning dialog if thresholds are crossed for the first time this session.
- */
-void MainWin::showActivityWarnings()
-{
-	const qint64 t_active = timetracker_.getActiveTime();
-	const qint64 t_pause = timetracker_.getPauseTime();
-
-	if ((!warning_activity_shown_)
-			&& (t_active > settings_.getWarnTimeActivityMsec())) {
-		warning_activity_shown_ = true;
-		showMsgBox("Total activity time: " + convMSecToTimeStr(t_active));
-	}
-
-	if ((!warning_pause_shown_)
-			&& (t_active > settings_.getWarnTimeNoPauseMsec())
-			&& (t_pause < settings_.getPauseTimeForWarnTimeNoPauseMsec())) {
-		warning_pause_shown_ = true;
-		showMsgBox("Pause time: " + convMSecToTimeStr(t_pause) + "\nwith activity time: " + convMSecToTimeStr(t_active));
+	if (content_widget_->isGUIinActivity()
+	    && (settings_.showTooMuchActivityWarning() || settings_.showNoPauseWarning())) {
+		health_monitor_->check(timetracker_.getActiveTime(), timetracker_.getPauseTime());
 	}
 }
 
@@ -265,8 +241,7 @@ void MainWin::start()
 		}
 	}
 
-	warning_activity_shown_ = !settings_.showTooMuchActivityWarning();
-	warning_pause_shown_ = !settings_.showNoPauseWarning();
+	health_monitor_->reset();
 }
 
 /**

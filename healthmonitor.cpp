@@ -1,4 +1,5 @@
 #include "healthmonitor.h"
+#include "helpers.h"
 
 HealthMonitor::HealthMonitor(const Settings& settings, QObject* parent)
     : QObject(parent), settings_(settings),
@@ -6,12 +7,24 @@ HealthMonitor::HealthMonitor(const Settings& settings, QObject* parent)
 {
 }
 
-void HealthMonitor::check(qint64 /*activeMsec*/, qint64 /*pauseMsec*/)
+void HealthMonitor::check(qint64 activeMsec, qint64 pauseMsec)
 {
-    // stub — body moved in T2.5
+    if (!activity_warning_shown_ && activeMsec > settings_.getWarnTimeActivityMsec()) {
+        activity_warning_shown_ = true;
+        emit warningTriggered("Total activity time: " + convMSecToTimeStr(activeMsec));
+    }
+
+    if (!pause_warning_shown_
+        && activeMsec > settings_.getWarnTimeNoPauseMsec()
+        && pauseMsec < settings_.getPauseTimeForWarnTimeNoPauseMsec()) {
+        pause_warning_shown_ = true;
+        emit warningTriggered("Pause time: " + convMSecToTimeStr(pauseMsec)
+                              + "\nwith activity time: " + convMSecToTimeStr(activeMsec));
+    }
 }
 
 void HealthMonitor::reset()
 {
-    // stub — body moved in T2.6
+    activity_warning_shown_ = !settings_.showTooMuchActivityWarning();
+    pause_warning_shown_ = !settings_.showNoPauseWarning();
 }

@@ -6,6 +6,7 @@
 #include <QString>
 #include <QTimer>
 #include "contentwidget.h"
+#include "healthmonitor.h"
 #include "settings.h"
 #include "types.h"
 #include "idatabasemanager.h"
@@ -21,9 +22,8 @@ private:
 	TimeTracker& timetracker_;
 	IDatabaseManager& db_;
 	ShutdownCoordinator& shutdown_coordinator_;
+	HealthMonitor* health_monitor_;
 
-	bool warning_activity_shown_;
-	bool warning_pause_shown_;
 	bool was_active_before_autopause_;
 
 	// Midnight forced-stop handling
@@ -35,7 +35,6 @@ private:
 	void showMsgBox(const QString &text);
 	void showMainWin();
 	void toggleAlwaysOnTopFlag();
-	void showActivityWarnings();
 	void setupIcon();
 	void setupCentralWidget(Settings &settings, TimeTracker &timetracker);
 	void shutdown(bool force_direct = false);
