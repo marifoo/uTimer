@@ -11,6 +11,8 @@ class TimeTrackerTest;
 class DatabaseTest;
 class IntegrationTest;
 class HistoryDialogTest;
+class ShutdownCoordinatorTest;
+class HealthMonitorTest;
 
 // Include test class headers
 #include "test_logger.h"
@@ -22,6 +24,8 @@ class HistoryDialogTest;
 #include "test_database.h"
 #include "test_integration.h"
 #include "test_historydialog.h"
+#include "test_shutdowncoordinator.h"
+#include "test_healthmonitor.h"
 
 // Test runner main function
 // Executes all test suites sequentially using QTest::qExec()
@@ -52,6 +56,8 @@ int main(int argc, char *argv[])
     runTest(new DatabaseTest, "DatabaseTest");
     runTest(new IntegrationTest, "IntegrationTest");
     runTest(new HistoryDialogTest, "HistoryDialogTest");
+    runTest(new ShutdownCoordinatorTest, "ShutdownCoordinatorTest");
+    runTest(new HealthMonitorTest, "HealthMonitorTest");
 
     qDebug() << "\n================ All Tests Complete ================";
     return status;
