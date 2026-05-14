@@ -1120,6 +1120,154 @@ void DatabaseTest::test_hasEntriesForDate_returns_yes_when_entries_exist()
     QCOMPARE(result, EntriesForDateResult::Yes);
 }
 
+void DatabaseTest::test_hasEntriesForDate_utc_positive_offset()
+{
+    // Simulate Asia/Tokyo (+09:00).
+    // A row stored as UTC end_date='2024-12-31' end_time='15:30:00.000'
+    // equals local 2025-01-01 00:30:00 +09:00, so it belongs to local date
+    // 2025-01-01, not 2024-12-31.
+
+    // RAII guard: restores TZ even if a QVERIFY/QCOMPARE assertion fires return early.
+    struct TzGuard {
+        QByteArray orig;
+        TzGuard() : orig(qgetenv("TZ")) {}
+        ~TzGuard() { orig.isEmpty() ? qunsetenv("TZ") : qputenv("TZ", orig); tzset(); }
+    } tzGuard;
+    qputenv("TZ", "Asia/Tokyo");
+    tzset();
+
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    // Use a large retention window so old test-specific dates are never pruned.
+    Settings settings(createSettingsFile(tempDir.path(), 30000));
+
+    // Bootstrap schema.
+    {
+        SqliteSessionStore bootstrap(settings);
+        QVERIFY(bootstrap.saveDurations({}, TransactionMode::Append));
+    }
+
+    // Seed the row with the UTC values directly.
+    const QString connName = "seed_tz_pos";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        q.prepare(
+            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:sid, 0, 1800000, '2024-12-31', '15:00:00.000', '2024-12-31', '15:30:00.000', 1)"
+        );
+        q.bindValue(":sid", TimeDuration::createSegmentId());
+        QVERIFY(q.exec());
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    SqliteSessionStore manager(settings);
+
+    // The row's UTC end is 2024-12-31T15:30Z = local 2025-01-01 in Tokyo.
+    QCOMPARE(manager.hasEntriesForDate(QDate(2025, 1, 1)), EntriesForDateResult::Yes);
+    QCOMPARE(manager.hasEntriesForDate(QDate(2024, 12, 31)), EntriesForDateResult::No);
+}
+
+void DatabaseTest::test_hasEntriesForDate_utc_negative_offset()
+{
+    // Simulate Pacific/Honolulu (-10:00).
+    // A row stored as UTC end_date='2025-01-02' end_time='08:00:00.000'
+    // equals local 2025-01-01 22:00:00 -10:00, so it belongs to local date
+    // 2025-01-01, not 2025-01-02.
+
+    struct TzGuard {
+        QByteArray orig;
+        TzGuard() : orig(qgetenv("TZ")) {}
+        ~TzGuard() { orig.isEmpty() ? qunsetenv("TZ") : qputenv("TZ", orig); tzset(); }
+    } tzGuard;
+    qputenv("TZ", "Pacific/Honolulu");
+    tzset();
+
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    // Use a large retention window so old test-specific dates are never pruned.
+    Settings settings(createSettingsFile(tempDir.path(), 30000));
+
+    {
+        SqliteSessionStore bootstrap(settings);
+        QVERIFY(bootstrap.saveDurations({}, TransactionMode::Append));
+    }
+
+    const QString connName = "seed_tz_neg";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        q.prepare(
+            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:sid, 0, 3600000, '2025-01-02', '07:00:00.000', '2025-01-02', '08:00:00.000', 1)"
+        );
+        q.bindValue(":sid", TimeDuration::createSegmentId());
+        QVERIFY(q.exec());
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    SqliteSessionStore manager(settings);
+
+    // The row's UTC end is 2025-01-02T08:00Z = local 2025-01-01 22:00 in Honolulu.
+    QCOMPARE(manager.hasEntriesForDate(QDate(2025, 1, 1)), EntriesForDateResult::Yes);
+    QCOMPARE(manager.hasEntriesForDate(QDate(2025, 1, 2)), EntriesForDateResult::No);
+}
+
+void DatabaseTest::test_hasEntriesForDate_utc_regression()
+{
+    // UTC zone, mid-day entry: end_date='2025-06-15' end_time='12:00:00.000'.
+    // With TZ=UTC local date == UTC date, so behaviour should be unchanged.
+
+    struct TzGuard {
+        QByteArray orig;
+        TzGuard() : orig(qgetenv("TZ")) {}
+        ~TzGuard() { orig.isEmpty() ? qunsetenv("TZ") : qputenv("TZ", orig); tzset(); }
+    } tzGuard;
+    qputenv("TZ", "UTC");
+    tzset();
+
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    // Use a large retention window so old test-specific dates are never pruned.
+    Settings settings(createSettingsFile(tempDir.path(), 30000));
+
+    {
+        SqliteSessionStore bootstrap(settings);
+        QVERIFY(bootstrap.saveDurations({}, TransactionMode::Append));
+    }
+
+    const QString connName = "seed_tz_utc";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        q.prepare(
+            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+            "VALUES (:sid, 0, 3600000, '2025-06-15', '11:00:00.000', '2025-06-15', '12:00:00.000', 1)"
+        );
+        q.bindValue(":sid", TimeDuration::createSegmentId());
+        QVERIFY(q.exec());
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    SqliteSessionStore manager(settings);
+
+    QCOMPARE(manager.hasEntriesForDate(QDate(2025, 6, 15)), EntriesForDateResult::Yes);
+    QCOMPARE(manager.hasEntriesForDate(QDate(2025, 6, 14)), EntriesForDateResult::No);
+    QCOMPARE(manager.hasEntriesForDate(QDate(2025, 6, 16)), EntriesForDateResult::No);
+}
+
 // ============================================================================
 // Retention cleanup once-per-session tests (T22)
 // ============================================================================

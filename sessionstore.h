@@ -65,7 +65,9 @@ public:
     virtual bool commitSession(const Timeline& session) = 0;
     virtual bool replaceAll(const Timeline& history, const Timeline& session) = 0;
     virtual LoadResult loadDurations() = 0;
-    virtual EntriesForDateResult hasEntriesForDate(const QDate& date) = 0;
+    // Returns Yes iff at least one finalised row's end falls on `localDate`
+    // interpreted in the system local time zone.
+    virtual EntriesForDateResult hasEntriesForDate(const QDate& localDate) = 0;
     virtual bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
                                 const QDateTime& endTime, const QString& segmentId) = 0;
     virtual bool checkSchemaOnStartup() = 0;

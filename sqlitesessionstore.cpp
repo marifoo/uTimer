@@ -982,15 +982,30 @@ EntriesForDateResult SqliteSessionStore::hasEntriesForDate(const QDate& date)
         return EntriesForDateResult::Unknown;
     }
 
-    // Check if any entries exist for the specified date
+    // Compute the UTC half-open range covering the caller's local day.
+    const QDateTime localStart(date, QTime(0, 0, 0), Qt::LocalTime);
+    const QDateTime localEnd = localStart.addDays(1);
+    const QDateTime utcStart = localStart.toUTC();
+    const QDateTime utcEnd   = localEnd.toUTC();
+
+    // Check if any finalized entry's end timestamp falls within that UTC range.
     QSqlQuery query(db);
-    query.prepare("SELECT COUNT(*) FROM durations WHERE end_date = :date AND is_finalized = 1");
-    query.bindValue(":date", date.toString(Qt::ISODate));
+    query.prepare(
+        "SELECT 1 FROM durations"
+        " WHERE is_finalized = 1"
+        "   AND end_date BETWEEN :utcStartDate AND :utcEndDate"
+        "   AND (end_date || 'T' || end_time || 'Z') >= :utcStartTs"
+        "   AND (end_date || 'T' || end_time || 'Z') <  :utcEndTs"
+        " LIMIT 1"
+    );
+    query.bindValue(":utcStartDate", utcStart.date().toString(Qt::ISODate));
+    query.bindValue(":utcEndDate",   utcEnd.date().toString(Qt::ISODate));
+    query.bindValue(":utcStartTs",   utcStart.toString(Qt::ISODateWithMs));
+    query.bindValue(":utcEndTs",     utcEnd.toString(Qt::ISODateWithMs));
 
     EntriesForDateResult result = EntriesForDateResult::Unknown;
-    if (query.exec() && query.next()) {
-        int count = query.value(0).toInt();
-        result = (count > 0) ? EntriesForDateResult::Yes : EntriesForDateResult::No;
+    if (query.exec()) {
+        result = query.next() ? EntriesForDateResult::Yes : EntriesForDateResult::No;
     } else {
         Logger::Log("[DB] Error checking entries for date: " + query.lastError().text());
     }

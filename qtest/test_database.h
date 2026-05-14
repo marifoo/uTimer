@@ -66,6 +66,9 @@ private slots:
     void test_hasEntriesForDate_returns_unknown_when_history_disabled();
     void test_hasEntriesForDate_returns_no_on_empty_database();
     void test_hasEntriesForDate_returns_yes_when_entries_exist();
+    void test_hasEntriesForDate_utc_positive_offset();
+    void test_hasEntriesForDate_utc_negative_offset();
+    void test_hasEntriesForDate_utc_regression();
 
     // Retention cleanup once-per-session tests (T22)
     void test_retention_cleanup_runs_once_across_multiple_opens();
