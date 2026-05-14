@@ -12,6 +12,11 @@
 #include "settings.h"
 #include "idatabasemanager.h"
 
+// saveDurations/createBackup use TransactionMode as an implementation detail.
+// The enum is not part of IDatabaseManager's public interface; it lives here
+// so it can be removed from types.h.
+enum class TransactionMode { Append, Replace };
+
 class DatabaseManager : public QObject, public IDatabaseManager
 {
     Q_OBJECT

@@ -30,8 +30,6 @@ struct TimeDuration {
     }
 };
 
-enum class TransactionMode { Append, Replace };
-
 /**
  * Tri-state result for hasEntriesForDate.
  *
