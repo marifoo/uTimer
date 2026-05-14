@@ -59,7 +59,7 @@ void HistoryDialogTest::test_historydialog_createPages_includes_current_db_ongoi
     // Save a DB entry for today
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, now.addSecs(-50), now.addSecs(-40));
-    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
 
     // Start ongoing activity
     tracker.useTimerViaButton(Button::Start);
@@ -92,7 +92,7 @@ void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Activity, memoryStart.addMSecs(-2), memoryEnd, segmentId);
-    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
 
     HistoryDialog dialog(tracker, settings);
     QCOMPARE(dialog.pages_.size(), static_cast<size_t>(1));
@@ -118,7 +118,7 @@ void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midn
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Activity, crossMidnightStart, crossMidnightEnd);
-    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
 
     HistoryDialog dialog(tracker, settings);
 
@@ -171,7 +171,7 @@ void HistoryDialogTest::test_historydialog_saveChanges_updates_timetracker_and_d
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, now.addSecs(-140), now.addSecs(-120));
-    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
 
     HistoryDialog dialog(tracker, settings);
     dialog.pendingTimelines_[0] = dialog.pendingTimelines_[0].withSegmentType(0, DurationType::Pause);
@@ -249,7 +249,7 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, dbStart, dbEnd);
-    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
 
     HistoryDialog dialog(tracker, settings);
     QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(2));
@@ -307,7 +307,7 @@ void HistoryDialogTest::test_historydialog_split_non_today_db_row_survives_save_
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Activity, start, end);
-    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
 
     HistoryDialog dialog(tracker, settings);
     QVERIFY(dialog.pages_.size() >= static_cast<size_t>(2));
@@ -404,7 +404,7 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
     const QDateTime historicalEnd = historicalStart.addSecs(300);
     std::deque<TimeDuration> historicalRows;
     historicalRows.emplace_back(DurationType::Pause, historicalStart, historicalEnd);
-    QVERIFY(tracker.replaceDurationsInDB(historicalRows, {}));
+    QVERIFY(tracker.replaceAll(Timeline(historicalRows, std::nullopt), Timeline({}, std::nullopt)));
 
 
     tracker.useTimerViaButton(Button::Start);
@@ -538,7 +538,7 @@ void HistoryDialogTest::test_historydialog_save_keeps_db_rows_for_history_plus_c
     const QDateTime historicalEnd = historicalStart.addSecs(60);
     std::deque<TimeDuration> historicalRows;
     historicalRows.emplace_back(DurationType::Pause, historicalStart, historicalEnd);
-    QVERIFY(tracker.replaceDurationsInDB(historicalRows, {}));
+    QVERIFY(tracker.replaceAll(Timeline(historicalRows, std::nullopt), Timeline({}, std::nullopt)));
 
     const QDateTime now = QDateTime::currentDateTime();
     tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, now.addSecs(-30), now.addSecs(-20)));
@@ -696,7 +696,7 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, dbStart, dbEnd);
-    QVERIFY(tracker.replaceDurationsInDB(dbDurations, {}));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
 
     HistoryDialog dialog(tracker, settings);
     QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(2));

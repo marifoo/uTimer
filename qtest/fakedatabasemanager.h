@@ -32,8 +32,7 @@ public:
     // ---- IDatabaseManager interface ----
 
     bool commitSession(const Timeline& session) override;
-    bool replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
-                              const std::deque<TimeDuration>& currentSessionDurations) override;
+    bool replaceAll(const Timeline& history, const Timeline& session) override;
     LoadResult loadDurations() override;
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
     bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,

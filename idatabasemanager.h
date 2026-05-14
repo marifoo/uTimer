@@ -63,8 +63,7 @@ public:
     virtual ~IDatabaseManager() = default;
 
     virtual bool commitSession(const Timeline& session) = 0;
-    virtual bool replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
-                                      const std::deque<TimeDuration>& currentSessionDurations) = 0;
+    virtual bool replaceAll(const Timeline& history, const Timeline& session) = 0;
     virtual LoadResult loadDurations() = 0;
     virtual EntriesForDateResult hasEntriesForDate(const QDate& date) = 0;
     virtual bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,

@@ -1022,7 +1022,7 @@ void TimeTrackerTest::test_D_timetracker_public_surface_regression()
     fakeDb.callLog.clear();
     tracker.appendDurationsToDB();
     tracker.updateDurationsInDB();
-    tracker.replaceDurationsInDB({}, {});
+    tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt));
 
     // replaceCurrentDurations
     tracker.replaceCurrentDurations({}, std::nullopt);

@@ -815,29 +815,9 @@ bool TimeTracker::updateDurationsInDB()
     return db_.commitSession(Timeline(session_.durations, std::nullopt));
 }
 
-bool TimeTracker::replaceDurationsInDB(std::deque<TimeDuration> historyDurations,
-                                       std::deque<TimeDuration> currentSessionDurations)
+bool TimeTracker::replaceAll(const Timeline& history, const Timeline& session)
 {
-    size_t originalHistory = historyDurations.size();
-    // Return value ignored: replaceDurationsInDB wipes the entire table,
-    // so orphaned segment_ids are implicitly cleaned up by the DELETE FROM.
-    cleanDurations(&historyDurations);
-    if (originalHistory != historyDurations.size()) {
-        Logger::Log(QString("[DB] Cleaned history durations for replace: %1 -> %2")
-            .arg(originalHistory)
-            .arg(historyDurations.size()));
-    }
-
-    size_t originalCurrent = currentSessionDurations.size();
-    // Return value ignored: same reasoning as above.
-    cleanDurations(&currentSessionDurations);
-    if (originalCurrent != currentSessionDurations.size()) {
-        Logger::Log(QString("[DB] Cleaned current-session durations for replace: %1 -> %2")
-            .arg(originalCurrent)
-            .arg(currentSessionDurations.size()));
-    }
-
-    return db_.replaceDurationsInDB(historyDurations, currentSessionDurations);
+    return db_.replaceAll(history, session);
 }
 
 EntriesForDateResult TimeTracker::hasEntriesForDate(const QDate& date)

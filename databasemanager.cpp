@@ -736,14 +736,16 @@ bool DatabaseManager::saveDurations(const std::deque<TimeDuration>& durations, T
     return commitSuccessful;
 }
 
-bool DatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
-                                            const std::deque<TimeDuration>& currentSessionDurations)
+bool DatabaseManager::replaceAll(const Timeline& history, const Timeline& session)
 {
     QMutexLocker locker(&db_mutex_);
 
     if (history_days_to_keep_ == 0) {
         return true;
     }
+
+    const std::deque<TimeDuration>& historyDurations = history.completed();
+    const std::deque<TimeDuration>& currentSessionDurations = session.completed();
 
     std::deque<TimeDuration> allDurations;
     allDurations.insert(allDurations.end(), historyDurations.begin(), historyDurations.end());

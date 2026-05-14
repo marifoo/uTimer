@@ -502,7 +502,9 @@ void HistoryDialog::saveChanges()
             .arg(historyDurations.size())
             .arg(currentSessionDurations.size()));
 
-        dbSaveSucceeded = timetracker_.replaceDurationsInDB(historyDurations, currentSessionDurations);
+        dbSaveSucceeded = timetracker_.replaceAll(
+            Timeline(historyDurations, std::nullopt),
+            Timeline(currentSessionDurations, std::nullopt));
         if (!dbSaveSucceeded) {
             Logger::Log("[HISTORY] CRITICAL: Failed to save durations to DB");
             QMessageBox::critical(this, "Database Error",

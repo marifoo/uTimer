@@ -56,16 +56,15 @@ bool FakeDatabaseManager::commitSession(const Timeline& session)
     return commitSessionResult;
 }
 
-bool FakeDatabaseManager::replaceDurationsInDB(const std::deque<TimeDuration>& historyDurations,
-                                                const std::deque<TimeDuration>& currentSessionDurations)
+bool FakeDatabaseManager::replaceAll(const Timeline& history, const Timeline& session)
 {
-    callLog.append("replaceDurationsInDB");
+    callLog.append("replaceAll");
     if (replaceDurationsResult) {
         storedDurations.clear();
-        for (const auto& d : historyDurations) {
+        for (const auto& d : history.completed()) {
             storedDurations.push_back(d);
         }
-        for (const auto& d : currentSessionDurations) {
+        for (const auto& d : session.completed()) {
             storedDurations.push_back(d);
         }
     }
