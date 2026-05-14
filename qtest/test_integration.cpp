@@ -421,6 +421,141 @@ void IntegrationTest::test_F_shutdown_sequence_stop_flush_marker()
              "flushToDisc must happen before the final setLastCleanShutdownMarker");
 }
 
+// ============================================================================
+// Phase 5 pre-flight regression tests (T5.0a)
+// ============================================================================
+
+/**
+ * Normal same-day session: isOngoingSegmentCrossMidnight() returns false and
+ * discardCrossMidnightOngoingAndStop() does not fire.
+ */
+void IntegrationTest::test_5_0a_normal_same_day_no_discard()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    // Start with a same-day segment_start_time (current real time is fine).
+    tracker.useTimerViaButton(Button::Start);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+
+    // Watchdog predicate must be false for a fresh same-day session.
+    QVERIFY(!tracker.isOngoingSegmentCrossMidnight());
+
+    // Directly call the internal helper with a same-day "now".
+    const QDateTime sameDay = QDateTime::currentDateTime();
+    QVERIFY(!tracker.discardCrossMidnightOngoingAndStop(sameDay));
+
+    // Engine must still be in Activity.
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+}
+
+/**
+ * Cross-midnight ongoing segment is discarded; same-day completed segments
+ * that accumulated before midnight are preserved and flushed to the DB.
+ */
+void IntegrationTest::test_5_0a_cross_midnight_ongoing_discarded_completed_preserved()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    // Arrange: start the timer, add a completed same-day segment manually,
+    // then rewind segment_start_time to yesterday to simulate cross-midnight.
+    tracker.useTimerViaButton(Button::Start);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+
+    // Insert a completed segment via direct addDuration() so we control the
+    // timestamps and guarantee a positive duration independent of wall-clock.
+    const QDateTime segStart = QDateTime::currentDateTime().addSecs(-10);
+    const QDateTime segEnd   = QDateTime::currentDateTime().addSecs(-1);
+    tracker.addDuration(DurationType::Activity, segStart, segEnd);
+    QVERIFY(!tracker.session_.durations.empty());
+    const size_t completedCount = tracker.session_.durations.size();
+
+    // Simulate sleep through midnight: move segment_start_time to yesterday.
+    const QDateTime yesterday = QDateTime::currentDateTime().addDays(-1);
+    tracker.session_.segment_start_time = yesterday;
+
+    // Pre-condition: watchdog predicate should now be true.
+    QVERIFY(tracker.isOngoingSegmentCrossMidnight());
+
+    // Act: call the internal helper with "now" (today).
+    const QDateTime today = QDateTime::currentDateTime();
+    fakeDb.callLog.clear();
+    const bool fired = tracker.discardCrossMidnightOngoingAndStop(today);
+
+    // Assert: helper fired, engine stopped, completed segments were committed.
+    QVERIFY(fired);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QVERIFY(fakeDb.callLog.contains("commitSession"));
+    // The completed segments must NOT be in session_.durations any more
+    // (they were flushed and resetForNewSession was called).
+    QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(0));
+    (void)completedCount; // used to verify state before discard
+}
+
+/**
+ * Repeated calls to discardCrossMidnightOngoingAndStop() are idempotent:
+ * the second call returns false and makes no DB writes.
+ */
+void IntegrationTest::test_5_0a_discard_is_idempotent()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::Activity);
+
+    // Force segment to yesterday.
+    tracker.session_.segment_start_time = QDateTime::currentDateTime().addDays(-1);
+
+    const QDateTime today = QDateTime::currentDateTime();
+    QVERIFY(tracker.discardCrossMidnightOngoingAndStop(today));
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+
+    // Second call must return false (engine already stopped).
+    fakeDb.callLog.clear();
+    QVERIFY(!tracker.discardCrossMidnightOngoingAndStop(today));
+    QVERIFY(!fakeDb.callLog.contains("commitSession"));
+}
+
+/**
+ * Watchdog predicate: isOngoingSegmentCrossMidnight() returns false when the
+ * engine is stopped (Mode::None), and true only when the segment_start_time
+ * is on a previous date.
+ */
+void IntegrationTest::test_5_0a_watchdog_helper_returns_false_when_not_crossed()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeDatabaseManager fakeDb;
+    TimeTracker tracker(settings, fakeDb);
+
+    // Stopped: must be false.
+    QCOMPARE(tracker.mode_, TimeTracker::Mode::None);
+    QVERIFY(!tracker.isOngoingSegmentCrossMidnight());
+
+    // Running with same-day start: must be false.
+    tracker.useTimerViaButton(Button::Start);
+    QVERIFY(!tracker.isOngoingSegmentCrossMidnight());
+
+    // Backdate to yesterday: must be true.
+    tracker.session_.segment_start_time = QDateTime::currentDateTime().addDays(-1);
+    QVERIFY(tracker.isOngoingSegmentCrossMidnight());
+
+    // Restore so destructor stops cleanly.
+    tracker.session_.segment_start_time = QDateTime::currentDateTime();
+}
+
 void IntegrationTest::test_integration_backpause_db_update()
 {
     resetDatabaseFile();

@@ -37,6 +37,13 @@ private slots:
     // Phase 1 test gate (T1)
     // Test F: shutdown sequence end-to-end via db_ directly.
     void test_F_shutdown_sequence_stop_flush_marker();
+
+    // Phase 5 pre-flight regression tests (T5.0a)
+    // Run on pre-refactor code as a safety net for Phase 5 changes.
+    void test_5_0a_normal_same_day_no_discard();
+    void test_5_0a_cross_midnight_ongoing_discarded_completed_preserved();
+    void test_5_0a_discard_is_idempotent();
+    void test_5_0a_watchdog_helper_returns_false_when_not_crossed();
 };
 
 #endif // TEST_INTEGRATION_H
