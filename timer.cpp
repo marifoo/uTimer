@@ -20,7 +20,7 @@
  *
  * Checkpoint behavior:
  * - Only saved during Activity mode (not Pause or Stopped)
- * - Suspended while PC is locked (is_locked_) or HistoryDialog is open (checkpoints_paused_)
+ * - Suspended while PC is locked (is_locked_) or HistoryDialog is open (dialog_open_)
  * - Uses session_.current_checkpoint_segment_id to update same DB row instead of creating new rows
  *
  * Backpause behavior:
@@ -57,6 +57,9 @@ void Timer::DayBoundaryWatcher::tick(const QDateTime& now)
     // Watchdog: if the ongoing segment has crossed midnight (e.g. due to sleep
     // bypassing the scheduled stop), force the engine to stopped state.
     // The mutex is already held by the caller (Timer::onTick).
+    if (owner_.dialog_open_) {
+        return;
+    }
     owner_.discardCrossMidnightOngoingAndStop(now);
 }
 
@@ -94,6 +97,11 @@ void Timer::DayBoundaryWatcher::onMidnightTimerFired()
     QMutexLocker locker(&owner_.mutex_);
     if (owner_.mode_ == Mode::None) {
         Logger::Log("[MIDNIGHT] Scheduled stop fired but engine already stopped - ignoring");
+        return;
+    }
+    if (owner_.dialog_open_) {
+        owner_.pending_midnight_stop_ = true;
+        Logger::Log("[MIDNIGHT] suspended during history edit");
         return;
     }
     owner_.stopTimer(QDateTime::currentDateTime(), StopReason::MidnightScheduled);
@@ -299,7 +307,7 @@ void Timer::checkDurationInvariants() const
 Timer::Timer(const Settings &settings, SessionStore& db, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), session_(), mode_(Mode::None),
       was_active_before_autopause_(false), is_locked_(false),
-      checkpoints_paused_(false), db_(db),
+      dialog_open_(false), db_(db),
       checkpoint_interval_msec_(settings.getCheckpointIntervalMsec()),
       last_history_load_skipped_(0), last_history_load_repaired_(0),
       startup_recovered_seconds_(0), startup_recovery_notification_needed_(false),
@@ -649,6 +657,10 @@ void Timer::useTimerViaLockEvent(LockEvent event)
     }
     if (event == LockEvent::Lock) {
         is_locked_ = true;
+        if (dialog_open_) {
+            Logger::Log("[LOCK] suspended during history edit (Lock)");
+            return;
+        }
         // Save a checkpoint when lock is detected (only if actively tracking time)
         if (mode_ == Mode::Activity) {
             saveCheckpointInternal(now);
@@ -660,6 +672,12 @@ void Timer::useTimerViaLockEvent(LockEvent event)
     }
     if (event == LockEvent::Unlock) {
         is_locked_ = false;
+        if (dialog_open_) {
+            // Unlock supersedes any pending LongOngoingLock
+            pending_lock_event_ = LockEvent::None;
+            Logger::Log("[LOCK] suspended during history edit (Unlock)");
+            return;
+        }
         Logger::Log("[LOCK] Desktop unlocked - checkpoint saving resumed");
     }
     if (!settings_.isAutopauseEnabled()) {
@@ -667,6 +685,11 @@ void Timer::useTimerViaLockEvent(LockEvent event)
         return;
     }
     if (event == LockEvent::LongOngoingLock) {
+        if (dialog_open_) {
+            pending_lock_event_ = LockEvent::LongOngoingLock;
+            Logger::Log("[LOCK] suspended during history edit (LongOngoingLock)");
+            return;
+        }
         was_active_before_autopause_ = (mode_ == Mode::Activity);
         if (was_active_before_autopause_) {
             backpauseTimer(now);
@@ -847,7 +870,6 @@ std::optional<TimeDuration> Timer::getOngoingDuration() const
     const QString segmentId = session_.current_checkpoint_segment_id.isEmpty()
         ? TimeDuration::createSegmentId()
         : session_.current_checkpoint_segment_id;
-    // transient — may be cross-day
     return TimeDuration::fromTrusted(type, session_.segment_start_time, now, segmentId);
 }
 
@@ -992,9 +1014,9 @@ void Timer::saveCheckpoint()
         return;
     }
 
-    // Don't save checkpoints while paused (e.g., HistoryDialog is open)
-    if (checkpoints_paused_) {
-        Logger::Log("[CHECKPOINT] Skipped - checkpoints paused");
+    // Don't save checkpoints while HistoryDialog is open
+    if (dialog_open_) {
+        Logger::Log("[CHECKPOINT] Skipped - dialog open");
         return;
     }
 
@@ -1040,19 +1062,35 @@ void Timer::saveCheckpointInternal(const QDateTime& now)
 void Timer::pauseCheckpoints()
 {
     QMutexLocker locker(&mutex_);
-    checkpoints_paused_ = true;
+    dialog_open_ = true;
     checkpointTimer_.stop();
-    Logger::Log("[CHECKPOINT] Checkpoints paused");
+    Logger::Log("[CHECKPOINT] Checkpoints paused (dialog open)");
 }
 
 void Timer::resumeCheckpoints()
 {
     QMutexLocker locker(&mutex_);
-    checkpoints_paused_ = false;
+    dialog_open_ = false;
+    Logger::Log("[CHECKPOINT] Checkpoints resumed (dialog closed)");
+
+    // Replay deferred events that were suspended while dialog was open.
+    if (pending_midnight_stop_) {
+        pending_midnight_stop_ = false;
+        pending_lock_event_ = LockEvent::None;
+        Logger::Log("[MIDNIGHT] Replaying deferred midnight stop after dialog close");
+        stopTimer(QDateTime::currentDateTime(), StopReason::MidnightScheduled);
+    } else if (pending_lock_event_ == LockEvent::LongOngoingLock) {
+        pending_lock_event_ = LockEvent::None;
+        Logger::Log("[LOCK] Replaying deferred LongOngoingLock after dialog close");
+        useTimerViaLockEvent(LockEvent::LongOngoingLock);
+    } else {
+        pending_lock_event_ = LockEvent::None;
+    }
+    // Restart checkpoint timer only after deferred events are replayed, so
+    // stopTimer/backpauseTimer can set mode_ before we decide whether to arm.
     if (checkpoint_interval_msec_ > 0 && mode_ == Mode::Activity && !is_locked_) {
         checkpointTimer_.start();
     }
-    Logger::Log("[CHECKPOINT] Checkpoints resumed");
 }
 
 qint64 Timer::reconcileOrphanCheckpoints(

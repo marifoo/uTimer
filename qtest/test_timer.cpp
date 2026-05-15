@@ -1218,3 +1218,104 @@ void TimerTest::test_X_stop_persists_via_commitSession_only()
     QVERIFY2(!fakeDb.callLog.contains("updateDurationsById"),
              "updateDurationsById must not be called; commitSession is the write path");
 }
+
+// Issue 3 Layer A: while dialog is open, LongOngoingLock must not call backpauseTimer.
+// After resumeCheckpoints(), the deferred event must be replayed.
+void TimerTest::test_dialog_open_blocks_backpause()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/autopause_enabled", true);
+    writer.setValue("uTimer/autopause_threshold_minutes", 1);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    const size_t dursBefore = tracker.session_.durations.size();
+
+    // Open dialog — suspends mutation
+    tracker.pauseCheckpoints();
+    QVERIFY(tracker.dialog_open_);
+
+    // Fire LongOngoingLock while dialog is open
+    tracker.useTimerViaLockEvent(LockEvent::LongOngoingLock);
+
+    // backpause must NOT have been applied
+    QCOMPARE(tracker.session_.durations.size(), dursBefore);
+    QVERIFY(tracker.mode_ == Timer::Mode::Activity);
+
+    // Pending event recorded
+    QCOMPARE(tracker.pending_lock_event_, LockEvent::LongOngoingLock);
+
+    // Close dialog — replay deferred LongOngoingLock
+    tracker.resumeCheckpoints();
+    QVERIFY(!tracker.dialog_open_);
+    QCOMPARE(tracker.pending_lock_event_, LockEvent::None);
+
+    // After replay, timer should be in Pause (backpause applied)
+    QCOMPARE(tracker.mode_, Timer::Mode::Pause);
+}
+
+// Issue 3 Layer A: pending_midnight_stop_ set directly, resumeCheckpoints replays it.
+void TimerTest::test_dialog_open_defers_midnight_stop()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+
+    Settings settings(settingsPath);
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // Simulate: dialog is open and midnight fired (deferred)
+    tracker.pauseCheckpoints();
+    tracker.pending_midnight_stop_ = true;
+
+    // Close dialog — replay deferred midnight stop
+    tracker.resumeCheckpoints();
+
+    QVERIFY(!tracker.pending_midnight_stop_);
+    QCOMPARE(tracker.mode_, Timer::Mode::None);
+}
+
+// Issue 3 Layer A: Lock bookkeeping (is_locked_) must still run even when dialog is open,
+// but saveCheckpointInternal must not be called.
+void TimerTest::test_dialog_open_allows_lock_bookkeeping()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+
+    Settings settings(settingsPath);
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    tracker.pauseCheckpoints();
+    QVERIFY(!tracker.is_locked_);
+
+    const size_t checksBefore = fakeDb.callLog.count("saveCheckpoint");
+
+    // Fire Lock while dialog is open
+    tracker.useTimerViaLockEvent(LockEvent::Lock);
+
+    // is_locked_ must be set (bookkeeping)
+    QVERIFY(tracker.is_locked_);
+
+    // saveCheckpoint (i.e. saveCheckpointInternal path via DB) must not have fired
+    QCOMPARE(fakeDb.callLog.count("saveCheckpoint"), checksBefore);
+
+    tracker.resumeCheckpoints();
+}

@@ -522,7 +522,7 @@ void HistoryDialogTest::test_historydialog_pauses_checkpoint_timer_for_dialog_li
 
     {
         HistoryDialog dialog(tracker, settings);
-        QVERIFY(tracker.checkpoints_paused_);
+        QVERIFY(tracker.dialog_open_);
         QVERIFY(!tracker.checkpointTimer_.isActive());
 
         tracker.saveCheckpoint();
@@ -543,7 +543,7 @@ void HistoryDialogTest::test_historydialog_pauses_checkpoint_timer_for_dialog_li
         QSqlDatabase::removeDatabase(connName);
     }
 
-    QVERIFY(!tracker.checkpoints_paused_);
+    QVERIFY(!tracker.dialog_open_);
     QVERIFY(tracker.checkpointTimer_.isActive());
 
     tracker.saveCheckpoint();
@@ -658,6 +658,8 @@ void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_curren
     }
 }
 
+// Issue 8: saveChanges() must refresh the ongoing end-time from the engine,
+// not preserve the stale snapshot captured at dialog-open time.
 void HistoryDialogTest::test_historydialog_save_uses_ongoing_snapshot_endtime_after_wait()
 {
     resetDatabaseFile();
@@ -675,6 +677,7 @@ void HistoryDialogTest::test_historydialog_save_uses_ongoing_snapshot_endtime_af
     const QDateTime snapshotEnd = dialog.pendingTimelines_[0].ongoing()->endTime;
     const QDateTime snapshotStart = dialog.pendingTimelines_[0].ongoing()->startTime;
 
+    // Wait so the engine's ongoing end-time advances past snapshotEnd
     QTest::qWait(200);
 
     dialog.done(QDialog::Accepted);
@@ -702,9 +705,15 @@ void HistoryDialogTest::test_historydialog_save_uses_ongoing_snapshot_endtime_af
         const QDateTime savedStartUtc(savedStartDate, savedStartTime, Qt::UTC);
         const QDateTime savedEndUtc(savedEndDate, savedEndTime, Qt::UTC);
 
+        // Start time is preserved exactly
         QCOMPARE(savedStartUtc, snapshotStart.toUTC());
-        QCOMPARE(savedEndUtc, snapshotEnd.toUTC());
-        QCOMPARE(savedDuration, snapshotStart.msecsTo(snapshotEnd));
+
+        // End-time must be strictly > snapshotEnd (refreshed, not stale)
+        QVERIFY2(savedEndUtc > snapshotEnd.toUTC(),
+                 "savedEndUtc must be > snapshotEnd: end-time was not refreshed");
+
+        // Duration reflects the refreshed end-time
+        QCOMPARE(savedDuration, snapshotStart.msecsTo(savedEndUtc.toLocalTime()));
 
         QVERIFY(!ongoingQuery.next());
         db.close();

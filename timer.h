@@ -143,8 +143,10 @@ private:
     SessionState session_;
     Mode mode_;
     bool was_active_before_autopause_;
-    bool is_locked_;  // Track if desktop is currently locked (to prevent checkpoints while locked)
-    bool checkpoints_paused_;  // Track if checkpoints are paused (e.g., while HistoryDialog is open)
+    bool is_locked_;     // Track if desktop is currently locked (to prevent checkpoints while locked)
+    bool dialog_open_;   // True while HistoryDialog is open (suspends mutation)
+    bool pending_midnight_stop_ = false;
+    LockEvent pending_lock_event_ = LockEvent::None;
     SessionStore& db_;
     mutable QRecursiveMutex mutex_;  // Protects state transitions from concurrent access
     QTimer checkpointTimer_;  // Timer for periodic checkpoint saving

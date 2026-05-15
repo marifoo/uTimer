@@ -468,6 +468,27 @@ void HistoryDialog::saveChanges()
         return;
     }
 
+    // Refresh ongoing end-time from engine (Issue 8 / Issue 3 Layer C).
+    // Skip if the user explicitly edited the ongoing slot — a rotated
+    // segment_id (e.g. after a split) signals a deliberate edit.
+    if (!pendingTimelines_.empty() && pages_[0].isCurrent) {
+        const auto fresh = timetracker_.getOngoingDuration();
+        const auto& cur  = pendingTimelines_[0].ongoing();
+        const bool stillSameOngoing =
+            fresh.has_value() && cur.has_value() &&
+            fresh->segment_id == cur->segment_id;
+        if (stillSameOngoing) {
+            pendingTimelines_[0] = Timeline(
+                pendingTimelines_[0].completed(), fresh);
+        } else if (!fresh.has_value() && cur.has_value()) {
+            // Engine has no valid ongoing (e.g. cross-midnight after a deferred
+            // midnight stop). Clear it so applyEdits does not anchor a stale
+            // start time in session_, which would orphan a checkpoint row.
+            pendingTimelines_[0] = Timeline(
+                pendingTimelines_[0].completed(), std::nullopt);
+        }
+    }
+
     // Step A: Build unified timeline + origin map
     std::deque<TimeDuration> unifiedCompleted;
     QHash<QString, bool> originIsMemory;  // segment_id → true if memory row

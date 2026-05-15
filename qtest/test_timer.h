@@ -90,6 +90,11 @@ private slots:
     // Phase 4 test gate (T4)
     // Test X: stop persists state via commitSession only.
     void test_X_stop_persists_via_commitSession_only();
+
+    // Issue 3 / Issue 8: dialog-open suspension tests
+    void test_dialog_open_blocks_backpause();
+    void test_dialog_open_defers_midnight_stop();
+    void test_dialog_open_allows_lock_bookkeeping();
 };
 
 #endif // TEST_TIMER_H
