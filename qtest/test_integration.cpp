@@ -302,9 +302,10 @@ void IntegrationTest::test_integration_retention_cleanup_preserves_current()
     current.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-90));
     QVERIFY(manager.saveDurations(current, TransactionMode::Append));
     
-    // Force cleanup by reopening database
+    // Cleanup runs in checkSchemaOnStartup(), not in the constructor.
     SqliteSessionStore manager2(settings);
-    
+    QVERIFY(manager2.checkSchemaOnStartup());
+
     auto loaded = manager2.loadDurations();
     QVERIFY(loaded.size() >= 1); // Current day preserved
     

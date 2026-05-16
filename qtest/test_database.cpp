@@ -1293,14 +1293,12 @@ void DatabaseTest::test_hasEntriesForDate_utc_regression()
 
 void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
 {
-    // The retention DELETE runs at most once per SqliteSessionStore lifetime.
-    // With a long-lived connection, cleanup runs in the constructor's ensureOpen()
-    // call.  Subsequent ensureOpen() calls are no-ops (connection already open).
-    // We verify: (1) after construction the flag is set, (2) the old entry is
-    // removed, (3) additional ensureOpen() calls leave the DB untouched.
+    // Retention cleanup now runs in checkSchemaOnStartup(), not in the
+    // constructor.  The test verifies: (1) after construction but before
+    // checkSchemaOnStartup() the old entry is still present, (2) after
+    // checkSchemaOnStartup() the old entry is removed, (3) additional
+    // ensureOpen() calls are no-ops and do not re-trigger cleanup.
 
-    // Arrange: create the schema via a bootstrap manager so we can seed entries
-    // before the test manager is constructed.
     resetDatabaseFile();
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
@@ -1308,12 +1306,9 @@ void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
 
     {
         SqliteSessionStore bootstrap(settings);
-        // saveDurations with empty set just ensures the schema exists.
         QVERIFY(bootstrap.saveDurations({}, TransactionMode::Append));
-    } // bootstrap destroyed — connection closed
+    }
 
-    // Seed entries directly (bypass the store) so that an old entry exists
-    // before the test manager is constructed.
     QDateTime now = QDateTime::currentDateTimeUtc();
     const QString connName = "seed_retention_test";
     {
@@ -1322,7 +1317,6 @@ void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
         QVERIFY(db.open());
         QSqlQuery query(db);
 
-        // Old entry: 10 days ago (should be pruned by 2-day retention)
         QDateTime oldStart = now.addDays(-10);
         QDateTime oldEnd = oldStart.addSecs(60);
         query.prepare(
@@ -1337,7 +1331,6 @@ void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
         query.bindValue(":et", oldEnd.time().toString("HH:mm:ss.zzz"));
         QVERIFY(query.exec());
 
-        // Recent entry: today (should survive cleanup)
         QDateTime recentStart = now.addSecs(-60);
         QDateTime recentEnd = now;
         query.bindValue(":sid", TimeDuration::createSegmentId());
@@ -1352,34 +1345,24 @@ void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
     }
     QSqlDatabase::removeDatabase(connName);
 
-    // Act: construct a fresh manager.  The constructor calls ensureOpen() which
-    // runs retention cleanup exactly once, removing the old entry.
+    // Construction does not run cleanup — both entries are still present.
     SqliteSessionStore manager(settings);
+    QCOMPARE(static_cast<int>(manager.loadDurations().size()), 2);
 
-    // Assert: cleanup ran during construction.
-    QVERIFY(manager.retention_cleanup_done_);
-
-    // Additional ensureOpen() calls are no-ops (connection already open).
-    for (int i = 0; i < 10; ++i) {
-        QVERIFY(manager.ensureOpen());
-    }
-
-    // Flag still true — cleanup did not re-run.
-    QVERIFY(manager.retention_cleanup_done_);
-
-    // The old entry was removed; the recent one survives.
+    // checkSchemaOnStartup() runs performRetentionCleanup() — old entry removed.
+    QVERIFY(manager.checkSchemaOnStartup());
     auto loaded = manager.loadDurations();
     QCOMPARE(static_cast<int>(loaded.size()), 1);
 }
 
 void DatabaseTest::test_retention_cleanup_retries_after_failure()
 {
-    // If the cleanup transaction fails (e.g. because the DB file is read-only
-    // at construction time), retention_cleanup_done_ must remain false and the
-    // connection must be closed.  ensureOpen() is a pure health check and does
-    // NOT retry the cleanup — that is handled in checkSchemaOnStartup() (Step 7).
+    // Cleanup runs in checkSchemaOnStartup(), not in the constructor.  When the
+    // DB is read-only at construction time, the constructor detects the unwritable
+    // file (via QFileInfo::isWritable()) and leaves the connection closed.
+    // checkSchemaOnStartup() fails while the file is read-only.  Once write
+    // permissions are restored, checkSchemaOnStartup() succeeds and runs cleanup.
 
-    // Arrange: create schema and seed entries via a writable manager.
     resetDatabaseFile();
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
@@ -1392,30 +1375,28 @@ void DatabaseTest::test_retention_cleanup_retries_after_failure()
         durations.emplace_back(DurationType::Activity, now.addDays(-10), now.addDays(-10).addSecs(60));
         durations.emplace_back(DurationType::Activity, now.addSecs(-60), now);
         QVERIFY(seed.saveDurations(durations, TransactionMode::Replace));
-    } // seed destroyed — connection closed
+    }
 
-    // Make the DB read-only so the retention DELETE will fail.
+    // Make the DB read-only.
     QFile dbFile(db_path_);
     QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::ReadUser));
 
-    // Construct a new manager while the DB is read-only.  initializeNewConnection()
-    // fails at the retention DELETE, so the constructor closes the connection.
+    // Constructor detects read-only file and leaves connection closed.
     SqliteSessionStore manager(settings);
-    QVERIFY(!manager.retention_cleanup_done_);
-    QVERIFY(!manager.db.isOpen()); // connection was closed on cleanup failure
+    QVERIFY(!manager.db.isOpen());
+
+    // checkSchemaOnStartup() fails while DB is read-only (ensureOpen() returns false).
+    QVERIFY(!manager.checkSchemaOnStartup());
 
     // Restore write permissions.
     QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser));
 
-    // ensureOpen() reopens the connection successfully.
-    QVERIFY(manager.ensureOpen());
+    // checkSchemaOnStartup() now succeeds and runs cleanup.
+    QVERIFY(manager.checkSchemaOnStartup());
 
-    // Cleanup did NOT retry via ensureOpen() — flag stays false.
-    QVERIFY(!manager.retention_cleanup_done_);
-
-    // Both entries remain (cleanup never ran).
+    // Old entry removed; recent entry survives.
     auto loaded = manager.loadDurations();
-    QCOMPARE(static_cast<int>(loaded.size()), 2);
+    QCOMPARE(static_cast<int>(loaded.size()), 1);
 }
 
 /**

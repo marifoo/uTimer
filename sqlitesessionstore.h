@@ -18,10 +18,12 @@
 enum class TransactionMode { Append, Replace };
 
 // Connection lifecycle: the database is opened in the constructor
-// (initializeNewConnection runs schema migrations, indexes, PRAGMA, and retention
-// cleanup exactly once) and closed in the destructor.  All public methods call
-// ensureOpen() as a lightweight health check; if the connection is unexpectedly
-// lost, ensureOpen() reopens it without re-running migrations.
+// (initializeNewConnection runs schema migrations, indexes, and PRAGMA once) and
+// closed in the destructor.  Retention cleanup and backup pruning run once per
+// startup via checkSchemaOnStartup() — safe to call more than once (idempotent),
+// but intended to be called once.  All public methods call ensureOpen() as a
+// lightweight health check; if the connection is unexpectedly lost, ensureOpen()
+// reopens it without re-running migrations.
 
 class SqliteSessionStore : public QObject, public SessionStore
 {
@@ -72,6 +74,8 @@ private:
     bool ensureSegmentIdColumn();
     bool ensureSettingsTable();
     bool createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
+    void performRetentionCleanup();
+    void pruneOldBackups(int keepCount = 5);
 
 #ifndef QT_NO_DEBUG
     /// Debug-build verification: checks that no segment_id appears more than
@@ -81,10 +85,6 @@ private:
     void checkSegmentIdUniqueness();
 #endif
 
-    // Tracks whether retention cleanup ran during this process lifetime.
-    // Set to true on success; left false on failure (no automatic retry — Step 7
-    // moves this to checkSchemaOnStartup() where it can be called explicitly).
-    bool retention_cleanup_done_ = false;
 };
 
 #endif // SQLITESESSIONSTORE_H

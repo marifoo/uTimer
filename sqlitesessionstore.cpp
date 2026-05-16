@@ -26,7 +26,8 @@
  *
  * Configuration:
  * - history_days_to_keep_ = 0 disables database entirely (all methods return early)
- * - Old entries automatically purged once per session on the first successful open
+ * - Old entries are purged once per startup via checkSchemaOnStartup() →
+ *   performRetentionCleanup(), not in the constructor.
  */
 
 #include "sqlitesessionstore.h"
@@ -38,6 +39,7 @@
 #include <QVariant>
 #include <QFile>
 #include <QFileInfo>
+#include <QStorageInfo>
 #include <QTextStream>
 #include <atomic>
 #include "logger.h"
@@ -73,6 +75,15 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
     // Open the connection and run one-time schema setup.
     if (!db.open()) {
         Logger::Log("[DB] Error opening database: " + db.lastError().text());
+        return;
+    }
+    // Reject read-only files immediately.  Without this check, db.open() can
+    // succeed on a read-only SQLite file (opening in read-only mode), leaving
+    // the connection open but unable to write — identical to the ensureOpen()
+    // guard added in Step 6.
+    if (!QFileInfo(db.databaseName()).isWritable()) {
+        Logger::Log("[DB] Warning: Database file is not writable.");
+        db.close();
         return;
     }
     if (!initializeNewConnection()) {
@@ -207,30 +218,6 @@ bool SqliteSessionStore::initializeNewConnection()
         Logger::Log("[DB] Warning: Failed to set synchronous=NORMAL: " + syncQuery.lastError().text());
     }
 
-    // Retention cleanup — runs once per process (this method is only called
-    // from the constructor).
-    if (!retention_cleanup_done_) {
-        if (!db.transaction()) {
-            Logger::Log("[DB] Error starting cleanup transaction: " + db.lastError().text());
-        } else {
-            QSqlQuery query(db);
-            query.prepare("DELETE FROM durations WHERE end_date < date('now', '-' || :days || ' days')");
-            query.bindValue(":days", static_cast<int>(history_days_to_keep_));
-
-            if (!query.exec()) {
-                db.rollback();
-                Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
-                return false;
-            }
-
-            if (!db.commit()) {
-                Logger::Log("[DB] Error committing cleanup transaction: " + db.lastError().text());
-            } else {
-                retention_cleanup_done_ = true;
-            }
-        }
-    }
-
     return true;
 }
 
@@ -283,43 +270,92 @@ void SqliteSessionStore::checkSegmentIdUniqueness()
 #endif // QT_NO_DEBUG
 
 /**
- * Public method to check schema validity on application startup.
+ * Schema validation + startup housekeeping.  Call once at application startup.
  *
- * This should be called before any other database operations to ensure
- * the database schema is compatible with the current version. If the
- * database file exists but has an outdated schema, returns false so
- * the application can show an appropriate error message.
+ * Safe to call more than once (all operations are idempotent), but intended to
+ * run once: each call re-runs retention cleanup and backup pruning.
  *
- * Returns true if:
- * - History storage is disabled (no DB needed)
- * - Database file doesn't exist (will be created fresh)
- * - Database schema is valid
- *
- * Returns false if:
- * - Database exists but schema is outdated
+ * Returns true if the database is ready for use (or history is disabled / file
+ * doesn't exist yet).  Returns false if the schema is outdated or the connection
+ * cannot be opened.
  */
 bool SqliteSessionStore::checkSchemaOnStartup()
 {
     QMutexLocker locker(&db_mutex_);
 
-    // If history storage is disabled, no need to check
     if (history_days_to_keep_ == 0) {
         return true;
     }
 
-    // If database file doesn't exist, it will be created fresh with correct schema
     if (!QFile::exists(db.databaseName())) {
         return true;
     }
 
-    // The constructor already opened the connection and ran all migrations via
-    // initializeNewConnection().  ensureOpen() here is a health check only —
-    // it reopens if needed but does NOT re-run migrations.
+    // The constructor already ran schema migrations via initializeNewConnection().
+    // ensureOpen() here is a health check only — it reopens if needed but does
+    // NOT re-run migrations.
     if (!ensureOpen()) {
         return false;
     }
 
-    return validateSchema();
+    if (!validateSchema()) {
+        return false;
+    }
+
+    // Retention cleanup and backup pruning run once per startup, after schema is
+    // confirmed valid.  Failures are non-fatal (logged, but do not abort startup).
+    performRetentionCleanup();
+    pruneOldBackups();
+
+    return true;
+}
+
+/**
+ * Deletes entries older than history_days_to_keep_ from the durations table.
+ * Called once per startup from checkSchemaOnStartup() after schema validation.
+ * Non-fatal: failures are logged but do not propagate to the caller.
+ */
+void SqliteSessionStore::performRetentionCleanup()
+{
+    if (!db.transaction()) {
+        Logger::Log("[DB] Error starting retention cleanup transaction: " + db.lastError().text());
+        return;
+    }
+    QSqlQuery query(db);
+    query.prepare("DELETE FROM durations WHERE end_date < date('now', '-' || :days || ' days')");
+    query.bindValue(":days", static_cast<int>(history_days_to_keep_));
+    if (!query.exec()) {
+        db.rollback();
+        Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
+        return;
+    }
+    if (!db.commit()) {
+        Logger::Log("[DB] Error committing retention cleanup: " + db.lastError().text());
+        db.rollback();
+    }
+}
+
+/**
+ * Prunes old backup files in the database directory, keeping only the
+ * `keepCount` most recent of each file type (.backup and .durations.txt).
+ * Files are named with ISO timestamps so alphabetical sort = chronological.
+ * Called once per startup from checkSchemaOnStartup(). Non-fatal.
+ */
+void SqliteSessionStore::pruneOldBackups(int keepCount)
+{
+    QDir dir(QFileInfo(db.databaseName()).absoluteDir());
+    const QString base = QFileInfo(db.databaseName()).fileName();
+
+    for (const QString& pattern : {base + ".*.backup", base + ".*.durations.txt"}) {
+        QStringList files = dir.entryList(
+            QStringList() << pattern, QDir::Files, QDir::Name);
+        while (files.size() > keepCount) {
+            const QString name = files.takeFirst(); // oldest (alphabetical = chronological)
+            if (!QFile::remove(dir.filePath(name))) {
+                Logger::Log("[DB] Warning: Failed to remove old backup file: " + name);
+            }
+        }
+    }
 }
 
 /**
@@ -533,9 +569,21 @@ bool SqliteSessionStore::ensureSettingsTable()
  */
 bool SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
-    // Don't create backup if database doesn't exist
     if (!QFile::exists(db.databaseName())) {
-        return true; // No file to backup, not an error
+        return true;
+    }
+
+    // Skip backup if disk space is low (< 100 MB).  Proceeding with a full-table
+    // write on a nearly-full volume risks leaving both the DB and the backup in a
+    // corrupted state; warn once and continue without a backup instead.
+    {
+        QStorageInfo storage(QFileInfo(db.databaseName()).absoluteDir().absolutePath());
+        const qint64 available = storage.bytesAvailable();
+        if (available >= 0 && available < 100LL * 1024 * 1024) {
+            Logger::Log(QString("[DB] Warning: Low disk space (%1 MB). Skipping backup.")
+                .arg(available / (1024 * 1024)));
+            return true;
+        }
     }
 
     // Close database before copying
