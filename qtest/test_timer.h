@@ -106,6 +106,10 @@ private slots:
 
     // Step 4: T8 — destructor ordering (crash-absence smoke test)
     void test_T8_destructor_does_not_crash_while_active();
+
+    // Step 5: C6 + T2 — beginExclusiveEdit/endExclusiveEdit + checkpoint guard
+    void test_T2_replaceCurrentDurations_skips_checkpoint_while_dialog_open();
+    void test_C6_replaceCurrentDurations_writes_checkpoint_after_endExclusiveEdit();
 };
 
 #endif // TEST_TIMER_H

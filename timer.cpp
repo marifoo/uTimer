@@ -832,6 +832,13 @@ void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations
         return;
     }
 
+    if (dialog_open_ || is_locked_) {
+#ifndef QT_NO_DEBUG
+        checkDurationInvariants();
+#endif
+        return;
+    }
+
     db_.saveCheckpoint(seg.type,
                        seg.duration,
                        seg.startTime,
@@ -1068,7 +1075,7 @@ void Timer::saveCheckpointInternal(const QDateTime& now)
     }
 }
 
-void Timer::pauseCheckpoints()
+void Timer::beginExclusiveEdit()
 {
     QMutexLocker locker(&mutex_);
     dialog_open_ = true;
@@ -1076,7 +1083,7 @@ void Timer::pauseCheckpoints()
     Logger::Log("[CHECKPOINT] Checkpoints paused (dialog open)");
 }
 
-void Timer::resumeCheckpoints()
+void Timer::endExclusiveEdit()
 {
     QMutexLocker locker(&mutex_);
     dialog_open_ = false;

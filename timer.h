@@ -239,8 +239,8 @@ public:
     bool appendDurationsToDB();
     bool updateDurationsInDB();
     bool replaceAll(const Timeline& history, const Timeline& session);
-    void pauseCheckpoints();
-    void resumeCheckpoints();
+    void beginExclusiveEdit();
+    void endExclusiveEdit();
     bool canMarkCleanShutdown() const;
 
 public slots:

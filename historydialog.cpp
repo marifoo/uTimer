@@ -49,7 +49,7 @@ HistoryDialog::HistoryDialog(Timer& timetracker, const Settings& settings, QWidg
     : QDialog(parent), timetracker_(timetracker), settings_(settings), pageIndex_(0)
 {
     // Pause checkpoints while dialog is open to prevent race conditions
-    timetracker_.pauseCheckpoints();
+    timetracker_.beginExclusiveEdit();
 
     createPages();
     setupUI();
@@ -816,5 +816,5 @@ HistoryDialog::~HistoryDialog() {
     assertPendingOriginsInvariant();
 
     // Resume checkpoints now that dialog is closed
-    timetracker_.resumeCheckpoints();
+    timetracker_.endExclusiveEdit();
 }
