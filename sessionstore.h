@@ -76,6 +76,26 @@ struct ReconcileResult {
     bool ok = true;
 };
 
+/**
+ * Tri-state result of consumeLastCleanShutdownMarker().
+ *
+ * Status semantics:
+ *   Found    — marker was present; `timestamp` holds its value.
+ *   NotFound — DB was queried successfully; no marker existed.
+ *   Error    — a transaction or query failure occurred; state is unknown.
+ *              Callers should refuse to reconcile orphan checkpoints on Error
+ *              because doing so on unknown state may overwrite valid data.
+ *
+ * The outer std::optional<MarkerResult> on consumeLastCleanShutdownMarker()
+ * is std::nullopt only when history storage is entirely disabled
+ * (history_days_to_keep_ == 0).  All other outcomes are expressed via Status.
+ */
+struct MarkerResult {
+    enum class Status { Found, NotFound, Error };
+    QDateTime timestamp;  // valid only when status == Found
+    Status status = Status::NotFound;
+};
+
 class SessionStore
 {
 public:
@@ -105,7 +125,10 @@ public:
     virtual ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
                                                             const std::vector<long long>& outrightDropIds) = 0;
     virtual bool setLastCleanShutdownMarker(const QDateTime& timestamp) = 0;
-    virtual std::optional<QDateTime> consumeLastCleanShutdownMarker() = 0;
+    // Reads and deletes the last-clean-shutdown marker in a single transaction.
+    // Returns nullopt only when history storage is disabled.  All other outcomes
+    // (found, not found, error) are expressed via MarkerResult::Status.
+    virtual std::optional<MarkerResult> consumeLastCleanShutdownMarker() = 0;
 };
 
 #endif // SESSIONSTORE_H

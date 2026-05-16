@@ -44,7 +44,7 @@ public:
     ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
                                                    const std::vector<long long>& outrightDropIds) override;
     bool setLastCleanShutdownMarker(const QDateTime& timestamp) override;
-    std::optional<QDateTime> consumeLastCleanShutdownMarker() override;
+    std::optional<MarkerResult> consumeLastCleanShutdownMarker() override;
 
     // ---- Call log (for assertions) ----
 
@@ -85,7 +85,8 @@ public:
     EntriesForDateResult entriesForDateResult = EntriesForDateResult::No;
 
     /// Marker returned (once) by consumeLastCleanShutdownMarker().
-    std::optional<QDateTime> cleanShutdownMarker;
+    /// Default is NotFound so Timer::reconcileOrphanCheckpoints() runs normally.
+    std::optional<MarkerResult> cleanShutdownMarker = MarkerResult { {}, MarkerResult::Status::NotFound };
 };
 
 #endif // FAKESESSIONSTORE_H

@@ -180,7 +180,7 @@ private:
     bool appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
     qint64 reconcileOrphanCheckpoints(
         const std::deque<OrphanCheckpoint>& orphans,
-        const std::optional<QDateTime>& cleanShutdownMarker);
+        const std::optional<MarkerResult>& markerResult);
 
 #ifndef QT_NO_DEBUG
     /// Debug-build state snapshot used by StateGuard to detect unlogged mutations.

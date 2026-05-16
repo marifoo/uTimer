@@ -86,7 +86,7 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
         db.close();
         return;
     }
-    if (!initializeNewConnection()) {
+    if (!ensureSchema()) {
         db.close();
     }
 }
@@ -108,9 +108,9 @@ SqliteSessionStore::~SqliteSessionStore()
  *
  * Returns true immediately if the connection is already open.  If the
  * connection was lost unexpectedly (e.g. after an OS-level file error),
- * reopens it and returns true.  Schema migrations, indexes, PRAGMA, and
- * retention cleanup are NOT re-applied here — those run once at construction
- * time via initializeNewConnection().
+ * reopens it and returns true.  Schema migrations, indexes, and PRAGMA are NOT
+ * re-applied here — those run via ensureSchema() (called from the constructor
+ * and idempotently from checkSchemaOnStartup()).
  *
  * After reopening, verifies the file is writable at the OS level.  SQLite can
  * open a read-only file in read-only mode (db.open() returns true), but all
@@ -139,10 +139,12 @@ bool SqliteSessionStore::ensureOpen()
 }
 
 /**
- * One-time schema setup: called from the constructor immediately after db.open().
+ * Idempotent schema setup: called from the constructor and checkSchemaOnStartup().
  *
- * Creates the durations table (if needed), runs forward-compatibility migrations,
- * creates indexes, sets PRAGMA synchronous=NORMAL, and runs retention cleanup.
+ * Creates the durations table (if needed), runs forward-compatibility migrations
+ * (creating a pre-migration backup before any table rebuild), creates indexes,
+ * and sets PRAGMA synchronous=NORMAL.  All DDL uses IF NOT EXISTS so repeated
+ * calls are safe.
  *
  * Journal mode note: this app uses SQLite's default rollback journal mode, NOT
  * WAL.  WAL's concurrent-readers advantage is irrelevant for a single-process
@@ -150,10 +152,10 @@ bool SqliteSessionStore::ensureOpen()
  * sidecars), which simplifies close-copy-reopen backups and portability.
  *
  * Returns false on schema/migration failures (caller closes the connection).
- * Non-fatal failures (index creation, PRAGMA, retention cleanup) are logged and
- * allowed through — the DB is still usable for reads and writes.
+ * Non-fatal failures (index creation, PRAGMA) are logged and allowed through —
+ * the DB is still usable for reads and writes.
  */
-bool SqliteSessionStore::initializeNewConnection()
+bool SqliteSessionStore::ensureSchema()
 {
     // Create the durations table if it doesn't exist
     QSqlQuery query_new(db);
@@ -291,14 +293,16 @@ bool SqliteSessionStore::checkSchemaOnStartup()
         return true;
     }
 
-    // The constructor already ran schema migrations via initializeNewConnection().
-    // ensureOpen() here is a health check only — it reopens if needed but does
-    // NOT re-run migrations.
+    // The constructor already ran ensureSchema(); this call is idempotent and
+    // will skip migrations that have already been applied.  Calling ensureSchema()
+    // here (rather than validateSchema() alone) ensures that if a migration is
+    // somehow still needed at startup time, a pre-migration backup is created
+    // before the table rebuild runs (S15).
     if (!ensureOpen()) {
         return false;
     }
 
-    if (!validateSchema()) {
+    if (!ensureSchema()) {
         return false;
     }
 
@@ -340,6 +344,11 @@ void SqliteSessionStore::performRetentionCleanup()
  * `keepCount` most recent of each file type (.backup and .durations.txt).
  * Files are named with ISO timestamps so alphabetical sort = chronological.
  * Called once per startup from checkSchemaOnStartup(). Non-fatal.
+ *
+ * Note: the glob "*.backup" also matches "*.pre-migration.backup" files created
+ * by ensureSegmentIdColumn().  Both count toward the same keepCount limit, which
+ * is intentional — pre-migration backups are created at most once per schema
+ * upgrade and are unlikely to crowd out regular backups in practice.
  */
 void SqliteSessionStore::pruneOldBackups(int keepCount)
 {
@@ -460,6 +469,24 @@ bool SqliteSessionStore::ensureSegmentIdColumn()
 
     Logger::Log("[DB] Migrating schema: rebuilding durations table with segment_id identity");
 
+    // S13: Create a pre-migration backup before the destructive table rebuild.
+    // Close the DB, copy the file, reopen — same pattern as createBackup().
+    // The PRAGMA synchronous=NORMAL will be re-applied at the end of ensureSchema().
+    if (QFile::exists(db.databaseName())) {
+        const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH-mm-ss");
+        const QString backupPath = db.databaseName() + "." + timestamp + ".pre-migration.backup";
+        db.close();
+        if (!QFile::copy(db.databaseName(), backupPath)) {
+            Logger::Log("[DB] Warning: Failed to create pre-migration backup");
+        } else {
+            Logger::Log("[DB] Created pre-migration backup: " + backupPath);
+        }
+        if (!db.open()) {
+            Logger::Log("[DB] CRITICAL: Failed to reopen database after pre-migration backup");
+            return false;
+        }
+    }
+
     if (!db.transaction()) {
         return false;
     }
@@ -566,11 +593,15 @@ bool SqliteSessionStore::ensureSettingsTable()
  *   The caller (a public method) must already hold db_mutex_, which prevents
  *   any other SqliteSessionStore operation from seeing the closed connection.
  *   QRecursiveMutex allows re-entrant calls within the same thread.
+ *
+ * TODO(S16): The current close-copy-reopen approach is correct for rollback-journal
+ * mode (no -wal/-shm sidecars).  If WAL mode is ever enabled, switch to SQLite's
+ * online backup API (sqlite3_backup_*) so the source DB stays open during the copy.
  */
-bool SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
+BackupResult SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
 {
     if (!QFile::exists(db.databaseName())) {
-        return true;
+        return BackupResult::Success;
     }
 
     // Skip backup if disk space is low (< 100 MB).  Proceeding with a full-table
@@ -582,7 +613,7 @@ bool SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations,
         if (available >= 0 && available < 100LL * 1024 * 1024) {
             Logger::Log(QString("[DB] Warning: Low disk space (%1 MB). Skipping backup.")
                 .arg(available / (1024 * 1024)));
-            return true;
+            return BackupResult::Success;
         }
     }
 
@@ -614,7 +645,7 @@ bool SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations,
         out << "Total Durations: " << durations.size() << "\n";
         out << "Timestamp: " << QDateTime::currentDateTime().toString(Qt::ISODate) << "\n";
         out << "----------------------------------------\n";
-        
+
         for (const auto& d : durations) {
             out << "Type: " << (d.type == DurationType::Activity ? "Activity" : "Pause") << " | ";
             out << "Duration: " << d.duration << "ms | ";
@@ -623,7 +654,7 @@ bool SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations,
             out << "End Date: " << d.endTime.toUTC().date().toString(Qt::ISODate) << " | ";
             out << "End Time: " << d.endTime.toUTC().time().toString("HH:mm:ss.zzz") << "\n";
         }
-        
+
         durationsFile.close();
         Logger::Log("[DB] Created durations log: " + durationsFileName);
     } else {
@@ -632,17 +663,17 @@ bool SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations,
 
     // Reopen database if it was open before.
     // Re-apply PRAGMA synchronous=NORMAL since reopening creates a fresh connection
-    // that loses all session-level PRAGMAs set in initializeNewConnection().
+    // that loses all session-level PRAGMAs set in ensureSchema().
     if (wasOpen) {
         if (!db.open()) {
             Logger::Log("[DB] CRITICAL: Failed to reopen database after backup: " + db.lastError().text());
-            return false;
+            return BackupResult::ReopenFailed;
         }
         QSqlQuery pragmaQuery(db);
         pragmaQuery.exec("PRAGMA synchronous=NORMAL");
     }
 
-    return success;
+    return success ? BackupResult::Success : BackupResult::BackupFailed;
 }
 
 /**
@@ -697,17 +728,21 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
         return true;
     }
 
-    // Create backup before any write operation
-    if (!createBackup(durations, mode)) {
-        {
-            QString modeStr = (mode == TransactionMode::Replace) ? "REPLACE" : "APPEND";
-            Logger::Log("[DB] Warning: Backup failed before " + modeStr + " operation - proceeding without backup");
-        }
-    }
-
+    // Validate connection first (S5: ensureOpen before createBackup so we don't
+    // create a backup for a DB we can't open).
     if (!ensureOpen()) {
         Logger::Log("[DB] Could not open DB to save Durations");
         return false;
+    }
+
+    const BackupResult backup = createBackup(durations, mode);
+    if (backup == BackupResult::ReopenFailed) {
+        Logger::Log("[DB] CRITICAL: DB connection lost after backup - aborting save");
+        return false;
+    }
+    if (backup != BackupResult::Success) {
+        const QString modeStr = (mode == TransactionMode::Replace) ? "REPLACE" : "APPEND";
+        Logger::Log("[DB] Warning: Backup failed before " + modeStr + " operation - proceeding without backup");
     }
 
     if (!db.transaction()) {
@@ -805,13 +840,18 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
     allDurations.insert(allDurations.end(), historyDurations.begin(), historyDurations.end());
     allDurations.insert(allDurations.end(), currentSessionDurations.begin(), currentSessionDurations.end());
 
-    if (!createBackup(allDurations, TransactionMode::Replace)) {
-        Logger::Log("[DB] Warning: Backup failed before REPLACE operation - proceeding without backup");
-    }
-
     if (!ensureOpen()) {
         Logger::Log("[DB] Could not open DB to replace durations");
         return false;
+    }
+
+    const BackupResult backup = createBackup(allDurations, TransactionMode::Replace);
+    if (backup == BackupResult::ReopenFailed) {
+        Logger::Log("[DB] CRITICAL: DB connection lost after backup - aborting replace");
+        return false;
+    }
+    if (backup != BackupResult::Success) {
+        Logger::Log("[DB] Warning: Backup failed before REPLACE operation - proceeding without backup");
     }
 
     if (!db.transaction()) {
@@ -1559,7 +1599,7 @@ bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
     return committed;
 }
 
-std::optional<QDateTime> SqliteSessionStore::consumeLastCleanShutdownMarker()
+std::optional<MarkerResult> SqliteSessionStore::consumeLastCleanShutdownMarker()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1568,25 +1608,29 @@ std::optional<QDateTime> SqliteSessionStore::consumeLastCleanShutdownMarker()
     }
 
     if (!ensureOpen()) {
-        return std::nullopt;
+        return MarkerResult { {}, MarkerResult::Status::Error };
     }
 
     if (!db.transaction()) {
-        return std::nullopt;
+        return MarkerResult { {}, MarkerResult::Status::Error };
     }
 
-    std::optional<QDateTime> marker;
+    std::optional<QDateTime> parsedTs;
     QSqlQuery readQuery(db);
     readQuery.prepare("SELECT value FROM app_settings WHERE key = :key");
     readQuery.bindValue(":key", QString::fromLatin1(kLastCleanShutdownKey));
-    if (readQuery.exec() && readQuery.next()) {
+    if (!readQuery.exec()) {
+        db.rollback();
+        return MarkerResult { {}, MarkerResult::Status::Error };
+    }
+    if (readQuery.next()) {
         const QString value = readQuery.value(0).toString();
         QDateTime parsed = QDateTime::fromString(value, Qt::ISODateWithMs);
         if (!parsed.isValid()) {
             parsed = QDateTime::fromString(value, Qt::ISODate);
         }
         if (parsed.isValid()) {
-            marker = parsed.toLocalTime();
+            parsedTs = parsed.toLocalTime();
         }
     }
 
@@ -1595,14 +1639,16 @@ std::optional<QDateTime> SqliteSessionStore::consumeLastCleanShutdownMarker()
     deleteQuery.bindValue(":key", QString::fromLatin1(kLastCleanShutdownKey));
     if (!deleteQuery.exec()) {
         db.rollback();
-        return std::nullopt;
+        return MarkerResult { {}, MarkerResult::Status::Error };
     }
 
-    const bool committed = db.commit();
-    if (!committed) {
+    if (!db.commit()) {
         db.rollback();
-        return std::nullopt;
+        return MarkerResult { {}, MarkerResult::Status::Error };
     }
 
-    return marker;
+    if (parsedTs.has_value()) {
+        return MarkerResult { *parsedTs, MarkerResult::Status::Found };
+    }
+    return MarkerResult { {}, MarkerResult::Status::NotFound };
 }

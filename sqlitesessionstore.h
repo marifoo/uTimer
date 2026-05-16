@@ -17,8 +17,16 @@
 // so it can be removed from types.h.
 enum class TransactionMode { Append, Replace };
 
+// Three-way result returned by createBackup().
+//   Success      — file copied and DB reopened.
+//   BackupFailed — file copy failed; DB connection state is unchanged (caller
+//                  may proceed without a backup — data is not at risk yet).
+//   ReopenFailed — DB could not be reopened after the close-copy step; caller
+//                  must abort the pending write — the connection is dead.
+enum class BackupResult { Success, BackupFailed, ReopenFailed };
+
 // Connection lifecycle: the database is opened in the constructor
-// (initializeNewConnection runs schema migrations, indexes, and PRAGMA once) and
+// (ensureSchema runs schema migrations, indexes, and PRAGMA once) and
 // closed in the destructor.  Retention cleanup and backup pruning run once per
 // startup via checkSchemaOnStartup() — safe to call more than once (idempotent),
 // but intended to be called once.  All public methods call ensureOpen() as a
@@ -38,6 +46,13 @@ public:
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
     bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId) override;
     bool checkSchemaOnStartup() override;
+    void flushToDisc() override;
+    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
+    bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc) override;
+    ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
+                                                   const std::vector<long long>& outrightDropIds) override;
+    bool setLastCleanShutdownMarker(const QDateTime& timestamp) override;
+    std::optional<MarkerResult> consumeLastCleanShutdownMarker() override;
 
     // Non-virtual helpers kept for test seeding and internal use.
     // No longer part of SessionStore — callers that previously used the
@@ -46,13 +61,6 @@ public:
                        const std::vector<QString>& removedSegmentIds = {});
     bool updateDurationsById(const std::deque<TimeDuration>& durations,
                              const std::vector<QString>& removedSegmentIds = {});
-    void flushToDisc() override;
-    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
-    bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc) override;
-    ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
-                                                   const std::vector<long long>& outrightDropIds) override;
-    bool setLastCleanShutdownMarker(const QDateTime& timestamp) override;
-    std::optional<QDateTime> consumeLastCleanShutdownMarker() override;
 
 private:
     QSqlDatabase db;
@@ -67,13 +75,13 @@ private:
     mutable QRecursiveMutex db_mutex_;
 
     bool ensureOpen();
-    bool initializeNewConnection();
+    bool ensureSchema();
     void lazyClose();
     bool validateSchema();
     bool ensureIsFinalizedColumn();
     bool ensureSegmentIdColumn();
     bool ensureSettingsTable();
-    bool createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
+    BackupResult createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
     void performRetentionCleanup();
     void pruneOldBackups(int keepCount = 5);
 

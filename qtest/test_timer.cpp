@@ -1585,3 +1585,34 @@ void TimerTest::test_C6_replaceCurrentDurations_writes_checkpoint_after_endExclu
 
     QCOMPARE(fakeDb.callLog.count("saveCheckpoint"), 1);
 }
+
+void TimerTest::test_S12_marker_error_skips_reconciliation()
+{
+    // When consumeLastCleanShutdownMarker() returns Status::Error (DB failure),
+    // Timer must NOT reconcile orphan checkpoints — the DB state is unknown and
+    // finalising orphans could conflict with in-progress data.
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+
+    // Seed an orphan checkpoint that would normally be reconciled.
+    OrphanCheckpoint orphan;
+    orphan.id = 1;
+    orphan.segment_id = TimeDuration::createSegmentId();
+    orphan.type = DurationType::Activity;
+    orphan.startTime = QDateTime::currentDateTime().addSecs(-120);
+    orphan.endTime   = QDateTime::currentDateTime().addSecs(-60);
+    orphan.duration  = orphan.startTime.msecsTo(orphan.endTime);
+    fakeDb.orphanCheckpoints.push_back(orphan);
+
+    // Simulate a marker read failure.
+    fakeDb.cleanShutdownMarker = MarkerResult { {}, MarkerResult::Status::Error };
+
+    Timer tracker(settings, fakeDb);
+
+    // No seconds recovered and no reconciliation attempted.
+    QCOMPARE(tracker.getStartupRecoveredSeconds(), (qint64)0);
+    QVERIFY(!fakeDb.callLog.contains("reconcileUnfinalizedCheckpoints"));
+}

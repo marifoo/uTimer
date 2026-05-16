@@ -182,10 +182,10 @@ bool FakeSessionStore::setLastCleanShutdownMarker(const QDateTime& /*timestamp*/
     return setMarkerResult;
 }
 
-std::optional<QDateTime> FakeSessionStore::consumeLastCleanShutdownMarker()
+std::optional<MarkerResult> FakeSessionStore::consumeLastCleanShutdownMarker()
 {
     callLog.append("consumeLastCleanShutdownMarker");
     auto result = cleanShutdownMarker;
-    cleanShutdownMarker = std::nullopt;
+    cleanShutdownMarker = MarkerResult { {}, MarkerResult::Status::NotFound };
     return result;
 }

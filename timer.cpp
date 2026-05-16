@@ -325,8 +325,16 @@ Timer::Timer(const Settings &settings, SessionStore& db, QObject *parent)
         Logger::Log("[CHECKPOINT] Checkpoints disabled (interval = 0)");
     }
 
-    const std::optional<QDateTime> cleanShutdownMarker = db_.consumeLastCleanShutdownMarker();
-    startup_recovered_seconds_ = reconcileOrphanCheckpoints(db_.loadUnfinalizedCheckpoints(), cleanShutdownMarker);
+    const std::optional<MarkerResult> markerResult = db_.consumeLastCleanShutdownMarker();
+    if (markerResult.has_value() && markerResult->status == MarkerResult::Status::Error) {
+        // DB state is unknown after a transaction failure — do not reconcile orphans
+        // to avoid finalising rows that may conflict with in-progress data.
+        Logger::Log("[TIMER] consumeLastCleanShutdownMarker failed — skipping orphan reconciliation");
+    } else {
+        // When markerResult is nullopt (history disabled), loadUnfinalizedCheckpoints()
+        // also returns empty (ensureOpen returns false), so reconciliation is harmless.
+        startup_recovered_seconds_ = reconcileOrphanCheckpoints(db_.loadUnfinalizedCheckpoints(), markerResult);
+    }
 }
 
 Timer::~Timer()
@@ -1111,7 +1119,7 @@ void Timer::endExclusiveEdit()
 
 qint64 Timer::reconcileOrphanCheckpoints(
     const std::deque<OrphanCheckpoint>& orphans,
-    const std::optional<QDateTime>& cleanShutdownMarker)
+    const std::optional<MarkerResult>& markerResult)
 {
     startup_recovery_notification_needed_ = false;
 
@@ -1154,8 +1162,11 @@ qint64 Timer::reconcileOrphanCheckpoints(
     if (!finalizeIds.empty()) {
         bool showNotification = true;
 
-        if (cleanShutdownMarker.has_value() && cleanShutdownMarker->isValid()) {
-            const QDateTime markerUtc = cleanShutdownMarker->toUTC();
+        const bool hasValidMarker = markerResult.has_value()
+            && markerResult->status == MarkerResult::Status::Found
+            && markerResult->timestamp.isValid();
+        if (hasValidMarker) {
+            const QDateTime markerUtc = markerResult->timestamp.toUTC();
             QDateTime oldestFinalizedOrphanEndUtc;
             for (const auto& orphan : orphans) {
                 if (std::find(finalizeIds.begin(), finalizeIds.end(), orphan.id) == finalizeIds.end()) {

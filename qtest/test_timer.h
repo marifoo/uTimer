@@ -110,6 +110,9 @@ private slots:
     // Step 5: C6 + T2 — beginExclusiveEdit/endExclusiveEdit + checkpoint guard
     void test_T2_replaceCurrentDurations_skips_checkpoint_while_dialog_open();
     void test_C6_replaceCurrentDurations_writes_checkpoint_after_endExclusiveEdit();
+
+    // Step 8: S12 — MarkerResult::Error skips orphan reconciliation
+    void test_S12_marker_error_skips_reconciliation();
 };
 
 #endif // TEST_TIMER_H
