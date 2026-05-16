@@ -17,6 +17,12 @@
 // so it can be removed from types.h.
 enum class TransactionMode { Append, Replace };
 
+// Connection lifecycle: the database is opened in the constructor
+// (initializeNewConnection runs schema migrations, indexes, PRAGMA, and retention
+// cleanup exactly once) and closed in the destructor.  All public methods call
+// ensureOpen() as a lightweight health check; if the connection is unexpectedly
+// lost, ensureOpen() reopens it without re-running migrations.
+
 class SqliteSessionStore : public QObject, public SessionStore
 {
     Q_OBJECT
@@ -58,7 +64,8 @@ private:
     // createBackup) and we must not deadlock on re-entry.
     mutable QRecursiveMutex db_mutex_;
 
-    bool lazyOpen();
+    bool ensureOpen();
+    bool initializeNewConnection();
     void lazyClose();
     bool validateSchema();
     bool ensureIsFinalizedColumn();
@@ -74,9 +81,9 @@ private:
     void checkSegmentIdUniqueness();
 #endif
 
-    // Ensures retention cleanup (DELETE of entries older than history_days_to_keep_)
-    // runs at most once per application session.  Set to true after a successful
-    // cleanup; left false on failure so the next lazyOpen() retries automatically.
+    // Tracks whether retention cleanup ran during this process lifetime.
+    // Set to true on success; left false on failure (no automatic retry — Step 7
+    // moves this to checkSchemaOnStartup() where it can be called explicitly).
     bool retention_cleanup_done_ = false;
 };
 

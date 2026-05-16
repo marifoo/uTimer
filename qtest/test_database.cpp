@@ -471,7 +471,7 @@ void DatabaseTest::test_database_checkpoint_single_row_per_segment()
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 20000, start, newEnd, segmentId));
     
     // Verify checkpoint row remains unfinalized and updated in place.
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     query.prepare("SELECT COUNT(*), duration, is_finalized FROM durations WHERE segment_id = :segment_id");
     query.bindValue(":segment_id", segmentId);
@@ -499,7 +499,7 @@ void DatabaseTest::test_database_checkpoint_missing_segment_reinserts_same_segme
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, start, end, segmentId));
     
     // Manually delete the checkpoint row (simulating retention cleanup)
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     query.prepare("DELETE FROM durations WHERE segment_id = :segment_id");
     query.bindValue(":segment_id", segmentId);
@@ -511,7 +511,7 @@ void DatabaseTest::test_database_checkpoint_missing_segment_reinserts_same_segme
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 20000, start, newEnd, segmentId));
     
     // Verify new checkpoint row exists as unfinalized
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery verifyQuery(manager.db);
     verifyQuery.prepare("SELECT COUNT(*), duration, is_finalized FROM durations WHERE segment_id = :segment_id");
     verifyQuery.bindValue(":segment_id", segmentId);
@@ -543,7 +543,7 @@ void DatabaseTest::test_database_checkpoint_preserves_start_time()
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 30000, originalStart, secondEnd, checkpointSegmentId));
     
     // Verify start/end/duration are preserved on the checkpoint row itself.
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     query.prepare("SELECT start_date, start_time, end_date, end_time, duration, is_finalized FROM durations WHERE segment_id = :segment_id");
     query.bindValue(":segment_id", checkpointSegmentId);
@@ -660,7 +660,7 @@ void DatabaseTest::test_database_load_negative_duration()
     SqliteSessionStore manager(settings);
 
     // Manually insert negative duration
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     QDateTime now = QDateTime::currentDateTimeUtc();
     query.prepare("INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
@@ -689,7 +689,7 @@ void DatabaseTest::test_database_load_start_after_end()
     SqliteSessionStore manager(settings);
 
     // Manually insert start > end
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     QDateTime now = QDateTime::currentDateTimeUtc();
     QDateTime start = now;
@@ -719,7 +719,7 @@ void DatabaseTest::test_database_load_invalid_enum_type()
     SqliteSessionStore manager(settings);
 
     // Manually insert invalid type (valid are 0=Activity, 1=Pause)
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     QDateTime now = QDateTime::currentDateTimeUtc();
     QDateTime end = now.addSecs(10);
@@ -751,7 +751,7 @@ void DatabaseTest::test_database_load_duration_mismatch_tolerance()
     QDateTime end = start.addMSecs(1000); // Actual duration: 1000ms
     
     // Insert with stored duration = 1003ms (within 100ms tolerance)
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     query.prepare("INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
                  "VALUES (:segment_id, 0, 1003, :start_date, :start_time, :end_date, :end_time, 1)");
@@ -802,7 +802,7 @@ void DatabaseTest::test_database_load_invalid_type_increments_skipped_and_omits_
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
 
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     const QDateTime start = QDateTime::currentDateTimeUtc();
     const QDateTime end = start.addSecs(10);
@@ -829,7 +829,7 @@ void DatabaseTest::test_database_load_200ms_mismatch_increments_repaired_and_use
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
 
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     const QDateTime start = QDateTime::currentDateTimeUtc();
     const QDateTime end = start.addMSecs(1000);
@@ -932,7 +932,7 @@ void DatabaseTest::test_database_schema_creates_idx_finalized_start()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
 
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     QVERIFY(query.exec(
         "SELECT name FROM sqlite_master "
@@ -987,7 +987,7 @@ void DatabaseTest::test_database_schema_migration_adds_is_finalized_and_segment_
 
     QVERIFY(manager.loadDurations().size() == static_cast<size_t>(1));
 
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     QVERIFY(query.exec("PRAGMA table_info(durations)"));
     bool hasIsFinalized = false;
@@ -1293,27 +1293,27 @@ void DatabaseTest::test_hasEntriesForDate_utc_regression()
 
 void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
 {
-    // The retention DELETE in lazyOpen() should execute at most once per
-    // SqliteSessionStore lifetime.  We verify this by seeding the DB with an
-    // old entry via direct SQL (bypassing lazyOpen's cleanup), then using
-    // a fresh SqliteSessionStore whose first lazyOpen runs the cleanup.
-    // After that, ten more open/close cycles must not re-run the DELETE.
+    // The retention DELETE runs at most once per SqliteSessionStore lifetime.
+    // With a long-lived connection, cleanup runs in the constructor's ensureOpen()
+    // call.  Subsequent ensureOpen() calls are no-ops (connection already open).
+    // We verify: (1) after construction the flag is set, (2) the old entry is
+    // removed, (3) additional ensureOpen() calls leave the DB untouched.
 
-    // Arrange: create the database and seed entries via a raw connection
-    // so that no cleanup has run yet.
+    // Arrange: create the schema via a bootstrap manager so we can seed entries
+    // before the test manager is constructed.
     resetDatabaseFile();
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 2)); // keep 2 days
 
-    // Use a first manager just to create the schema.
     {
         SqliteSessionStore bootstrap(settings);
-        std::deque<TimeDuration> empty;
-        QVERIFY(bootstrap.saveDurations(empty, TransactionMode::Append));
-    }
+        // saveDurations with empty set just ensures the schema exists.
+        QVERIFY(bootstrap.saveDurations({}, TransactionMode::Append));
+    } // bootstrap destroyed — connection closed
 
-    // Insert entries directly so that the old one survives (no cleanup yet).
+    // Seed entries directly (bypass the store) so that an old entry exists
+    // before the test manager is constructed.
     QDateTime now = QDateTime::currentDateTimeUtc();
     const QString connName = "seed_retention_test";
     {
@@ -1352,23 +1352,19 @@ void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
     }
     QSqlDatabase::removeDatabase(connName);
 
-    // Act: create a fresh manager.  Its first lazyOpen should run cleanup.
+    // Act: construct a fresh manager.  The constructor calls ensureOpen() which
+    // runs retention cleanup exactly once, removing the old entry.
     SqliteSessionStore manager(settings);
-    QVERIFY(!manager.retention_cleanup_done_); // flag starts false
 
-    QVERIFY(manager.lazyOpen());
-    manager.lazyClose();
-
-    // Assert: cleanup ran once.
+    // Assert: cleanup ran during construction.
     QVERIFY(manager.retention_cleanup_done_);
 
-    // Open ten more times; cleanup must not re-execute.
+    // Additional ensureOpen() calls are no-ops (connection already open).
     for (int i = 0; i < 10; ++i) {
-        QVERIFY(manager.lazyOpen());
-        manager.lazyClose();
+        QVERIFY(manager.ensureOpen());
     }
 
-    // Flag still true, no re-run.
+    // Flag still true — cleanup did not re-run.
     QVERIFY(manager.retention_cleanup_done_);
 
     // The old entry was removed; the recent one survives.
@@ -1378,53 +1374,48 @@ void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
 
 void DatabaseTest::test_retention_cleanup_retries_after_failure()
 {
-    // If the cleanup transaction fails (e.g. because the DB file is
-    // read-only), retention_cleanup_done_ must remain false so the next
-    // lazyOpen() retries automatically.  Once the obstacle is removed,
-    // the retry should succeed and set the flag.
+    // If the cleanup transaction fails (e.g. because the DB file is read-only
+    // at construction time), retention_cleanup_done_ must remain false and the
+    // connection must be closed.  ensureOpen() is a pure health check and does
+    // NOT retry the cleanup — that is handled in checkSchemaOnStartup() (Step 7).
 
-    // Arrange
+    // Arrange: create schema and seed entries via a writable manager.
     resetDatabaseFile();
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 2));
-    SqliteSessionStore manager(settings);
 
-    // Create the database and seed an old entry.
-    QDateTime now = QDateTime::currentDateTimeUtc();
-    std::deque<TimeDuration> durations;
-    durations.emplace_back(DurationType::Activity, now.addDays(-10), now.addDays(-10).addSecs(60));
-    durations.emplace_back(DurationType::Activity, now.addSecs(-60), now);
-    QVERIFY(manager.saveDurations(durations, TransactionMode::Replace));
+    {
+        SqliteSessionStore seed(settings);
+        QDateTime now = QDateTime::currentDateTimeUtc();
+        std::deque<TimeDuration> durations;
+        durations.emplace_back(DurationType::Activity, now.addDays(-10), now.addDays(-10).addSecs(60));
+        durations.emplace_back(DurationType::Activity, now.addSecs(-60), now);
+        QVERIFY(seed.saveDurations(durations, TransactionMode::Replace));
+    } // seed destroyed — connection closed
 
-    // The first lazyOpen (inside saveDurations) already ran cleanup
-    // successfully.  Reset the flag to simulate a fresh session where the
-    // first cleanup attempt will fail.
-    manager.retention_cleanup_done_ = false;
-
-    // Make the DB read-only so the retention DELETE fails.
+    // Make the DB read-only so the retention DELETE will fail.
     QFile dbFile(db_path_);
     QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::ReadUser));
 
-    // Act: lazyOpen should fail because the cleanup transaction cannot write.
-    QVERIFY(!manager.lazyOpen());
-
-    // Assert: flag must still be false (cleanup was not successful).
+    // Construct a new manager while the DB is read-only.  initializeNewConnection()
+    // fails at the retention DELETE, so the constructor closes the connection.
+    SqliteSessionStore manager(settings);
     QVERIFY(!manager.retention_cleanup_done_);
+    QVERIFY(!manager.db.isOpen()); // connection was closed on cleanup failure
 
     // Restore write permissions.
     QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser));
 
-    // Act: the next lazyOpen should retry cleanup and succeed.
-    QVERIFY(manager.lazyOpen());
-    manager.lazyClose();
+    // ensureOpen() reopens the connection successfully.
+    QVERIFY(manager.ensureOpen());
 
-    // Assert: flag is now true.
-    QVERIFY(manager.retention_cleanup_done_);
+    // Cleanup did NOT retry via ensureOpen() — flag stays false.
+    QVERIFY(!manager.retention_cleanup_done_);
 
-    // Verify the old entry was removed.
+    // Both entries remain (cleanup never ran).
     auto loaded = manager.loadDurations();
-    QCOMPARE(static_cast<int>(loaded.size()), 1);
+    QCOMPARE(static_cast<int>(loaded.size()), 2);
 }
 
 /**
@@ -1458,6 +1449,47 @@ void DatabaseTest::test_connection_names_unique_across_100_instances()
 
     // Assert: all 100 names were distinct.
     QCOMPARE(connectionNames.size(), 100);
+}
+
+// ============================================================================
+// Step 6: long-lived connection tests
+// ============================================================================
+
+/**
+ * The database connection must be open immediately after construction
+ * (history_days_to_keep_ > 0), without any caller needing to call ensureOpen().
+ */
+void DatabaseTest::test_connection_open_after_construction()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    QVERIFY(manager.db.isOpen());
+}
+
+/**
+ * PRAGMA synchronous=NORMAL must be set on the open connection.
+ * Verified by querying PRAGMA synchronous after construction — the value
+ * should be 1 (NORMAL).  This also confirms the PRAGMA was applied during
+ * the single connection-open, not skipped.
+ */
+void DatabaseTest::test_pragma_synchronous_normal_set_after_construction()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    QVERIFY(manager.db.isOpen());
+    QSqlQuery q(manager.db);
+    QVERIFY(q.exec("PRAGMA synchronous"));
+    QVERIFY(q.next());
+    // 1 = NORMAL, 2 = FULL (SQLite default is FULL = 2)
+    QCOMPARE(q.value(0).toInt(), 1);
 }
 
 // ============================================================================
@@ -1740,7 +1772,7 @@ void DatabaseTest::test_database_saveDurations_append_upserts_existing_segment_i
     // Capture the autoincrement id assigned to that row.
     qint64 originalRowId = -1;
     {
-        QVERIFY(manager.lazyOpen());
+        QVERIFY(manager.ensureOpen());
         QSqlQuery q(manager.db);
         q.prepare("SELECT id FROM durations WHERE segment_id = :sid");
         q.bindValue(":sid", segId);
@@ -1759,7 +1791,7 @@ void DatabaseTest::test_database_saveDurations_append_upserts_existing_segment_i
 
     // Assert: still exactly one row for that segment_id, fields are updated,
     // and the autoincrement id is unchanged.
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery verify(manager.db);
     verify.prepare("SELECT id, type, duration, start_date, start_time, end_date, end_time "
                    "FROM durations WHERE segment_id = :sid");
@@ -1817,7 +1849,7 @@ void DatabaseTest::test_finalizeIfNoOverlap_succeeds_when_no_overlap()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
 
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
 
     // Existing finalised row from 10:00 to 11:00.
     const QDateTime existingStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 0, 0), Qt::UTC);
@@ -1831,7 +1863,7 @@ void DatabaseTest::test_finalizeIfNoOverlap_succeeds_when_no_overlap()
     const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC);
     const QDateTime orphanEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(12, 30, 0), Qt::UTC);
 
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     const qint64 orphanRowId = seedOrphanRow(manager, orphanStartUtc, orphanEndUtc);
     QVERIFY(orphanRowId > 0);
     manager.lazyClose();
@@ -1839,7 +1871,7 @@ void DatabaseTest::test_finalizeIfNoOverlap_succeeds_when_no_overlap()
     QVERIFY(manager.finalizeIfNoOverlap(orphanRowId, orphanStartUtc, orphanEndUtc));
 
     // Verify the row is now finalised.
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery verify(manager.db);
     verify.prepare("SELECT is_finalized FROM durations WHERE id = :id");
     verify.bindValue(":id", orphanRowId);
@@ -1868,7 +1900,7 @@ void DatabaseTest::test_finalizeIfNoOverlap_rejects_when_overlapping_finalized_r
     const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC);
     const QDateTime orphanEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 30, 0), Qt::UTC);
 
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     const qint64 orphanRowId = seedOrphanRow(manager, orphanStartUtc, orphanEndUtc);
     QVERIFY(orphanRowId > 0);
     manager.lazyClose();
@@ -1896,7 +1928,7 @@ void DatabaseTest::test_finalizeIfNoOverlap_leaves_row_unchanged_on_overlap()
     const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(9, 30, 0), Qt::UTC);
     const QDateTime orphanEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC);
 
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     const qint64 orphanRowId = seedOrphanRow(manager, orphanStartUtc, orphanEndUtc);
     QVERIFY(orphanRowId > 0);
     manager.lazyClose();
@@ -1904,7 +1936,7 @@ void DatabaseTest::test_finalizeIfNoOverlap_leaves_row_unchanged_on_overlap()
     QVERIFY(!manager.finalizeIfNoOverlap(orphanRowId, orphanStartUtc, orphanEndUtc));
 
     // After rejection, the row must still be is_finalized = 0 (transaction atomicity).
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery verify(manager.db);
     verify.prepare("SELECT is_finalized FROM durations WHERE id = :id");
     verify.bindValue(":id", orphanRowId);
@@ -1931,7 +1963,7 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dr
 
     // Orphan A: 12:00 - 12:30 — no overlap → should be finalised.
     // Orphan B: 10:30 - 11:30 — overlaps existing → should be reported as dropped.
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     const QDateTime aStartUtc = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC);
     const QDateTime aEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(12, 30, 0), Qt::UTC);
     const QDateTime bStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC);
@@ -1955,7 +1987,7 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dr
     QCOMPARE(result.dropped[0], bId);
 
     // Verify DB state: A is finalised, B remains unfinalised.
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery verify(manager.db);
     verify.prepare("SELECT id, is_finalized FROM durations WHERE id IN (:a, :b) ORDER BY id");
     verify.bindValue(":a", aId);
@@ -1982,7 +2014,7 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_outright_drops_are_delet
     SqliteSessionStore manager(settings);
 
     // Two orphans, no overlapping finalised rows in the DB.
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     const QDateTime aStartUtc = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC);
     const QDateTime aEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(12, 30, 0), Qt::UTC);
     const QDateTime bStartUtc = QDateTime(QDate(2025, 1, 1), QTime(13, 0, 0), Qt::UTC);
@@ -2004,7 +2036,7 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_outright_drops_are_delet
     QCOMPARE(result.dropped.size(), (size_t)0); // outright drops are not reported in `dropped`
 
     // Verify DB state: A finalised, B deleted entirely.
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery verify(manager.db);
     verify.prepare("SELECT id FROM durations WHERE id = :b");
     verify.bindValue(":b", bId);

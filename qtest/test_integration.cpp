@@ -70,7 +70,7 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
         QCOMPARE(loaded[0].type, DurationType::Activity);
 
         // Reconciliation must keep row identity by finalizing in place.
-        QVERIFY(db.lazyOpen());
+        QVERIFY(db.ensureOpen());
         QSqlQuery query(db.db);
         query.prepare("SELECT is_finalized FROM durations WHERE segment_id = :segment_id");
         query.bindValue(":segment_id", orphanSegmentId);
@@ -127,7 +127,7 @@ void IntegrationTest::test_integration_orphan_reconciliation_drops_stale_and_too
 
     Settings settings(settingsPath);
     SqliteSessionStore db(settings);
-    QVERIFY(db.lazyOpen());
+    QVERIFY(db.ensureOpen());
 
     // Too short orphan (< 1s)
     {

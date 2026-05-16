@@ -78,6 +78,10 @@ private slots:
     // Connection name uniqueness (T25)
     void test_connection_names_unique_across_100_instances();
 
+    // Step 6: long-lived connection + WAL guard
+    void test_connection_open_after_construction();
+    void test_pragma_synchronous_normal_set_after_construction();
+
     // Phase 4 test gate (T4)
     void test_T_commitSession_upserts_by_segment_id();
     void test_U_commitSession_orphan_cleanup_is_internal();

@@ -192,7 +192,7 @@ void TimerTest::test_timer_checkpoints_paused()
     tracker.saveCheckpoint(); // Should be ignored
     
     // Check DB: no unfinalized checkpoint entries yet
-    QVERIFY(db.lazyOpen());
+    QVERIFY(db.ensureOpen());
     QSqlQuery query(db.db);
     QVERIFY(query.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0"));
     QVERIFY(query.next());
@@ -204,7 +204,7 @@ void TimerTest::test_timer_checkpoints_paused()
     tracker.saveCheckpoint();
 
     // Check DB: should now have one unfinalized checkpoint entry
-    QVERIFY(db.lazyOpen());
+    QVERIFY(db.ensureOpen());
     QVERIFY(query.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0"));
     QVERIFY(query.next());
     QCOMPARE(query.value(0).toInt(), 1);
@@ -227,6 +227,11 @@ void TimerTest::test_timer_retry_append_failure_then_success_preserves_segments(
     QTest::qWait(20);
 
     // Force stop save to fail and keep data in memory for retry.
+    // Close the connection first so the next ensureOpen() re-tries the file open
+    // and fails on the read-only permission.  (With a long-lived connection the
+    // file descriptor is open with write permission; making the file read-only
+    // afterwards doesn't revoke that permission until the connection is closed.)
+    db.lazyClose();
     QFile dbFile(db_path_);
     QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::ReadUser | QFile::ReadGroup | QFile::ReadOther));
     tracker.useTimerViaButton(Button::Stop);
@@ -274,7 +279,9 @@ void TimerTest::test_timer_retry_failure_keeps_unsaved_state_and_durations()
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
 
-    // Force first stop save to fail.
+    // Force first stop save to fail.  Close the connection before making the
+    // file read-only so that ensureOpen() re-tries and fails on the permission.
+    db.lazyClose();
     QFile dbFile(db_path_);
     QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::ReadUser | QFile::ReadGroup | QFile::ReadOther));
     tracker.useTimerViaButton(Button::Stop);

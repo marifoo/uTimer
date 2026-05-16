@@ -2,8 +2,10 @@
  * SqliteSessionStore - SQLite persistence for time duration data.
  *
  * Connection pattern:
- * - Lazy-open: Database opened on first operation, closed after each operation
- * - This prevents file locking issues and allows external backup tools to work
+ * - Long-lived: Database opened in the constructor, closed in the destructor.
+ * - ensureOpen() is called at the start of every public method as a health
+ *   check; if the connection was closed (e.g. by createBackup's copy window),
+ *   it will be reopened transparently.
  *
  * Thread safety:
  * - A QRecursiveMutex (db_mutex_) guards every public entry point, preventing
@@ -24,7 +26,7 @@
  *
  * Configuration:
  * - history_days_to_keep_ = 0 disables database entirely (all methods return early)
- * - Old entries automatically purged once per session on the first successful lazyOpen()
+ * - Old entries automatically purged once per session on the first successful open
  */
 
 #include "sqlitesessionstore.h"
@@ -35,6 +37,7 @@
 #include <QSqlError>
 #include <QVariant>
 #include <QFile>
+#include <QFileInfo>
 #include <QTextStream>
 #include <atomic>
 #include "logger.h"
@@ -58,13 +61,22 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
     // See s_connection_seq declaration for rationale (avoids address-reuse collisions).
     QString connectionName = QString("uTimer_connection_%1").arg(s_connection_seq.fetch_add(1, std::memory_order_relaxed));
     db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
-    
+
     // Use executable directory for portability
     db.setDatabaseName(QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.sqlite"));
 
-    // Log when database is disabled (history_days_to_keep_ = 0 means no history storage)
     if (history_days_to_keep_ == 0) {
         Logger::Log("[DB] History days to keep is set to 0, database will not be used.");
+        return;
+    }
+
+    // Open the connection and run one-time schema setup.
+    if (!db.open()) {
+        Logger::Log("[DB] Error opening database: " + db.lastError().text());
+        return;
+    }
+    if (!initializeNewConnection()) {
+        db.close();
     }
 }
 
@@ -81,56 +93,69 @@ SqliteSessionStore::~SqliteSessionStore()
 }
 
 /**
- * Initializes the database connection and ensures schema integrity.
+ * Lightweight connection health check.
  *
- * Journal mode:
- * This app deliberately uses SQLite's default rollback journal mode, NOT WAL.
- * WAL's primary advantage — concurrent readers during writes — is irrelevant
- * for a single-process, single-threaded app.  Rollback journal keeps the
- * database as a single file (no `-wal`/`-shm` sidecars), which simplifies
- * backup (createBackup copies one file) and portability (move the .sqlite
- * to another machine without forgetting sidecars).
+ * Returns true immediately if the connection is already open.  If the
+ * connection was lost unexpectedly (e.g. after an OS-level file error),
+ * reopens it and returns true.  Schema migrations, indexes, PRAGMA, and
+ * retention cleanup are NOT re-applied here — those run once at construction
+ * time via initializeNewConnection().
  *
- * Tasks:
- * 1. Opens the SQLite file (creates it if missing).
- * 2. Creates the 'durations' table if it doesn't exist.
- * 3. Creates necessary indices for performance.
- * 4. Performs auto-maintenance: Deletes entries older than history_days_to_keep_.
- *    This cleanup runs at most once per application session (gated by
- *    retention_cleanup_done_).  On failure the flag stays false so the next
- *    lazyOpen() retries automatically.
- *
- * Returns true if the database is ready for use.
+ * After reopening, verifies the file is writable at the OS level.  SQLite can
+ * open a read-only file in read-only mode (db.open() returns true), but all
+ * subsequent write calls would fail with SQLITE_READONLY on the same connection.
+ * Closing and returning false here forces the caller to treat it as a DB failure
+ * and try again once write access is restored.  Note: isWritable() checks
+ * permission bits only — it cannot detect immutable-bit or SELinux-denied writes.
  */
-bool SqliteSessionStore::lazyOpen()
+bool SqliteSessionStore::ensureOpen()
 {
-    // Don't open database if history storage is disabled
     if (history_days_to_keep_ == 0) {
         return false;
     }
-
-    // Return true if already open
     if (db.isOpen()) {
         return true;
-	}
-    
+    }
     if (!db.open()) {
-        Logger::Log("[DB] Error opening database: " + db.lastError().text());
+        Logger::Log("[DB] Error reopening database: " + db.lastError().text());
         return false;
     }
+    if (!QFileInfo(db.databaseName()).isWritable()) {
+        db.close();
+        return false;
+    }
+    return true;
+}
 
+/**
+ * One-time schema setup: called from the constructor immediately after db.open().
+ *
+ * Creates the durations table (if needed), runs forward-compatibility migrations,
+ * creates indexes, sets PRAGMA synchronous=NORMAL, and runs retention cleanup.
+ *
+ * Journal mode note: this app uses SQLite's default rollback journal mode, NOT
+ * WAL.  WAL's concurrent-readers advantage is irrelevant for a single-process
+ * app.  Rollback journal keeps the database as a single file (no -wal/-shm
+ * sidecars), which simplifies close-copy-reopen backups and portability.
+ *
+ * Returns false on schema/migration failures (caller closes the connection).
+ * Non-fatal failures (index creation, PRAGMA, retention cleanup) are logged and
+ * allowed through — the DB is still usable for reads and writes.
+ */
+bool SqliteSessionStore::initializeNewConnection()
+{
     // Create the durations table if it doesn't exist
     QSqlQuery query_new(db);
     bool tableCreated = query_new.exec(
         "CREATE TABLE IF NOT EXISTS durations ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "segment_id TEXT NOT NULL," // Stable segment identity across edits/reloads
-        "type INTEGER NOT NULL," // 0 = Activity, 1 = Pause (DurationType enum)
-        "duration INTEGER NOT NULL," // Duration in milliseconds
-        "start_date DATE NOT NULL," // Date when the duration started
-        "start_time TEXT NOT NULL," // Time when the duration started (UTC, TIME(3) precision)
-        "end_date DATE NOT NULL," // Date when the duration ended
-        "end_time TEXT NOT NULL," // Time when the duration ended (UTC, TIME(3) precision)
+        "segment_id TEXT NOT NULL,"
+        "type INTEGER NOT NULL,"
+        "duration INTEGER NOT NULL,"
+        "start_date DATE NOT NULL,"
+        "start_time TEXT NOT NULL,"
+        "end_date DATE NOT NULL,"
+        "end_time TEXT NOT NULL,"
         "is_finalized INTEGER NOT NULL DEFAULT 0,"
         "UNIQUE(segment_id)"
         ")"
@@ -138,107 +163,74 @@ bool SqliteSessionStore::lazyOpen()
 
     if (!tableCreated) {
         Logger::Log("[DB] Error creating table: " + query_new.lastError().text());
-        db.close();
         return false;
     }
 
-    // Keep schema forward-compatible: older databases do not have is_finalized.
-    // We migrate all existing rows to finalized=1 because checkpoints from older
-    // versions are indistinguishable from completed entries.
     if (!ensureIsFinalizedColumn()) {
-        db.close();
         return false;
     }
 
     if (!ensureSegmentIdColumn()) {
-        db.close();
         return false;
     }
 
-    // Keep a tiny key/value table for lifecycle markers (e.g. clean shutdown).
     if (!ensureSettingsTable()) {
-        db.close();
         return false;
     }
 
-    // Validate schema - ensure start_date and start_time columns exist
     if (!validateSchema()) {
         Logger::Log("[DB] CRITICAL: Schema validation failed - database is outdated");
-        db.close();
         return false;
     }
 
-    // Create index for date-based queries (cleanup and hasEntriesForDate)
     QSqlQuery indexQuery(db);
     if (!indexQuery.exec("CREATE INDEX IF NOT EXISTS idx_end_date ON durations(end_date)")) {
         Logger::Log("[DB] Warning: Failed to create end_date index: " + indexQuery.lastError().text());
-        // Non-fatal: continue even if index creation fails
     }
 
-    // Index for segment identity lookups (checkpoint/update paths).
     QSqlQuery segmentIndexQuery(db);
     if (!segmentIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_segment_id ON durations(segment_id)")) {
         Logger::Log("[DB] Warning: Failed to create segment_id index: " + segmentIndexQuery.lastError().text());
-        // Non-fatal: continue even if index creation fails
     }
 
-    // Partial index for overlap-detection queries on finalised rows.
     QSqlQuery finalizedStartIndexQuery(db);
     if (!finalizedStartIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_finalized_start ON durations(is_finalized, start_date, start_time) WHERE is_finalized = 1")) {
         Logger::Log("[DB] Warning: Failed to create finalized_start index: " + finalizedStartIndexQuery.lastError().text());
-        // Non-fatal: continue even if index creation fails
     }
 
-    // Set synchronous mode for durability.
-    //
-    // In rollback journal mode (the default — this app does NOT use WAL),
-    // NORMAL provides reasonable crash safety: data can only be lost if the
-    // OS itself crashes or power is lost during a transaction commit.  An
-    // application crash cannot cause corruption.  FULL would add an extra
-    // fsync per transaction, which is unnecessary overhead for a time-tracking
-    // app that writes a few rows per minute and can tolerate losing a few
-    // minutes of data in a power failure.
-    //
-    // The shutdown path (flushToDisc) temporarily promotes to FULL to ensure
-    // the final save is fully durable before the process exits.
+    // PRAGMA synchronous=NORMAL: in rollback journal mode this provides good
+    // crash safety (only OS crash / power loss can lose data, not an app crash).
+    // The shutdown path (flushToDisc) temporarily promotes to FULL for the
+    // final durable write before the process exits.
     QSqlQuery syncQuery(db);
     if (!syncQuery.exec("PRAGMA synchronous=NORMAL")) {
         Logger::Log("[DB] Warning: Failed to set synchronous=NORMAL: " + syncQuery.lastError().text());
-        // Non-fatal: SQLite defaults to FULL, which is strictly safer
     }
 
-    // Retention cleanup: delete entries older than history_days_to_keep_.
-    // Gated behind retention_cleanup_done_ so we only pay the cost once per
-    // application session.  On failure the flag stays false, causing an
-    // automatic retry on the next lazyOpen() call.
+    // Retention cleanup — runs once per process (this method is only called
+    // from the constructor).
     if (!retention_cleanup_done_) {
-        if (db.transaction()) {
+        if (!db.transaction()) {
+            Logger::Log("[DB] Error starting cleanup transaction: " + db.lastError().text());
+        } else {
             QSqlQuery query(db);
-
             query.prepare("DELETE FROM durations WHERE end_date < date('now', '-' || :days || ' days')");
             query.bindValue(":days", static_cast<int>(history_days_to_keep_));
 
             if (!query.exec()) {
                 db.rollback();
                 Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
-                // Leave retention_cleanup_done_ = false so we retry next time.
-                db.close();
                 return false;
             }
 
             if (!db.commit()) {
                 Logger::Log("[DB] Error committing cleanup transaction: " + db.lastError().text());
-                // Commit failed — leave flag false for retry.
             } else {
                 retention_cleanup_done_ = true;
             }
         }
-        else {
-            Logger::Log("[DB] Error starting cleanup transaction: " + db.lastError().text());
-            // Transaction start failed — leave flag false for retry.
-        }
     }
-    
+
     return true;
 }
 
@@ -320,16 +312,14 @@ bool SqliteSessionStore::checkSchemaOnStartup()
         return true;
     }
 
-    // Open database to check schema
-    if (!db.open()) {
-        Logger::Log("[DB] Error opening database for schema check: " + db.lastError().text());
+    // The constructor already opened the connection and ran all migrations via
+    // initializeNewConnection().  ensureOpen() here is a health check only —
+    // it reopens if needed but does NOT re-run migrations.
+    if (!ensureOpen()) {
         return false;
     }
 
-    bool valid = ensureIsFinalizedColumn() && ensureSegmentIdColumn() && validateSchema();
-    db.close();
-
-    return valid;
+    return validateSchema();
 }
 
 /**
@@ -592,12 +582,16 @@ bool SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations,
         Logger::Log("[DB] Warning: Could not create durations log file");
     }
 
-    // Reopen database if it was open before
+    // Reopen database if it was open before.
+    // Re-apply PRAGMA synchronous=NORMAL since reopening creates a fresh connection
+    // that loses all session-level PRAGMAs set in initializeNewConnection().
     if (wasOpen) {
         if (!db.open()) {
             Logger::Log("[DB] CRITICAL: Failed to reopen database after backup: " + db.lastError().text());
-            return false;  // Signal backup failure since DB is now unusable
+            return false;
         }
+        QSqlQuery pragmaQuery(db);
+        pragmaQuery.exec("PRAGMA synchronous=NORMAL");
     }
 
     return success;
@@ -663,14 +657,13 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
         }
     }
 
-    if (!lazyOpen()) {
-        Logger::Log("[DB] Could not lazy open DB to save Durations");
+    if (!ensureOpen()) {
+        Logger::Log("[DB] Could not open DB to save Durations");
         return false;
     }
 
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting transaction for Saving: " + db.lastError().text());
-        lazyClose();
         return false;
     }
 
@@ -680,7 +673,6 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
         if (!clearQuery.exec("DELETE FROM durations")) {
             db.rollback();
             Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
-            lazyClose();
             return false;
         }
     }
@@ -695,7 +687,6 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
             if (!deleteOrphanQuery.exec()) {
                 db.rollback();
                 Logger::Log("[DB] Error deleting orphaned segment_id: " + deleteOrphanQuery.lastError().text());
-                lazyClose();
                 return false;
             }
         }
@@ -733,7 +724,6 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
         if (!query.exec()) {
             db.rollback();
             Logger::Log("[DB] Error inserting duration: " + query.lastError().text());
-            lazyClose();
             return false;
         }
     }
@@ -748,8 +738,6 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
         checkSegmentIdUniqueness();
     }
 #endif
-
-    lazyClose();
 
     return commitSuccessful;
 }
@@ -773,14 +761,13 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
         Logger::Log("[DB] Warning: Backup failed before REPLACE operation - proceeding without backup");
     }
 
-    if (!lazyOpen()) {
-        Logger::Log("[DB] Could not lazy open DB to replace durations");
+    if (!ensureOpen()) {
+        Logger::Log("[DB] Could not open DB to replace durations");
         return false;
     }
 
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting transaction for replace: " + db.lastError().text());
-        lazyClose();
         return false;
     }
 
@@ -788,7 +775,6 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
     if (!clearQuery.exec("DELETE FROM durations")) {
         db.rollback();
         Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
-        lazyClose();
         return false;
     }
 
@@ -813,7 +799,6 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
         if (!finalizedInsert.exec()) {
             db.rollback();
             Logger::Log("[DB] Error inserting finalized duration: " + finalizedInsert.lastError().text());
-            lazyClose();
             return false;
         }
     }
@@ -839,7 +824,6 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
         if (!unfinalizedInsert.exec()) {
             db.rollback();
             Logger::Log("[DB] Error inserting current-session duration: " + unfinalizedInsert.lastError().text());
-            lazyClose();
             return false;
         }
     }
@@ -855,7 +839,6 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
     }
 #endif
 
-    lazyClose();
     return success;
 }
 
@@ -877,15 +860,14 @@ LoadResult SqliteSessionStore::loadDurations()
 
     LoadResult result;
 
-    if (!lazyOpen()) {
-        Logger::Log("[DB] Could not lazy open DB to load Durations");
+    if (!ensureOpen()) {
+        Logger::Log("[DB] Could not open DB to load Durations");
         return result;
     }
 
     // Start read transaction for consistent snapshot
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting read transaction: " + db.lastError().text());
-        lazyClose();
         return result;
     }
 
@@ -895,7 +877,6 @@ LoadResult SqliteSessionStore::loadDurations()
     if (!query.exec()) {
         db.rollback();
         Logger::Log("[DB] Error executing load query: " + query.lastError().text());
-        lazyClose();
         return result;
     }
 
@@ -970,7 +951,6 @@ LoadResult SqliteSessionStore::loadDurations()
     // so there is nothing to commit. Both commit() and rollback() release the
     // transaction lock, but rollback() signals the intent more clearly.
     db.rollback();
-    lazyClose();
 
     if (result.skipped > 0 || result.repaired > 0) {
         Logger::Log(QString("[DB] loadDurations reconciliation summary: skipped=%1, repaired=%2")
@@ -995,8 +975,8 @@ EntriesForDateResult SqliteSessionStore::hasEntriesForDate(const QDate& date)
 {
     QMutexLocker locker(&db_mutex_);
 
-    if (!lazyOpen()) {
-        Logger::Log("[DB] Could not lazy open DB to check entries for date");
+    if (!ensureOpen()) {
+        Logger::Log("[DB] Could not open DB to check entries for date");
         return EntriesForDateResult::Unknown;
     }
 
@@ -1028,7 +1008,6 @@ EntriesForDateResult SqliteSessionStore::hasEntriesForDate(const QDate& date)
         Logger::Log("[DB] Error checking entries for date: " + query.lastError().text());
     }
 
-    lazyClose();
     return result;
 }
 
@@ -1052,8 +1031,8 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
         return true;
     }
 
-    if (!lazyOpen()) {
-        Logger::Log("[DB] Could not lazy open DB to save checkpoint");
+    if (!ensureOpen()) {
+        Logger::Log("[DB] Could not open DB to save checkpoint");
         return false;
     }
 
@@ -1068,7 +1047,6 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
 
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting transaction for checkpoint: " + db.lastError().text());
-        lazyClose();
         return false;
     }
 
@@ -1086,7 +1064,6 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
     if (!updateQuery.exec()) {
         db.rollback();
         Logger::Log("[DB] Error updating checkpoint by segment_id: " + updateQuery.lastError().text());
-        lazyClose();
         return false;
     }
 
@@ -1112,7 +1089,6 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
         if (!insertQuery.exec()) {
             db.rollback();
             Logger::Log("[DB] Error inserting checkpoint by segment_id: " + insertQuery.lastError().text());
-            lazyClose();
             return false;
         }
 
@@ -1128,7 +1104,6 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
     }
 #endif
 
-    lazyClose();
     return success;
 }
 
@@ -1153,14 +1128,13 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
         return true;
     }
 
-    if (!lazyOpen()) {
-        Logger::Log("[DB] Could not lazy open DB to update durations");
+    if (!ensureOpen()) {
+        Logger::Log("[DB] Could not open DB to update durations");
         return false;
     }
 
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting transaction for updating durations: " + db.lastError().text());
-        lazyClose();
         return false;
     }
 
@@ -1174,7 +1148,6 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
             if (!deleteOrphanQuery.exec()) {
                 db.rollback();
                 Logger::Log("[DB] Error deleting orphaned segment_id: " + deleteOrphanQuery.lastError().text());
-                lazyClose();
                 return false;
             }
         }
@@ -1215,7 +1188,6 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
         if (!updateQuery.exec()) {
             db.rollback();
             Logger::Log("[DB] Error updating duration by segment_id: " + updateQuery.lastError().text());
-            lazyClose();
             return false;
         }
 
@@ -1231,7 +1203,6 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
             if (!insertQuery.exec()) {
                 db.rollback();
                 Logger::Log("[DB] Error inserting duration by segment_id: " + insertQuery.lastError().text());
-                lazyClose();
                 return false;
             }
         }
@@ -1251,7 +1222,6 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
     }
 #endif
 
-    lazyClose();
     return success;
 }
 
@@ -1261,12 +1231,21 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
  * This is critical during Windows shutdown to ensure data is persisted
  * before the process is terminated. SQLite may buffer writes even after
  * commit() returns — this method ensures they're flushed by temporarily
- * promoting to PRAGMA synchronous=FULL and issuing a dummy statement to
+ * promoting to PRAGMA synchronous=FULL and issuing a dummy write to
  * trigger the fsync.
  *
- * Note: This app uses rollback journal mode (the SQLite default), not WAL.
- * See the comment in lazyOpen() for the rationale. In rollback journal mode,
- * promoting synchronous to FULL is sufficient to guarantee durability.
+ * Durability guarantee depends on journal mode:
+ * This app uses rollback journal mode (the SQLite default), NOT WAL.  In
+ * rollback journal mode, promoting synchronous to FULL is sufficient to
+ * guarantee durability — the journal file is fully flushed before the
+ * transaction is considered committed.
+ *
+ * If WAL mode is ever enabled (e.g. for concurrent reader performance),
+ * this method must also call:
+ *   PRAGMA wal_checkpoint(RESTART)
+ * after the commit, to flush the WAL file into the main database file.
+ * Without the checkpoint, the most recent writes live only in the WAL
+ * and a power failure could leave them unrecoverable from the main file.
  */
 void SqliteSessionStore::flushToDisc()
 {
@@ -1276,7 +1255,7 @@ void SqliteSessionStore::flushToDisc()
         return;
     }
 
-    if (!lazyOpen()) {
+    if (!ensureOpen()) {
         Logger::Log("[DB] flushToDisc: could not open DB");
         return;
     }
@@ -1284,13 +1263,11 @@ void SqliteSessionStore::flushToDisc()
     QSqlQuery pragma(db);
     if (!pragma.exec("PRAGMA synchronous=FULL")) {
         Logger::Log("[DB] flushToDisc: set synchronous=FULL failed: " + pragma.lastError().text());
-        lazyClose();
         return;
     }
 
     if (!db.transaction()) {
         Logger::Log("[DB] flushToDisc: could not begin transaction");
-        lazyClose();
         return;
     }
 
@@ -1302,17 +1279,14 @@ void SqliteSessionStore::flushToDisc()
     if (!query.exec()) {
         Logger::Log("[DB] flushToDisc: write failed: " + query.lastError().text());
         db.rollback();
-        lazyClose();
         return;
     }
     if (!db.commit()) {
         Logger::Log("[DB] flushToDisc: commit failed: " + db.lastError().text());
         db.rollback();
-        lazyClose();
         return;
     }
 
-    lazyClose();
     Logger::Log("[DB] flushToDisc: durable heartbeat committed");
 }
 
@@ -1322,7 +1296,7 @@ std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
 
     std::deque<OrphanCheckpoint> orphans;
 
-    if (!lazyOpen()) {
+    if (!ensureOpen()) {
         return orphans;
     }
 
@@ -1330,7 +1304,6 @@ std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
     query.prepare("SELECT id, segment_id, type, duration, start_date, start_time, end_date, end_time FROM durations WHERE is_finalized = 0 ORDER BY id ASC");
     if (!query.exec()) {
         Logger::Log("[DB] Error loading orphan checkpoints: " + query.lastError().text());
-        lazyClose();
         return orphans;
     }
 
@@ -1359,7 +1332,6 @@ std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
         orphans.push_back(checkpoint);
     }
 
-    lazyClose();
     return orphans;
 }
 
@@ -1371,13 +1343,12 @@ bool SqliteSessionStore::finalizeIfNoOverlap(qint64 rowId, const QDateTime& star
         return false;
     }
 
-    if (!lazyOpen()) {
+    if (!ensureOpen()) {
         return false;
     }
 
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting finalizeIfNoOverlap transaction: " + db.lastError().text());
-        lazyClose();
         return false;
     }
 
@@ -1406,14 +1377,12 @@ bool SqliteSessionStore::finalizeIfNoOverlap(qint64 rowId, const QDateTime& star
     if (!probe.exec()) {
         Logger::Log("[DB] Error probing for orphan overlap: " + probe.lastError().text());
         db.rollback();
-        lazyClose();
         return false;
     }
 
     if (probe.next()) {
         // Overlap detected: leave the row unchanged.
         db.rollback();
-        lazyClose();
         return false;
     }
 
@@ -1423,7 +1392,6 @@ bool SqliteSessionStore::finalizeIfNoOverlap(qint64 rowId, const QDateTime& star
     if (!updateQuery.exec()) {
         Logger::Log("[DB] Error finalising orphan row: " + updateQuery.lastError().text());
         db.rollback();
-        lazyClose();
         return false;
     }
 
@@ -1432,18 +1400,15 @@ bool SqliteSessionStore::finalizeIfNoOverlap(qint64 rowId, const QDateTime& star
         // Row missing or already finalised — nothing to commit, but treat as a
         // no-op rather than a failure.
         db.rollback();
-        lazyClose();
         return false;
     }
 
     if (!db.commit()) {
         Logger::Log("[DB] Error committing finalizeIfNoOverlap: " + db.lastError().text());
         db.rollback();
-        lazyClose();
         return false;
     }
 
-    lazyClose();
     return true;
 }
 
@@ -1463,7 +1428,7 @@ ReconcileResult SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::v
         return result;
     }
 
-    if (!lazyOpen()) {
+    if (!ensureOpen()) {
         result.ok = false;
         return result;
     }
@@ -1474,7 +1439,6 @@ ReconcileResult SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::v
     if (!outrightDropIds.empty()) {
         if (!db.transaction()) {
             Logger::Log("[DB] Error starting orphan drop transaction: " + db.lastError().text());
-            lazyClose();
             result.ok = false;
             return result;
         }
@@ -1486,7 +1450,6 @@ ReconcileResult SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::v
             if (!dropQuery.exec()) {
                 Logger::Log("[DB] Error dropping orphan row: " + dropQuery.lastError().text());
                 db.rollback();
-                lazyClose();
                 result.ok = false;
                 return result;
             }
@@ -1495,17 +1458,11 @@ ReconcileResult SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::v
         if (!db.commit()) {
             Logger::Log("[DB] Error committing orphan drop transaction: " + db.lastError().text());
             db.rollback();
-            lazyClose();
             result.ok = false;
             return result;
         }
     }
 
-    // lazyClose() between the drop commit and the per-row finalise loop would be
-    // wasteful; each finalizeIfNoOverlap call re-acquires the recursive mutex and
-    // calls lazyOpen() itself, which is a no-op when the connection is already
-    // open.  Leave the connection open and let the final lazyClose() at the end
-    // of this function tear it down.
     for (const auto& orphan : orphansToFinalize) {
         const QDateTime startUtc = orphan.startTime.toUTC();
         const QDateTime endUtc   = orphan.endTime.toUTC();
@@ -1516,7 +1473,6 @@ ReconcileResult SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::v
         }
     }
 
-    lazyClose();
     return result;
 }
 
@@ -1528,12 +1484,11 @@ bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
         return true;
     }
 
-    if (!lazyOpen()) {
+    if (!ensureOpen()) {
         return false;
     }
 
     if (!db.transaction()) {
-        lazyClose();
         return false;
     }
 
@@ -1545,7 +1500,6 @@ bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
 
     if (!query.exec()) {
         db.rollback();
-        lazyClose();
         return false;
     }
 
@@ -1554,7 +1508,6 @@ bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
         db.rollback();
     }
 
-    lazyClose();
     return committed;
 }
 
@@ -1566,12 +1519,11 @@ std::optional<QDateTime> SqliteSessionStore::consumeLastCleanShutdownMarker()
         return std::nullopt;
     }
 
-    if (!lazyOpen()) {
+    if (!ensureOpen()) {
         return std::nullopt;
     }
 
     if (!db.transaction()) {
-        lazyClose();
         return std::nullopt;
     }
 
@@ -1595,17 +1547,14 @@ std::optional<QDateTime> SqliteSessionStore::consumeLastCleanShutdownMarker()
     deleteQuery.bindValue(":key", QString::fromLatin1(kLastCleanShutdownKey));
     if (!deleteQuery.exec()) {
         db.rollback();
-        lazyClose();
         return std::nullopt;
     }
 
     const bool committed = db.commit();
     if (!committed) {
         db.rollback();
-        lazyClose();
         return std::nullopt;
     }
 
-    lazyClose();
     return marker;
 }

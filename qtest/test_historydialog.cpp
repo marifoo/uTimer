@@ -392,7 +392,7 @@ void HistoryDialogTest::test_historydialog_shows_load_reconciliation_banner()
     Timer tracker(settings, db);
 
     SqliteSessionStore manager(settings);
-    QVERIFY(manager.lazyOpen());
+    QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     const QDateTime start = QDateTime::currentDateTimeUtc();
     const QDateTime end = start.addMSecs(1000);
@@ -644,7 +644,7 @@ void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_curren
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
 
-        QVERIFY(db.lazyOpen());
+        QVERIFY(db.ensureOpen());
         QSqlQuery unfinalizedQuery(db.db);
         QVERIFY(unfinalizedQuery.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0"));
         QVERIFY(unfinalizedQuery.next());
