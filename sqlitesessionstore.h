@@ -81,6 +81,7 @@ private:
     bool ensureIsFinalizedColumn();
     bool ensureSegmentIdColumn();
     bool ensureUtcColumns();
+    bool dropLegacyColumns();
     bool ensureSettingsTable();
     BackupResult createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
     void performRetentionCleanup();

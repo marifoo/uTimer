@@ -135,16 +135,13 @@ void IntegrationTest::test_integration_orphan_reconciliation_drops_stale_and_too
         const QDateTime start = QDateTime::currentDateTimeUtc().addSecs(-10);
         const QDateTime end = start.addMSecs(500);
         insert.prepare(
-            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-            "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
+            "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+            "VALUES (:segment_id, :type, :start_utc, :end_utc, 0)"
         );
         insert.bindValue(":segment_id", TimeDuration::createSegmentId());
         insert.bindValue(":type", static_cast<int>(DurationType::Activity));
-        insert.bindValue(":duration", static_cast<qint64>(500));
-        insert.bindValue(":start_date", start.date().toString(Qt::ISODate));
-        insert.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
-        insert.bindValue(":end_date", end.date().toString(Qt::ISODate));
-        insert.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+        insert.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
+        insert.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
         QVERIFY(insert.exec());
     }
 
@@ -154,16 +151,13 @@ void IntegrationTest::test_integration_orphan_reconciliation_drops_stale_and_too
         const QDateTime start = QDateTime::currentDateTimeUtc().addDays(-2);
         const QDateTime end = start.addSecs(30);
         insert.prepare(
-            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-            "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
+            "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+            "VALUES (:segment_id, :type, :start_utc, :end_utc, 0)"
         );
         insert.bindValue(":segment_id", TimeDuration::createSegmentId());
         insert.bindValue(":type", static_cast<int>(DurationType::Activity));
-        insert.bindValue(":duration", static_cast<qint64>(30000));
-        insert.bindValue(":start_date", start.date().toString(Qt::ISODate));
-        insert.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
-        insert.bindValue(":end_date", end.date().toString(Qt::ISODate));
-        insert.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+        insert.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
+        insert.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
         QVERIFY(insert.exec());
     }
 

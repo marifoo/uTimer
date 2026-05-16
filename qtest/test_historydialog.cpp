@@ -143,17 +143,12 @@ void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midn
         QSqlQuery q(rawDb);
         q.prepare(
             "INSERT INTO durations "
-            "(segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-            "VALUES (:sid, 0, :dur, :sd, :st, :ed, :et, 1)"
+            "(segment_id, type, start_utc, end_utc, is_finalized) "
+            "VALUES (:sid, 0, :start_utc, :end_utc, 1)"
         );
         q.bindValue(":sid", TimeDuration::createSegmentId());
-        q.bindValue(":dur", crossMidnightStart.msecsTo(crossMidnightEnd));
-        const QDateTime sUtc = crossMidnightStart.toUTC();
-        const QDateTime eUtc = crossMidnightEnd.toUTC();
-        q.bindValue(":sd", sUtc.date().toString(Qt::ISODate));
-        q.bindValue(":st", sUtc.time().toString("HH:mm:ss.zzz"));
-        q.bindValue(":ed", eUtc.date().toString(Qt::ISODate));
-        q.bindValue(":et", eUtc.time().toString("HH:mm:ss.zzz"));
+        q.bindValue(":start_utc", crossMidnightStart.toUTC().toString(Qt::ISODateWithMs));
+        q.bindValue(":end_utc", crossMidnightEnd.toUTC().toString(Qt::ISODateWithMs));
         QVERIFY(q.exec());
         rawDb.close();
         rawDb = QSqlDatabase();
@@ -397,28 +392,26 @@ void HistoryDialogTest::test_historydialog_shows_load_reconciliation_banner()
     const QDateTime start = QDateTime::currentDateTimeUtc();
     const QDateTime end = start.addMSecs(1000);
 
-    query.prepare("INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-                  "VALUES (:segment_id, 99, 1000, :start_date, :start_time, :end_date, :end_time, 1)");
+    // Row with invalid type → will be skipped
+    query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+                  "VALUES (:segment_id, 99, :start_utc, :end_utc, 1)");
     query.bindValue(":segment_id", TimeDuration::createSegmentId());
-    query.bindValue(":start_date", start.date().toString(Qt::ISODate));
-    query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
-    query.bindValue(":end_date", end.date().toString(Qt::ISODate));
-    query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+    query.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
+    query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
 
-    query.prepare("INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-                  "VALUES (:segment_id, 0, 1200, :start_date, :start_time, :end_date, :end_time, 1)");
+    // Row with valid type → loads normally; no stored duration to mismatch
+    query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+                  "VALUES (:segment_id, 0, :start_utc, :end_utc, 1)");
     query.bindValue(":segment_id", TimeDuration::createSegmentId());
-    query.bindValue(":start_date", start.date().toString(Qt::ISODate));
-    query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
-    query.bindValue(":end_date", end.date().toString(Qt::ISODate));
-    query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
+    query.bindValue(":start_utc", start.addSecs(10).toString(Qt::ISODateWithMs));
+    query.bindValue(":end_utc", end.addSecs(10).toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
     manager.lazyClose();
 
     HistoryDialog dialog(tracker, settings);
     const QString msg = dialog.getLoadReconciliationMessage();
-    QCOMPARE(msg, QString("1 rows skipped due to corrupt data, 1 rows auto-repaired."));
+    QCOMPARE(msg, QString("1 rows skipped due to corrupt data, 0 rows auto-repaired."));
     QVERIFY(dialog.loadReconciliationLabel_ != nullptr);
     QCOMPARE(dialog.loadReconciliationLabel_->text(), msg);
     QVERIFY(!dialog.loadReconciliationLabel_->isHidden());
@@ -474,16 +467,13 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
 
         QSqlQuery historicalQuery(db);
         historicalQuery.prepare(
-            "SELECT type, duration FROM durations WHERE start_date = :start_date AND start_time = :start_time AND end_date = :end_date AND end_time = :end_time"
+            "SELECT type FROM durations WHERE start_utc = :start_utc AND end_utc = :end_utc AND is_finalized = 1"
         );
-        historicalQuery.bindValue(":start_date", historicalStart.toUTC().date().toString(Qt::ISODate));
-        historicalQuery.bindValue(":start_time", historicalStart.toUTC().time().toString("HH:mm:ss.zzz"));
-        historicalQuery.bindValue(":end_date", historicalEnd.toUTC().date().toString(Qt::ISODate));
-        historicalQuery.bindValue(":end_time", historicalEnd.toUTC().time().toString("HH:mm:ss.zzz"));
+        historicalQuery.bindValue(":start_utc", historicalStart.toUTC().toString(Qt::ISODateWithMs));
+        historicalQuery.bindValue(":end_utc", historicalEnd.toUTC().toString(Qt::ISODateWithMs));
         QVERIFY(historicalQuery.exec());
         QVERIFY(historicalQuery.next());
         QCOMPARE(historicalQuery.value(0).toInt(), static_cast<int>(DurationType::Activity));
-        QCOMPARE(historicalQuery.value(1).toLongLong(), historicalStart.msecsTo(historicalEnd));
 
         QSqlQuery checkpointQuery(db);
         checkpointQuery.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0");
@@ -691,19 +681,13 @@ void HistoryDialogTest::test_historydialog_save_uses_ongoing_snapshot_endtime_af
 
         QSqlQuery ongoingQuery(db);
         ongoingQuery.prepare(
-            "SELECT start_date, start_time, end_date, end_time, duration FROM durations WHERE is_finalized = 0"
+            "SELECT start_utc, end_utc FROM durations WHERE is_finalized = 0"
         );
         QVERIFY(ongoingQuery.exec());
         QVERIFY(ongoingQuery.next());
 
-        const QDate savedStartDate = QDate::fromString(ongoingQuery.value(0).toString(), Qt::ISODate);
-        const QTime savedStartTime = QTime::fromString(ongoingQuery.value(1).toString(), "HH:mm:ss.zzz");
-        const QDate savedEndDate = QDate::fromString(ongoingQuery.value(2).toString(), Qt::ISODate);
-        const QTime savedEndTime = QTime::fromString(ongoingQuery.value(3).toString(), "HH:mm:ss.zzz");
-        const qint64 savedDuration = ongoingQuery.value(4).toLongLong();
-
-        const QDateTime savedStartUtc(savedStartDate, savedStartTime, Qt::UTC);
-        const QDateTime savedEndUtc(savedEndDate, savedEndTime, Qt::UTC);
+        const QDateTime savedStartUtc = QDateTime::fromString(ongoingQuery.value(0).toString(), Qt::ISODateWithMs);
+        const QDateTime savedEndUtc   = QDateTime::fromString(ongoingQuery.value(1).toString(), Qt::ISODateWithMs);
 
         // Start time is preserved exactly
         QCOMPARE(savedStartUtc, snapshotStart.toUTC());
@@ -711,9 +695,6 @@ void HistoryDialogTest::test_historydialog_save_uses_ongoing_snapshot_endtime_af
         // End-time must be strictly > snapshotEnd (refreshed, not stale)
         QVERIFY2(savedEndUtc > snapshotEnd.toUTC(),
                  "savedEndUtc must be > snapshotEnd: end-time was not refreshed");
-
-        // Duration reflects the refreshed end-time
-        QCOMPARE(savedDuration, snapshotStart.msecsTo(savedEndUtc.toLocalTime()));
 
         QVERIFY(!ongoingQuery.next());
         db.close();
@@ -797,16 +778,12 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
         QVERIFY(verifyDb.open());
 
         QSqlQuery verifyQuery(verifyDb);
-        QVERIFY(verifyQuery.exec("SELECT type, start_date, start_time, end_date, end_time FROM durations ORDER BY id"));
+        QVERIFY(verifyQuery.exec("SELECT type, start_utc, end_utc FROM durations ORDER BY id"));
         QVERIFY(verifyQuery.next());
         QCOMPARE(verifyQuery.value(0).toInt(), static_cast<int>(DurationType::Pause));
 
-        const QDate savedStartDate = QDate::fromString(verifyQuery.value(1).toString(), Qt::ISODate);
-        const QTime savedStartTime = QTime::fromString(verifyQuery.value(2).toString(), "HH:mm:ss.zzz");
-        const QDate savedEndDate = QDate::fromString(verifyQuery.value(3).toString(), Qt::ISODate);
-        const QTime savedEndTime = QTime::fromString(verifyQuery.value(4).toString(), "HH:mm:ss.zzz");
-        const QDateTime savedStartUtc(savedStartDate, savedStartTime, Qt::UTC);
-        const QDateTime savedEndUtc(savedEndDate, savedEndTime, Qt::UTC);
+        const QDateTime savedStartUtc = QDateTime::fromString(verifyQuery.value(1).toString(), Qt::ISODateWithMs);
+        const QDateTime savedEndUtc   = QDateTime::fromString(verifyQuery.value(2).toString(), Qt::ISODateWithMs);
 
         QCOMPARE(savedStartUtc, dbStart.toUTC());
         QCOMPARE(savedEndUtc, dbEnd.toUTC());
@@ -996,13 +973,13 @@ void HistoryDialogTest::test_saveChanges_deduplicates_cross_bucket_overlaps()
         QCOMPARE(countQuery.value(0).toInt(), 1);
 
         QSqlQuery rowQuery(sqlDb);
-        QVERIFY(rowQuery.exec("SELECT start_time, end_time FROM durations WHERE type = " +
+        QVERIFY(rowQuery.exec("SELECT start_utc, end_utc FROM durations WHERE type = " +
             QString::number(static_cast<int>(DurationType::Activity))));
         QVERIFY(rowQuery.next());
-        const QTime savedStart = QTime::fromString(rowQuery.value(0).toString(), "HH:mm:ss.zzz");
-        const QTime savedEnd = QTime::fromString(rowQuery.value(1).toString(), "HH:mm:ss.zzz");
-        QCOMPARE(savedStart, QTime(10, 0, 0));
-        QCOMPARE(savedEnd, QTime(10, 45, 0));
+        const QDateTime savedStart = QDateTime::fromString(rowQuery.value(0).toString(), Qt::ISODateWithMs);
+        const QDateTime savedEnd   = QDateTime::fromString(rowQuery.value(1).toString(), Qt::ISODateWithMs);
+        QCOMPARE(savedStart.toUTC().time(), QTime(10, 0, 0));
+        QCOMPARE(savedEnd.toUTC().time(), QTime(10, 45, 0));
 
         sqlDb.close();
     }
@@ -1048,18 +1025,18 @@ void HistoryDialogTest::test_saveChanges_noop_save_unchanged()
         QCOMPARE(countQuery.value(0).toInt(), 2);
 
         QSqlQuery pauseQuery(sqlDb);
-        QVERIFY(pauseQuery.exec("SELECT start_time, end_time FROM durations WHERE type = " +
+        QVERIFY(pauseQuery.exec("SELECT start_utc, end_utc FROM durations WHERE type = " +
             QString::number(static_cast<int>(DurationType::Pause))));
         QVERIFY(pauseQuery.next());
-        QCOMPARE(QTime::fromString(pauseQuery.value(0).toString(), "HH:mm:ss.zzz"), QTime(8, 0, 0));
-        QCOMPARE(QTime::fromString(pauseQuery.value(1).toString(), "HH:mm:ss.zzz"), QTime(8, 30, 0));
+        QCOMPARE(QDateTime::fromString(pauseQuery.value(0).toString(), Qt::ISODateWithMs).toUTC().time(), QTime(8, 0, 0));
+        QCOMPARE(QDateTime::fromString(pauseQuery.value(1).toString(), Qt::ISODateWithMs).toUTC().time(), QTime(8, 30, 0));
 
         QSqlQuery actQuery(sqlDb);
-        QVERIFY(actQuery.exec("SELECT start_time, end_time FROM durations WHERE type = " +
+        QVERIFY(actQuery.exec("SELECT start_utc, end_utc FROM durations WHERE type = " +
             QString::number(static_cast<int>(DurationType::Activity))));
         QVERIFY(actQuery.next());
-        QCOMPARE(QTime::fromString(actQuery.value(0).toString(), "HH:mm:ss.zzz"), QTime(9, 0, 0));
-        QCOMPARE(QTime::fromString(actQuery.value(1).toString(), "HH:mm:ss.zzz"), QTime(9, 30, 0));
+        QCOMPARE(QDateTime::fromString(actQuery.value(0).toString(), Qt::ISODateWithMs).toUTC().time(), QTime(9, 0, 0));
+        QCOMPARE(QDateTime::fromString(actQuery.value(1).toString(), Qt::ISODateWithMs).toUTC().time(), QTime(9, 30, 0));
 
         sqlDb.close();
     }

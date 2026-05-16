@@ -45,7 +45,6 @@
 #include "logger.h"
 
 namespace {
-constexpr qint64 kDurationReconciliationToleranceMs = 100;
 const char* kLastCleanShutdownKey = "last_clean_shutdown";
 
 // Monotonically increasing counter used to mint unique SQLite connection names.
@@ -157,21 +156,19 @@ bool SqliteSessionStore::ensureOpen()
  */
 bool SqliteSessionStore::ensureSchema()
 {
-    // Create the durations table if it doesn't exist
+    // Create the durations table if it doesn't exist.
+    // New installs get the clean schema directly; existing DBs go through
+    // the migration chain (ensureIsFinalizedColumn → ensureSegmentIdColumn
+    // → ensureUtcColumns → dropLegacyColumns).
     QSqlQuery query_new(db);
     bool tableCreated = query_new.exec(
         "CREATE TABLE IF NOT EXISTS durations ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "segment_id TEXT NOT NULL,"
         "type INTEGER NOT NULL,"
-        "duration INTEGER NOT NULL,"
-        "start_date DATE NOT NULL,"
-        "start_time TEXT NOT NULL,"
-        "end_date DATE NOT NULL,"
-        "end_time TEXT NOT NULL,"
+        "start_utc TEXT NOT NULL,"
+        "end_utc TEXT NOT NULL,"
         "is_finalized INTEGER NOT NULL DEFAULT 0,"
-        "start_utc TEXT,"
-        "end_utc TEXT,"
         "UNIQUE(segment_id)"
         ")"
     );
@@ -193,6 +190,10 @@ bool SqliteSessionStore::ensureSchema()
         return false;
     }
 
+    if (!dropLegacyColumns()) {
+        return false;
+    }
+
     if (!ensureSettingsTable()) {
         return false;
     }
@@ -202,19 +203,9 @@ bool SqliteSessionStore::ensureSchema()
         return false;
     }
 
-    QSqlQuery indexQuery(db);
-    if (!indexQuery.exec("CREATE INDEX IF NOT EXISTS idx_end_date ON durations(end_date)")) {
-        Logger::Log("[DB] Warning: Failed to create end_date index: " + indexQuery.lastError().text());
-    }
-
     QSqlQuery segmentIndexQuery(db);
     if (!segmentIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_segment_id ON durations(segment_id)")) {
         Logger::Log("[DB] Warning: Failed to create segment_id index: " + segmentIndexQuery.lastError().text());
-    }
-
-    QSqlQuery finalizedStartIndexQuery(db);
-    if (!finalizedStartIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_finalized_start ON durations(is_finalized, start_date, start_time) WHERE is_finalized = 1")) {
-        Logger::Log("[DB] Warning: Failed to create finalized_start index: " + finalizedStartIndexQuery.lastError().text());
     }
 
     QSqlQuery startUtcIndexQuery(db);
@@ -336,9 +327,10 @@ void SqliteSessionStore::performRetentionCleanup()
         Logger::Log("[DB] Error starting retention cleanup transaction: " + db.lastError().text());
         return;
     }
+    const QDateTime threshold = QDateTime::currentDateTimeUtc().addDays(-static_cast<int>(history_days_to_keep_));
     QSqlQuery query(db);
-    query.prepare("DELETE FROM durations WHERE end_date < date('now', '-' || :days || ' days')");
-    query.bindValue(":days", static_cast<int>(history_days_to_keep_));
+    query.prepare("DELETE FROM durations WHERE end_utc < :threshold");
+    query.bindValue(":threshold", threshold.toString(Qt::ISODateWithMs));
     if (!query.exec()) {
         db.rollback();
         Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
@@ -379,13 +371,10 @@ void SqliteSessionStore::pruneOldBackups(int keepCount)
 }
 
 /**
- * Validates that the database schema contains required columns.
+ * Validates that the database schema contains the required UTC timestamp columns.
  *
- * This function checks for the presence of start_date and start_time columns
- * which are required for the explicit start time feature. If these columns
- * are missing, the database is considered outdated and needs to be recreated.
- *
- * Returns true if schema is valid, false if outdated.
+ * Checks for start_utc, end_utc, and segment_id. Returns false if any are absent
+ * (e.g. a manually-created table or a DB predating the UTC migration).
  */
 bool SqliteSessionStore::validateSchema()
 {
@@ -395,25 +384,21 @@ bool SqliteSessionStore::validateSchema()
         return false;
     }
 
-    bool hasStartDate = false;
-    bool hasStartTime = false;
+    bool hasStartUtc = false;
+    bool hasEndUtc = false;
     bool hasSegmentId = false;
 
     while (query.next()) {
-        QString columnName = query.value(1).toString();
-        if (columnName == "start_date") {
-            hasStartDate = true;
-        } else if (columnName == "start_time") {
-            hasStartTime = true;
-        } else if (columnName == "segment_id") {
-            hasSegmentId = true;
-        }
+        const QString col = query.value(1).toString();
+        if (col == "start_utc") hasStartUtc = true;
+        else if (col == "end_utc") hasEndUtc = true;
+        else if (col == "segment_id") hasSegmentId = true;
     }
 
-    if (!hasStartDate || !hasStartTime || !hasSegmentId) {
-        Logger::Log(QString("[DB] Schema validation failed: start_date=%1, start_time=%2, segment_id=%3")
-            .arg(hasStartDate ? "present" : "MISSING")
-            .arg(hasStartTime ? "present" : "MISSING")
+    if (!hasStartUtc || !hasEndUtc || !hasSegmentId) {
+        Logger::Log(QString("[DB] Schema validation failed: start_utc=%1, end_utc=%2, segment_id=%3")
+            .arg(hasStartUtc ? "present" : "MISSING")
+            .arg(hasEndUtc ? "present" : "MISSING")
             .arg(hasSegmentId ? "present" : "MISSING"));
         return false;
     }
@@ -633,6 +618,91 @@ bool SqliteSessionStore::ensureUtcColumns()
     }
 
     Logger::Log("[DB] UTC column migration completed");
+    return true;
+}
+
+bool SqliteSessionStore::dropLegacyColumns()
+{
+    QSqlQuery tableInfo(db);
+    if (!tableInfo.exec("PRAGMA table_info(durations)")) {
+        Logger::Log("[DB] Error checking table_info for legacy column drop: " + tableInfo.lastError().text());
+        return false;
+    }
+    bool hasLegacy = false;
+    while (tableInfo.next()) {
+        if (tableInfo.value(1).toString() == "start_date") { hasLegacy = true; break; }
+    }
+    if (!hasLegacy) return true;
+
+    const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH-mm-ss");
+    const QString backupPath = db.databaseName() + "." + timestamp + ".pre-migration.backup";
+    db.close();
+    if (!QFile::copy(db.databaseName(), backupPath)) {
+        Logger::Log("[DB] Warning: Failed to create pre-migration backup for legacy column drop");
+    } else {
+        Logger::Log("[DB] Created pre-migration backup: " + backupPath);
+    }
+    if (!db.open()) {
+        Logger::Log("[DB] CRITICAL: Failed to reopen database after pre-migration backup for legacy column drop");
+        return false;
+    }
+
+    if (!db.transaction()) {
+        Logger::Log("[DB] Error starting transaction for legacy column drop: " + db.lastError().text());
+        return false;
+    }
+
+    QSqlQuery q(db);
+    if (!q.exec(
+            "CREATE TABLE durations_new ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "segment_id TEXT NOT NULL,"
+            "type INTEGER NOT NULL,"
+            "start_utc TEXT NOT NULL,"
+            "end_utc TEXT NOT NULL,"
+            "is_finalized INTEGER NOT NULL DEFAULT 0,"
+            "UNIQUE(segment_id)"
+            ")")) {
+        db.rollback();
+        Logger::Log("[DB] Error creating durations_new for legacy drop: " + q.lastError().text());
+        return false;
+    }
+
+    // Copy data. Use COALESCE so rows with NULL start_utc/end_utc (which should
+    // not occur in production) are still recovered from the legacy columns if present.
+    // Rows where neither source is available are excluded — they are unrecoverable.
+    if (!q.exec(
+            "INSERT INTO durations_new (id, segment_id, type, start_utc, end_utc, is_finalized) "
+            "SELECT id, segment_id, type, "
+            "    COALESCE(start_utc, start_date || 'T' || start_time || 'Z'), "
+            "    COALESCE(end_utc,   end_date   || 'T' || end_time   || 'Z'), "
+            "    is_finalized "
+            "FROM durations "
+            "WHERE COALESCE(start_utc, start_date) IS NOT NULL "
+            "  AND COALESCE(end_utc,   end_date)   IS NOT NULL")) {
+        db.rollback();
+        Logger::Log("[DB] Error copying data to durations_new: " + q.lastError().text());
+        return false;
+    }
+
+    if (!q.exec("DROP TABLE durations")) {
+        db.rollback();
+        Logger::Log("[DB] Error dropping old durations table: " + q.lastError().text());
+        return false;
+    }
+    if (!q.exec("ALTER TABLE durations_new RENAME TO durations")) {
+        db.rollback();
+        Logger::Log("[DB] Error renaming durations_new to durations: " + q.lastError().text());
+        return false;
+    }
+
+    if (!db.commit()) {
+        db.rollback();
+        Logger::Log("[DB] Error committing legacy column drop: " + db.lastError().text());
+        return false;
+    }
+
+    Logger::Log("[DB] Legacy timestamp columns dropped successfully");
     return true;
 }
 
@@ -856,33 +926,20 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
     // which the reconciliation path relies on via OrphanCheckpoint.id, and avoids aborting
     // the surrounding transaction when an Append re-encounters an existing segment_id.
     QSqlQuery query(db);
-    query.prepare("INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized, start_utc, end_utc) "
-                  "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1, :start_utc, :end_utc) "
+    query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+                  "VALUES (:segment_id, :type, :start_utc, :end_utc, 1) "
                   "ON CONFLICT(segment_id) DO UPDATE SET "
                   "    type         = excluded.type, "
-                  "    duration     = excluded.duration, "
-                  "    start_date   = excluded.start_date, "
-                  "    start_time   = excluded.start_time, "
-                  "    end_date     = excluded.end_date, "
-                  "    end_time     = excluded.end_time, "
-                  "    is_finalized = excluded.is_finalized, "
                   "    start_utc    = excluded.start_utc, "
-                  "    end_utc      = excluded.end_utc");
+                  "    end_utc      = excluded.end_utc, "
+                  "    is_finalized = excluded.is_finalized");
 
     // Insert each duration entry (convert to UTC for storage)
     for (const auto& d : durations) {
-        QDateTime startUtc = d.startTime.toUTC();
-        QDateTime endUtc = d.endTime.toUTC();
-
         query.bindValue(":segment_id", d.segment_id);
         query.bindValue(":type", static_cast<int>(d.type));
-        query.bindValue(":duration", d.duration);
-        query.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
-        query.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
-        query.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
-        query.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
-        query.bindValue(":start_utc", startUtc.toString(Qt::ISODateWithMs));
-        query.bindValue(":end_utc", endUtc.toString(Qt::ISODateWithMs));
+        query.bindValue(":start_utc", d.startTime.toUTC().toString(Qt::ISODateWithMs));
+        query.bindValue(":end_utc", d.endTime.toUTC().toString(Qt::ISODateWithMs));
 
         if (!query.exec()) {
             db.rollback();
@@ -948,23 +1005,15 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
 
     QSqlQuery finalizedInsert(db);
     finalizedInsert.prepare(
-        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized, start_utc, end_utc) "
-        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1, :start_utc, :end_utc)"
+        "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+        "VALUES (:segment_id, :type, :start_utc, :end_utc, 1)"
     );
 
     for (const auto& d : historyDurations) {
-        const QDateTime startUtc = d.startTime.toUTC();
-        const QDateTime endUtc = d.endTime.toUTC();
-
         finalizedInsert.bindValue(":segment_id", d.segment_id);
         finalizedInsert.bindValue(":type", static_cast<int>(d.type));
-        finalizedInsert.bindValue(":duration", d.duration);
-        finalizedInsert.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
-        finalizedInsert.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
-        finalizedInsert.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
-        finalizedInsert.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
-        finalizedInsert.bindValue(":start_utc", startUtc.toString(Qt::ISODateWithMs));
-        finalizedInsert.bindValue(":end_utc", endUtc.toString(Qt::ISODateWithMs));
+        finalizedInsert.bindValue(":start_utc", d.startTime.toUTC().toString(Qt::ISODateWithMs));
+        finalizedInsert.bindValue(":end_utc", d.endTime.toUTC().toString(Qt::ISODateWithMs));
 
         if (!finalizedInsert.exec()) {
             db.rollback();
@@ -975,23 +1024,15 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
 
     QSqlQuery unfinalizedInsert(db);
     unfinalizedInsert.prepare(
-        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized, start_utc, end_utc) "
-        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0, :start_utc, :end_utc)"
+        "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+        "VALUES (:segment_id, :type, :start_utc, :end_utc, 0)"
     );
 
     for (const auto& d : currentSessionDurations) {
-        const QDateTime startUtc = d.startTime.toUTC();
-        const QDateTime endUtc = d.endTime.toUTC();
-
         unfinalizedInsert.bindValue(":segment_id", d.segment_id);
         unfinalizedInsert.bindValue(":type", static_cast<int>(d.type));
-        unfinalizedInsert.bindValue(":duration", d.duration);
-        unfinalizedInsert.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
-        unfinalizedInsert.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
-        unfinalizedInsert.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
-        unfinalizedInsert.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
-        unfinalizedInsert.bindValue(":start_utc", startUtc.toString(Qt::ISODateWithMs));
-        unfinalizedInsert.bindValue(":end_utc", endUtc.toString(Qt::ISODateWithMs));
+        unfinalizedInsert.bindValue(":start_utc", d.startTime.toUTC().toString(Qt::ISODateWithMs));
+        unfinalizedInsert.bindValue(":end_utc", d.endTime.toUTC().toString(Qt::ISODateWithMs));
 
         if (!unfinalizedInsert.exec()) {
             db.rollback();
@@ -1043,9 +1084,9 @@ LoadResult SqliteSessionStore::loadDurations()
         return result;
     }
 
-    // Load all durations ordered by start date and time
+    // Load all durations ordered by start_utc
     QSqlQuery query(db);
-    query.prepare("SELECT segment_id, type, duration, start_date, start_time, end_date, end_time FROM durations WHERE is_finalized = 1 ORDER BY start_date, start_time");
+    query.prepare("SELECT segment_id, type, start_utc, end_utc FROM durations WHERE is_finalized = 1 ORDER BY start_utc");
     if (!query.exec()) {
         db.rollback();
         Logger::Log("[DB] Error executing load query: " + query.lastError().text());
@@ -1055,18 +1096,9 @@ LoadResult SqliteSessionStore::loadDurations()
     // Parse each row and reconstruct TimeDuration objects
     while (query.next()) {
         const QString segmentId = query.value(0).toString();
-        int typeInt = query.value(1).toInt();
-        qint64 storedDuration = query.value(2).toLongLong();
-        QDate startDate = QDate::fromString(query.value(3).toString(), Qt::ISODate);
-        QTime startTime = QTime::fromString(query.value(4).toString(), "HH:mm:ss.zzz");
-        QDate endDate = QDate::fromString(query.value(5).toString(), Qt::ISODate);
-        QTime endTime = QTime::fromString(query.value(6).toString(), "HH:mm:ss.zzz");
-
-        // Reconstruct QDateTime in UTC, then convert to local time
-        QDateTime startDateTime(startDate, startTime, Qt::UTC);
-        QDateTime endDateTime(endDate, endTime, Qt::UTC);
-        startDateTime = startDateTime.toLocalTime();
-        endDateTime = endDateTime.toLocalTime();
+        const int typeInt = query.value(1).toInt();
+        const QDateTime startDateTime = QDateTime::fromString(query.value(2).toString(), Qt::ISODateWithMs).toLocalTime();
+        const QDateTime endDateTime   = QDateTime::fromString(query.value(3).toString(), Qt::ISODateWithMs).toLocalTime();
 
         // Validate type enum range
         if (typeInt != static_cast<int>(DurationType::Activity) &&
@@ -1079,9 +1111,9 @@ LoadResult SqliteSessionStore::loadDurations()
         DurationType type = static_cast<DurationType>(typeInt);
 
         // Validate timestamps
-        if (!startDate.isValid() || !startTime.isValid() || !endDate.isValid() || !endTime.isValid()) {
-            Logger::Log(QString("[DB] Warning: Skipped invalid timestamp entry - StartDate: %1, StartTime: %2, EndDate: %3, EndTime: %4")
-                .arg(startDate.toString()).arg(startTime.toString()).arg(endDate.toString()).arg(endTime.toString()));
+        if (!startDateTime.isValid() || !endDateTime.isValid()) {
+            Logger::Log(QString("[DB] Warning: Skipped entry with invalid UTC timestamp(s) - start: %1, end: %2")
+                .arg(query.value(2).toString()).arg(query.value(3).toString()));
             result.skipped++;
             continue;
         }
@@ -1092,19 +1124,6 @@ LoadResult SqliteSessionStore::loadDurations()
                 .arg(startDateTime.toString(Qt::ISODate)).arg(endDateTime.toString(Qt::ISODate)));
             result.skipped++;
             continue;
-        }
-
-        // Compute duration from timestamps and validate against stored duration
-        qint64 computedDuration = startDateTime.msecsTo(endDateTime);
-
-        if (storedDuration < 0) {
-            Logger::Log(QString("[DB] Warning: Negative stored duration %1ms - using computed duration %2ms")
-                .arg(storedDuration).arg(computedDuration));
-            result.repaired++;
-        } else if (qAbs(computedDuration - storedDuration) > kDurationReconciliationToleranceMs) {
-            Logger::Log(QString("[DB] Warning: Duration mismatch (stored: %1ms, computed: %2ms) - using computed value")
-                .arg(storedDuration).arg(computedDuration));
-            result.repaired++;
         }
 
         // Create TimeDuration with explicit start/end times
@@ -1124,10 +1143,8 @@ LoadResult SqliteSessionStore::loadDurations()
     // transaction lock, but rollback() signals the intent more clearly.
     db.rollback();
 
-    if (result.skipped > 0 || result.repaired > 0) {
-        Logger::Log(QString("[DB] loadDurations reconciliation summary: skipped=%1, repaired=%2")
-            .arg(result.skipped)
-            .arg(result.repaired));
+    if (result.skipped > 0) {
+        Logger::Log(QString("[DB] loadDurations reconciliation summary: skipped=%1").arg(result.skipped));
     }
 
     return result;
@@ -1158,20 +1175,17 @@ EntriesForDateResult SqliteSessionStore::hasEntriesForDate(const QDate& date)
     const QDateTime utcStart = localStart.toUTC();
     const QDateTime utcEnd   = localEnd.toUTC();
 
-    // Check if any finalized entry's end timestamp falls within that UTC range.
+    // Check if any finalized entry started within that UTC range.
     QSqlQuery query(db);
     query.prepare(
         "SELECT 1 FROM durations"
         " WHERE is_finalized = 1"
-        "   AND end_date BETWEEN :utcStartDate AND :utcEndDate"
-        "   AND (end_date || 'T' || end_time || 'Z') >= :utcStartTs"
-        "   AND (end_date || 'T' || end_time || 'Z') <  :utcEndTs"
+        "   AND start_utc >= :utcStartTs"
+        "   AND start_utc <  :utcEndTs"
         " LIMIT 1"
     );
-    query.bindValue(":utcStartDate", utcStart.date().toString(Qt::ISODate));
-    query.bindValue(":utcEndDate",   utcEnd.date().toString(Qt::ISODate));
-    query.bindValue(":utcStartTs",   utcStart.toString(Qt::ISODateWithMs));
-    query.bindValue(":utcEndTs",     utcEnd.toString(Qt::ISODateWithMs));
+    query.bindValue(":utcStartTs", utcStart.toString(Qt::ISODateWithMs));
+    query.bindValue(":utcEndTs",   utcEnd.toString(Qt::ISODateWithMs));
 
     EntriesForDateResult result = EntriesForDateResult::Unknown;
     if (query.exec()) {
@@ -1197,6 +1211,7 @@ EntriesForDateResult SqliteSessionStore::hasEntriesForDate(const QDate& date)
 bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId)
 {
     QMutexLocker locker(&db_mutex_);
+    Q_UNUSED(duration)  // duration is computed from timestamps at load; not stored
 
     // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
@@ -1208,32 +1223,20 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
         return false;
     }
 
-    // Convert to UTC for storage
-    QDateTime startUtc = startTime.toUTC();
-    QDateTime endUtc = endTime.toUTC();
-
-    QString startDateStr = startUtc.date().toString(Qt::ISODate);
-    QString startTimeStr = startUtc.time().toString("HH:mm:ss.zzz");
-    QString endDateStr = endUtc.date().toString(Qt::ISODate);
-    QString endTimeStr = endUtc.time().toString("HH:mm:ss.zzz");
+    const QString startUtcStr = startTime.toUTC().toString(Qt::ISODateWithMs);
+    const QString endUtcStr   = endTime.toUTC().toString(Qt::ISODateWithMs);
 
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting transaction for checkpoint: " + db.lastError().text());
         return false;
     }
 
-    const QString startUtcStr = startUtc.toString(Qt::ISODateWithMs);
-    const QString endUtcStr = endUtc.toString(Qt::ISODateWithMs);
-
     bool success = false;
     QSqlQuery updateQuery(db);
     updateQuery.prepare(
-        "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time, end_utc = :end_utc, is_finalized = 0 "
+        "UPDATE durations SET end_utc = :end_utc, is_finalized = 0 "
         "WHERE segment_id = :segment_id"
     );
-    updateQuery.bindValue(":duration", duration);
-    updateQuery.bindValue(":end_date", endDateStr);
-    updateQuery.bindValue(":end_time", endTimeStr);
     updateQuery.bindValue(":end_utc", endUtcStr);
     updateQuery.bindValue(":segment_id", segmentId);
 
@@ -1251,16 +1254,11 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
     } else {
         QSqlQuery insertQuery(db);
         insertQuery.prepare(
-            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized, start_utc, end_utc) "
-            "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0, :start_utc, :end_utc)"
+            "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+            "VALUES (:segment_id, :type, :start_utc, :end_utc, 0)"
         );
         insertQuery.bindValue(":segment_id", segmentId);
         insertQuery.bindValue(":type", static_cast<int>(type));
-        insertQuery.bindValue(":duration", duration);
-        insertQuery.bindValue(":start_date", startDateStr);
-        insertQuery.bindValue(":start_time", startTimeStr);
-        insertQuery.bindValue(":end_date", endDateStr);
-        insertQuery.bindValue(":end_time", endTimeStr);
         insertQuery.bindValue(":start_utc", startUtcStr);
         insertQuery.bindValue(":end_utc", endUtcStr);
 
@@ -1333,38 +1331,24 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
 
     QSqlQuery updateQuery(db);
     updateQuery.prepare(
-        "UPDATE durations SET type = :type, duration = :duration, start_date = :start_date, start_time = :start_time, "
-        "end_date = :end_date, end_time = :end_time, is_finalized = 1, start_utc = :start_utc, end_utc = :end_utc "
+        "UPDATE durations SET type = :type, start_utc = :start_utc, end_utc = :end_utc, is_finalized = 1 "
         "WHERE segment_id = :segment_id"
     );
 
     QSqlQuery insertQuery(db);
     insertQuery.prepare(
-        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized, start_utc, end_utc) "
-        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1, :start_utc, :end_utc)"
+        "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+        "VALUES (:segment_id, :type, :start_utc, :end_utc, 1)"
     );
 
     int count = 0;
 
     for (const auto& d : durations) {
-        // Convert to UTC for storage
-        QDateTime startUtc = d.startTime.toUTC();
-        QDateTime endUtc = d.endTime.toUTC();
-
-        const QString startDate = startUtc.date().toString(Qt::ISODate);
-        const QString startTime = startUtc.time().toString("HH:mm:ss.zzz");
-        const QString endDate = endUtc.date().toString(Qt::ISODate);
-        const QString endTime = endUtc.time().toString("HH:mm:ss.zzz");
-        const QString startUtcStr = startUtc.toString(Qt::ISODateWithMs);
-        const QString endUtcStr = endUtc.toString(Qt::ISODateWithMs);
+        const QString startUtcStr = d.startTime.toUTC().toString(Qt::ISODateWithMs);
+        const QString endUtcStr   = d.endTime.toUTC().toString(Qt::ISODateWithMs);
 
         updateQuery.bindValue(":segment_id", d.segment_id);
         updateQuery.bindValue(":type", static_cast<int>(d.type));
-        updateQuery.bindValue(":duration", d.duration);
-        updateQuery.bindValue(":start_date", startDate);
-        updateQuery.bindValue(":start_time", startTime);
-        updateQuery.bindValue(":end_date", endDate);
-        updateQuery.bindValue(":end_time", endTime);
         updateQuery.bindValue(":start_utc", startUtcStr);
         updateQuery.bindValue(":end_utc", endUtcStr);
 
@@ -1377,11 +1361,6 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
         if (updateQuery.numRowsAffected() == 0) {
             insertQuery.bindValue(":segment_id", d.segment_id);
             insertQuery.bindValue(":type", static_cast<int>(d.type));
-            insertQuery.bindValue(":duration", d.duration);
-            insertQuery.bindValue(":start_date", startDate);
-            insertQuery.bindValue(":start_time", startTime);
-            insertQuery.bindValue(":end_date", endDate);
-            insertQuery.bindValue(":end_time", endTime);
             insertQuery.bindValue(":start_utc", startUtcStr);
             insertQuery.bindValue(":end_utc", endUtcStr);
 
@@ -1486,24 +1465,22 @@ std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
     }
 
     QSqlQuery query(db);
-    query.prepare("SELECT id, segment_id, type, duration, start_date, start_time, end_date, end_time FROM durations WHERE is_finalized = 0 ORDER BY id ASC");
+    query.prepare("SELECT id, segment_id, type, start_utc, end_utc FROM durations WHERE is_finalized = 0 ORDER BY id ASC");
     if (!query.exec()) {
         Logger::Log("[DB] Error loading orphan checkpoints: " + query.lastError().text());
         return orphans;
     }
 
     while (query.next()) {
-        int typeInt = query.value(2).toInt();
+        const int typeInt = query.value(2).toInt();
         if (typeInt != static_cast<int>(DurationType::Activity) &&
             typeInt != static_cast<int>(DurationType::Pause)) {
             continue;
         }
 
-        QDate startDate = QDate::fromString(query.value(4).toString(), Qt::ISODate);
-        QTime startTime = QTime::fromString(query.value(5).toString(), "HH:mm:ss.zzz");
-        QDate endDate = QDate::fromString(query.value(6).toString(), Qt::ISODate);
-        QTime endTime = QTime::fromString(query.value(7).toString(), "HH:mm:ss.zzz");
-        if (!startDate.isValid() || !startTime.isValid() || !endDate.isValid() || !endTime.isValid()) {
+        const QDateTime startTime = QDateTime::fromString(query.value(3).toString(), Qt::ISODateWithMs).toLocalTime();
+        const QDateTime endTime   = QDateTime::fromString(query.value(4).toString(), Qt::ISODateWithMs).toLocalTime();
+        if (!startTime.isValid() || !endTime.isValid()) {
             continue;
         }
 
@@ -1511,9 +1488,9 @@ std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
         checkpoint.id = query.value(0).toLongLong();
         checkpoint.segment_id = query.value(1).toString();
         checkpoint.type = static_cast<DurationType>(typeInt);
-        checkpoint.duration = query.value(3).toLongLong();
-        checkpoint.startTime = QDateTime(startDate, startTime, Qt::UTC).toLocalTime();
-        checkpoint.endTime = QDateTime(endDate, endTime, Qt::UTC).toLocalTime();
+        checkpoint.duration = startTime.msecsTo(endTime);
+        checkpoint.startTime = startTime;
+        checkpoint.endTime = endTime;
         orphans.push_back(checkpoint);
     }
 
@@ -1539,10 +1516,8 @@ bool SqliteSessionStore::finalizeIfNoOverlap(qint64 rowId, const QDateTime& star
 
     // Probe for any *other* finalised row that overlaps [startUtc, endUtc).
     // Two intervals [a, b) and [c, d) overlap iff a < d AND c < b.
-    // The schema stores date+time as separate TEXT columns in UTC; concatenating
-    // them with the literal 'T' / 'Z' yields an ISO-8601 string that compares
-    // lexicographically in the correct chronological order.  The
-    // idx_finalized_start partial index (Step 1) covers the LHS of the predicate.
+    // ISO-8601 strings compare lexicographically in chronological order.
+    // The idx_start_utc partial index covers the LHS of the predicate.
     const QString startTs = startUtc.toString(Qt::ISODateWithMs);
     const QString endTs   = endUtc.toString(Qt::ISODateWithMs);
 
@@ -1551,8 +1526,8 @@ bool SqliteSessionStore::finalizeIfNoOverlap(qint64 rowId, const QDateTime& star
         "SELECT 1 FROM durations"
         " WHERE is_finalized = 1"
         "   AND id != :rowId"
-        "   AND (start_date || 'T' || start_time || 'Z') < :endTs"
-        "   AND (end_date   || 'T' || end_time   || 'Z') > :startTs"
+        "   AND start_utc < :endTs"
+        "   AND end_utc   > :startTs"
         " LIMIT 1"
     );
     probe.bindValue(":rowId", static_cast<qlonglong>(rowId));
