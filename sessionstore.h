@@ -57,6 +57,25 @@ struct LoadResult {
     operator std::deque<TimeDuration>&() { return durations; }
 };
 
+/**
+ * Result of reconcileUnfinalizedCheckpoints.
+ *
+ *  - finalized: row ids that were successfully promoted from is_finalized=0 to 1.
+ *  - dropped:   row ids that the store would not adopt.  Most commonly because
+ *               another already-finalised row overlaps the orphan's
+ *               [startUtc, endUtc) interval; also covers missing/already-final
+ *               rows.  These rows are left in the database (still is_finalized=0
+ *               if they exist) so a future reconciliation pass can re-evaluate.
+ *  - ok:        false iff a transaction-level failure prevented the call from
+ *               doing meaningful work.  When false the two lists are empty and
+ *               the caller must assume nothing happened.
+ */
+struct ReconcileResult {
+    std::vector<long long> finalized;
+    std::vector<long long> dropped;
+    bool ok = true;
+};
+
 class SessionStore
 {
 public:
@@ -73,8 +92,18 @@ public:
     virtual bool checkSchemaOnStartup() = 0;
     virtual void flushToDisc() = 0;
     virtual std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() = 0;
-    virtual bool reconcileUnfinalizedCheckpoints(const std::vector<long long>& finalizeIds,
-                                                  const std::vector<long long>& dropIds) = 0;
+    // Atomically check overlap and finalise.  Inside a single transaction:
+    //   (a) probe for any other finalised row whose [startUtc, endUtc) interval
+    //       intersects the supplied [startUtc, endUtc);
+    //   (b) only if no overlap, UPDATE `rowId` to is_finalized = 1.
+    // Returns true iff the UPDATE took effect.
+    virtual bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc) = 0;
+    // Reconcile a batch of orphan checkpoints.
+    //   `orphansToFinalize` is attempted via finalizeIfNoOverlap, one per row.
+    //   `outrightDropIds`   are deleted unconditionally.
+    // See ReconcileResult for the return-value contract.
+    virtual ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
+                                                            const std::vector<long long>& outrightDropIds) = 0;
     virtual bool setLastCleanShutdownMarker(const QDateTime& timestamp) = 0;
     virtual std::optional<QDateTime> consumeLastCleanShutdownMarker() = 0;
 };

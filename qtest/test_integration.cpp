@@ -740,3 +740,122 @@ void IntegrationTest::test_AB_scheduleMidnightStop_is_gone()
     QVERIFY2(!content.contains("scheduleMidnightStop"),
              "scheduleMidnightStop should not appear in mainwin.h");
 }
+
+/**
+ * FakeSessionStore mirrors SqliteSessionStore's overlap-guarded finalise:
+ * if the orphan does not overlap any finalised row, the call returns true and
+ * the row is promoted; if it overlaps, the call returns false and storedDurations
+ * is unchanged.
+ */
+void IntegrationTest::test_fakeStore_finalizeIfNoOverlap_mirrors_sqlite_semantics()
+{
+    FakeSessionStore fakeDb;
+
+    // Seed one finalised row 10:00 - 11:00 UTC.
+    const QDateTime existingStart = QDateTime(QDate(2025, 1, 1), QTime(10, 0, 0), Qt::UTC).toLocalTime();
+    const QDateTime existingEnd   = QDateTime(QDate(2025, 1, 1), QTime(11, 0, 0), Qt::UTC).toLocalTime();
+    fakeDb.storedDurations.push_back(
+        TimeDuration::fromTrusted(DurationType::Activity, existingStart, existingEnd));
+
+    // Orphan A: 12:00 - 12:30 UTC, no overlap → should finalise.
+    OrphanCheckpoint a;
+    a.id = 1;
+    a.startTime = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC).toLocalTime();
+    a.endTime   = QDateTime(QDate(2025, 1, 1), QTime(12, 30, 0), Qt::UTC).toLocalTime();
+    fakeDb.orphanCheckpoints.push_back(a);
+
+    // Orphan B: 10:30 - 11:30 UTC, overlaps → should be rejected.
+    OrphanCheckpoint b;
+    b.id = 2;
+    b.startTime = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC).toLocalTime();
+    b.endTime   = QDateTime(QDate(2025, 1, 1), QTime(11, 30, 0), Qt::UTC).toLocalTime();
+    fakeDb.orphanCheckpoints.push_back(b);
+
+    const size_t storedBefore = fakeDb.storedDurations.size();
+
+    QVERIFY( fakeDb.finalizeIfNoOverlap(a.id, a.startTime.toUTC(), a.endTime.toUTC()));
+    QVERIFY(!fakeDb.finalizeIfNoOverlap(b.id, b.startTime.toUTC(), b.endTime.toUTC()));
+
+    // A was promoted; B remains an orphan.
+    QCOMPARE(fakeDb.storedDurations.size(), storedBefore + 1);
+    QCOMPARE(fakeDb.orphanCheckpoints.size(), (size_t)1);
+    QCOMPARE(fakeDb.orphanCheckpoints.front().id, b.id);
+}
+
+void IntegrationTest::test_fakeStore_reconcile_reports_finalized_and_overlap_dropped()
+{
+    FakeSessionStore fakeDb;
+
+    // Seed one finalised row 10:00 - 11:00 UTC.
+    const QDateTime existingStart = QDateTime(QDate(2025, 1, 1), QTime(10, 0, 0), Qt::UTC).toLocalTime();
+    const QDateTime existingEnd   = QDateTime(QDate(2025, 1, 1), QTime(11, 0, 0), Qt::UTC).toLocalTime();
+    fakeDb.storedDurations.push_back(
+        TimeDuration::fromTrusted(DurationType::Activity, existingStart, existingEnd));
+
+    OrphanCheckpoint a;
+    a.id = 1;
+    a.startTime = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC).toLocalTime();
+    a.endTime   = QDateTime(QDate(2025, 1, 1), QTime(12, 30, 0), Qt::UTC).toLocalTime();
+    OrphanCheckpoint b;
+    b.id = 2;
+    b.startTime = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC).toLocalTime();
+    b.endTime   = QDateTime(QDate(2025, 1, 1), QTime(11, 30, 0), Qt::UTC).toLocalTime();
+    fakeDb.orphanCheckpoints.push_back(a);
+    fakeDb.orphanCheckpoints.push_back(b);
+
+    ReconcileResult result = fakeDb.reconcileUnfinalizedCheckpoints({a, b}, {});
+    QVERIFY(result.ok);
+    QCOMPARE(result.finalized.size(), (size_t)1);
+    QCOMPARE(result.finalized[0], (long long)a.id);
+    QCOMPARE(result.dropped.size(), (size_t)1);
+    QCOMPARE(result.dropped[0], (long long)b.id);
+}
+
+/**
+ * Timer-level test: when the store rejects an orphan due to overlap, those
+ * seconds must NOT appear in startup_recovered_seconds_.
+ *
+ * All timestamps are anchored to "now" so Timer's pre-filter (stale > 24h,
+ * too-short < 1s) does not interfere with the path under test.
+ */
+void IntegrationTest::test_timer_reconcileOrphans_excludes_overlap_dropped_from_recovered_seconds()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+
+    const QDateTime now = QDateTime::currentDateTime();
+
+    // Seed a finalised row whose window overlaps orphan B (see below).
+    const QDateTime overlapStart = now.addSecs(-50);
+    const QDateTime overlapEnd   = now.addSecs(-30);
+    fakeDb.storedDurations.push_back(
+        TimeDuration::fromTrusted(DurationType::Activity, overlapStart, overlapEnd));
+
+    // Orphan A: 60-second window ending 60s ago. No overlap, recent, > 1s.
+    OrphanCheckpoint a;
+    a.id = 1;
+    a.segment_id = TimeDuration::createSegmentId();
+    a.type = DurationType::Activity;
+    a.startTime = now.addSecs(-120);
+    a.endTime   = now.addSecs(-60);
+    a.duration  = a.startTime.msecsTo(a.endTime);
+    fakeDb.orphanCheckpoints.push_back(a);
+
+    // Orphan B: 10-second window that overlaps the seeded finalised row.
+    // Recent (>= now-50s), longer than 1s, but must be overlap-rejected.
+    OrphanCheckpoint b;
+    b.id = 2;
+    b.segment_id = TimeDuration::createSegmentId();
+    b.type = DurationType::Activity;
+    b.startTime = now.addSecs(-45);
+    b.endTime   = now.addSecs(-35);
+    b.duration  = b.startTime.msecsTo(b.endTime);
+    fakeDb.orphanCheckpoints.push_back(b);
+
+    Timer tracker(settings, fakeDb);
+
+    // Only A's 60 seconds are counted; B was overlap-dropped by the store.
+    QCOMPARE(tracker.getStartupRecoveredSeconds(), (qint64)60);
+}

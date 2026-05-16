@@ -1363,12 +1363,12 @@ std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
     return orphans;
 }
 
-bool SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::vector<long long>& finalizeIds, const std::vector<long long>& dropIds)
+bool SqliteSessionStore::finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc)
 {
     QMutexLocker locker(&db_mutex_);
 
-    if (finalizeIds.empty() && dropIds.empty()) {
-        return true;
+    if (history_days_to_keep_ == 0) {
+        return false;
     }
 
     if (!lazyOpen()) {
@@ -1376,39 +1376,148 @@ bool SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::vector<long 
     }
 
     if (!db.transaction()) {
-        Logger::Log("[DB] Error starting orphan reconciliation transaction: " + db.lastError().text());
+        Logger::Log("[DB] Error starting finalizeIfNoOverlap transaction: " + db.lastError().text());
         lazyClose();
         return false;
     }
 
-    QSqlQuery finalizeQuery(db);
-    finalizeQuery.prepare("UPDATE durations SET is_finalized = 1 WHERE id = :id AND is_finalized = 0");
-    for (long long id : finalizeIds) {
-        finalizeQuery.bindValue(":id", id);
-        if (!finalizeQuery.exec()) {
-            db.rollback();
-            lazyClose();
-            return false;
-        }
-    }
+    // Probe for any *other* finalised row that overlaps [startUtc, endUtc).
+    // Two intervals [a, b) and [c, d) overlap iff a < d AND c < b.
+    // The schema stores date+time as separate TEXT columns in UTC; concatenating
+    // them with the literal 'T' / 'Z' yields an ISO-8601 string that compares
+    // lexicographically in the correct chronological order.  The
+    // idx_finalized_start partial index (Step 1) covers the LHS of the predicate.
+    const QString startTs = startUtc.toString(Qt::ISODateWithMs);
+    const QString endTs   = endUtc.toString(Qt::ISODateWithMs);
 
-    QSqlQuery dropQuery(db);
-    dropQuery.prepare("DELETE FROM durations WHERE id = :id AND is_finalized = 0");
-    for (long long id : dropIds) {
-        dropQuery.bindValue(":id", id);
-        if (!dropQuery.exec()) {
-            db.rollback();
-            lazyClose();
-            return false;
-        }
-    }
+    QSqlQuery probe(db);
+    probe.prepare(
+        "SELECT 1 FROM durations"
+        " WHERE is_finalized = 1"
+        "   AND id != :rowId"
+        "   AND (start_date || 'T' || start_time || 'Z') < :endTs"
+        "   AND (end_date   || 'T' || end_time   || 'Z') > :startTs"
+        " LIMIT 1"
+    );
+    probe.bindValue(":rowId", static_cast<qlonglong>(rowId));
+    probe.bindValue(":endTs", endTs);
+    probe.bindValue(":startTs", startTs);
 
-    const bool committed = db.commit();
-    if (!committed) {
+    if (!probe.exec()) {
+        Logger::Log("[DB] Error probing for orphan overlap: " + probe.lastError().text());
         db.rollback();
+        lazyClose();
+        return false;
     }
+
+    if (probe.next()) {
+        // Overlap detected: leave the row unchanged.
+        db.rollback();
+        lazyClose();
+        return false;
+    }
+
+    QSqlQuery updateQuery(db);
+    updateQuery.prepare("UPDATE durations SET is_finalized = 1 WHERE id = :id AND is_finalized = 0");
+    updateQuery.bindValue(":id", static_cast<qlonglong>(rowId));
+    if (!updateQuery.exec()) {
+        Logger::Log("[DB] Error finalising orphan row: " + updateQuery.lastError().text());
+        db.rollback();
+        lazyClose();
+        return false;
+    }
+
+    const bool updated = updateQuery.numRowsAffected() > 0;
+    if (!updated) {
+        // Row missing or already finalised — nothing to commit, but treat as a
+        // no-op rather than a failure.
+        db.rollback();
+        lazyClose();
+        return false;
+    }
+
+    if (!db.commit()) {
+        Logger::Log("[DB] Error committing finalizeIfNoOverlap: " + db.lastError().text());
+        db.rollback();
+        lazyClose();
+        return false;
+    }
+
     lazyClose();
-    return committed;
+    return true;
+}
+
+ReconcileResult SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
+                                                                   const std::vector<long long>& outrightDropIds)
+{
+    QMutexLocker locker(&db_mutex_);
+
+    ReconcileResult result;
+
+    if (history_days_to_keep_ == 0) {
+        result.ok = false;
+        return result;
+    }
+
+    if (orphansToFinalize.empty() && outrightDropIds.empty()) {
+        return result;
+    }
+
+    if (!lazyOpen()) {
+        result.ok = false;
+        return result;
+    }
+
+    // Outright drops happen first in their own transaction so they survive even
+    // if a subsequent finalize call fails.  Finalise calls are then issued one
+    // by one via finalizeIfNoOverlap, each in its own atomic transaction.
+    if (!outrightDropIds.empty()) {
+        if (!db.transaction()) {
+            Logger::Log("[DB] Error starting orphan drop transaction: " + db.lastError().text());
+            lazyClose();
+            result.ok = false;
+            return result;
+        }
+
+        QSqlQuery dropQuery(db);
+        dropQuery.prepare("DELETE FROM durations WHERE id = :id AND is_finalized = 0");
+        for (long long id : outrightDropIds) {
+            dropQuery.bindValue(":id", static_cast<qlonglong>(id));
+            if (!dropQuery.exec()) {
+                Logger::Log("[DB] Error dropping orphan row: " + dropQuery.lastError().text());
+                db.rollback();
+                lazyClose();
+                result.ok = false;
+                return result;
+            }
+        }
+
+        if (!db.commit()) {
+            Logger::Log("[DB] Error committing orphan drop transaction: " + db.lastError().text());
+            db.rollback();
+            lazyClose();
+            result.ok = false;
+            return result;
+        }
+    }
+
+    // lazyClose() between the drop commit and the per-row finalise loop would be
+    // wasteful; each finalizeIfNoOverlap call re-acquires the recursive mutex and
+    // calls lazyOpen() itself, which is a no-op when the connection is already
+    // open.  Leave the connection open and let the final lazyClose() at the end
+    // of this function tear it down.
+    for (const auto& orphan : orphansToFinalize) {
+        const QDateTime startUtc = orphan.startTime.toUTC();
+        const QDateTime endUtc   = orphan.endTime.toUTC();
+        if (finalizeIfNoOverlap(orphan.id, startUtc, endUtc)) {
+            result.finalized.push_back(orphan.id);
+        } else {
+            result.dropped.push_back(orphan.id);
+        }
+    }
+
+    lazyClose();
+    return result;
 }
 
 bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)

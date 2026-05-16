@@ -90,6 +90,13 @@ private slots:
 
     // Step 2 (S1): saveDurations(Append) upserts on segment_id collision
     void test_database_saveDurations_append_upserts_existing_segment_id();
+
+    // Step 3 (S2 + T3): atomic overlap-guarded finalisation.
+    void test_finalizeIfNoOverlap_succeeds_when_no_overlap();
+    void test_finalizeIfNoOverlap_rejects_when_overlapping_finalized_row_exists();
+    void test_finalizeIfNoOverlap_leaves_row_unchanged_on_overlap();
+    void test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dropped();
+    void test_reconcileUnfinalizedCheckpoints_outright_drops_are_deleted();
 };
 
 #endif // TEST_DATABASE_H

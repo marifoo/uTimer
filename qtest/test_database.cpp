@@ -1778,3 +1778,244 @@ void DatabaseTest::test_database_saveDurations_append_upserts_existing_segment_i
     QVERIFY(!verify.next()); // no duplicate
     manager.lazyClose();
 }
+
+/**
+ * Step 3 (S2 + T3): atomic overlap-guarded finalisation.
+ *
+ * Helper: seed an orphan (is_finalized = 0) row directly via SQL with the given
+ * UTC start/end and return its rowid.  Mirrors the columns that
+ * loadUnfinalizedCheckpoints() reads.
+ */
+static qint64 seedOrphanRow(SqliteSessionStore& manager,
+                            const QDateTime& startUtc,
+                            const QDateTime& endUtc,
+                            DurationType type = DurationType::Activity)
+{
+    QSqlQuery q(manager.db);
+    q.prepare(
+        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
+        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
+    );
+    q.bindValue(":segment_id", TimeDuration::createSegmentId());
+    q.bindValue(":type", static_cast<int>(type));
+    q.bindValue(":duration", startUtc.msecsTo(endUtc));
+    q.bindValue(":start_date", startUtc.date().toString(Qt::ISODate));
+    q.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
+    q.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
+    q.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
+    if (!q.exec()) {
+        return -1;
+    }
+    return q.lastInsertId().toLongLong();
+}
+
+void DatabaseTest::test_finalizeIfNoOverlap_succeeds_when_no_overlap()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    QVERIFY(manager.lazyOpen());
+
+    // Existing finalised row from 10:00 to 11:00.
+    const QDateTime existingStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 0, 0), Qt::UTC);
+    const QDateTime existingEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 0, 0), Qt::UTC);
+    std::deque<TimeDuration> seeded;
+    seeded.emplace_back(DurationType::Activity, existingStartUtc.toLocalTime(), existingEndUtc.toLocalTime());
+    manager.lazyClose();
+    QVERIFY(manager.updateDurationsById(seeded));
+
+    // Orphan from 12:00 to 12:30 — no overlap with the finalised row above.
+    const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC);
+    const QDateTime orphanEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(12, 30, 0), Qt::UTC);
+
+    QVERIFY(manager.lazyOpen());
+    const qint64 orphanRowId = seedOrphanRow(manager, orphanStartUtc, orphanEndUtc);
+    QVERIFY(orphanRowId > 0);
+    manager.lazyClose();
+
+    QVERIFY(manager.finalizeIfNoOverlap(orphanRowId, orphanStartUtc, orphanEndUtc));
+
+    // Verify the row is now finalised.
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery verify(manager.db);
+    verify.prepare("SELECT is_finalized FROM durations WHERE id = :id");
+    verify.bindValue(":id", orphanRowId);
+    QVERIFY(verify.exec());
+    QVERIFY(verify.next());
+    QCOMPARE(verify.value(0).toInt(), 1);
+    manager.lazyClose();
+}
+
+void DatabaseTest::test_finalizeIfNoOverlap_rejects_when_overlapping_finalized_row_exists()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    // Existing finalised row from 10:00 to 11:00.
+    const QDateTime existingStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 0, 0), Qt::UTC);
+    const QDateTime existingEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 0, 0), Qt::UTC);
+    std::deque<TimeDuration> seeded;
+    seeded.emplace_back(DurationType::Activity, existingStartUtc.toLocalTime(), existingEndUtc.toLocalTime());
+    QVERIFY(manager.updateDurationsById(seeded));
+
+    // Orphan from 10:30 to 11:30 — overlaps the finalised row.
+    const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC);
+    const QDateTime orphanEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 30, 0), Qt::UTC);
+
+    QVERIFY(manager.lazyOpen());
+    const qint64 orphanRowId = seedOrphanRow(manager, orphanStartUtc, orphanEndUtc);
+    QVERIFY(orphanRowId > 0);
+    manager.lazyClose();
+
+    // The overlap probe must reject the finalise attempt.
+    QVERIFY(!manager.finalizeIfNoOverlap(orphanRowId, orphanStartUtc, orphanEndUtc));
+}
+
+void DatabaseTest::test_finalizeIfNoOverlap_leaves_row_unchanged_on_overlap()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    // Existing finalised row from 10:00 to 11:00.
+    const QDateTime existingStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 0, 0), Qt::UTC);
+    const QDateTime existingEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 0, 0), Qt::UTC);
+    std::deque<TimeDuration> seeded;
+    seeded.emplace_back(DurationType::Activity, existingStartUtc.toLocalTime(), existingEndUtc.toLocalTime());
+    QVERIFY(manager.updateDurationsById(seeded));
+
+    // Orphan whose interval straddles the existing row.
+    const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(9, 30, 0), Qt::UTC);
+    const QDateTime orphanEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC);
+
+    QVERIFY(manager.lazyOpen());
+    const qint64 orphanRowId = seedOrphanRow(manager, orphanStartUtc, orphanEndUtc);
+    QVERIFY(orphanRowId > 0);
+    manager.lazyClose();
+
+    QVERIFY(!manager.finalizeIfNoOverlap(orphanRowId, orphanStartUtc, orphanEndUtc));
+
+    // After rejection, the row must still be is_finalized = 0 (transaction atomicity).
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery verify(manager.db);
+    verify.prepare("SELECT is_finalized FROM durations WHERE id = :id");
+    verify.bindValue(":id", orphanRowId);
+    QVERIFY(verify.exec());
+    QVERIFY(verify.next());
+    QCOMPARE(verify.value(0).toInt(), 0);
+    manager.lazyClose();
+}
+
+void DatabaseTest::test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dropped()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    // Existing finalised row 10:00 - 11:00 to force one orphan to be rejected.
+    const QDateTime existingStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 0, 0), Qt::UTC);
+    const QDateTime existingEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 0, 0), Qt::UTC);
+    std::deque<TimeDuration> seeded;
+    seeded.emplace_back(DurationType::Activity, existingStartUtc.toLocalTime(), existingEndUtc.toLocalTime());
+    QVERIFY(manager.updateDurationsById(seeded));
+
+    // Orphan A: 12:00 - 12:30 — no overlap → should be finalised.
+    // Orphan B: 10:30 - 11:30 — overlaps existing → should be reported as dropped.
+    QVERIFY(manager.lazyOpen());
+    const QDateTime aStartUtc = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC);
+    const QDateTime aEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(12, 30, 0), Qt::UTC);
+    const QDateTime bStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC);
+    const QDateTime bEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 30, 0), Qt::UTC);
+    const qint64 aId = seedOrphanRow(manager, aStartUtc, aEndUtc);
+    const qint64 bId = seedOrphanRow(manager, bStartUtc, bEndUtc);
+    QVERIFY(aId > 0 && bId > 0);
+    manager.lazyClose();
+
+    std::vector<OrphanCheckpoint> toFinalize;
+    OrphanCheckpoint a; a.id = aId; a.startTime = aStartUtc.toLocalTime(); a.endTime = aEndUtc.toLocalTime();
+    OrphanCheckpoint b; b.id = bId; b.startTime = bStartUtc.toLocalTime(); b.endTime = bEndUtc.toLocalTime();
+    toFinalize.push_back(a);
+    toFinalize.push_back(b);
+
+    ReconcileResult result = manager.reconcileUnfinalizedCheckpoints(toFinalize, {});
+    QVERIFY(result.ok);
+    QCOMPARE(result.finalized.size(), (size_t)1);
+    QCOMPARE(result.finalized[0], aId);
+    QCOMPARE(result.dropped.size(), (size_t)1);
+    QCOMPARE(result.dropped[0], bId);
+
+    // Verify DB state: A is finalised, B remains unfinalised.
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery verify(manager.db);
+    verify.prepare("SELECT id, is_finalized FROM durations WHERE id IN (:a, :b) ORDER BY id");
+    verify.bindValue(":a", aId);
+    verify.bindValue(":b", bId);
+    QVERIFY(verify.exec());
+    int seen = 0;
+    while (verify.next()) {
+        const qint64 id = verify.value(0).toLongLong();
+        const int fin = verify.value(1).toInt();
+        if (id == aId)      QCOMPARE(fin, 1);
+        else if (id == bId) QCOMPARE(fin, 0);
+        seen++;
+    }
+    QCOMPARE(seen, 2);
+    manager.lazyClose();
+}
+
+void DatabaseTest::test_reconcileUnfinalizedCheckpoints_outright_drops_are_deleted()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    // Two orphans, no overlapping finalised rows in the DB.
+    QVERIFY(manager.lazyOpen());
+    const QDateTime aStartUtc = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC);
+    const QDateTime aEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(12, 30, 0), Qt::UTC);
+    const QDateTime bStartUtc = QDateTime(QDate(2025, 1, 1), QTime(13, 0, 0), Qt::UTC);
+    const QDateTime bEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(13, 30, 0), Qt::UTC);
+    const qint64 aId = seedOrphanRow(manager, aStartUtc, aEndUtc);
+    const qint64 bId = seedOrphanRow(manager, bStartUtc, bEndUtc);
+    QVERIFY(aId > 0 && bId > 0);
+    manager.lazyClose();
+
+    // Reconcile with B in the outright-drop list and A in toFinalize.
+    std::vector<OrphanCheckpoint> toFinalize;
+    OrphanCheckpoint a; a.id = aId; a.startTime = aStartUtc.toLocalTime(); a.endTime = aEndUtc.toLocalTime();
+    toFinalize.push_back(a);
+
+    ReconcileResult result = manager.reconcileUnfinalizedCheckpoints(toFinalize, {bId});
+    QVERIFY(result.ok);
+    QCOMPARE(result.finalized.size(), (size_t)1);
+    QCOMPARE(result.finalized[0], aId);
+    QCOMPARE(result.dropped.size(), (size_t)0); // outright drops are not reported in `dropped`
+
+    // Verify DB state: A finalised, B deleted entirely.
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery verify(manager.db);
+    verify.prepare("SELECT id FROM durations WHERE id = :b");
+    verify.bindValue(":b", bId);
+    QVERIFY(verify.exec());
+    QVERIFY(!verify.next()); // B is gone
+
+    QSqlQuery verifyA(manager.db);
+    verifyA.prepare("SELECT is_finalized FROM durations WHERE id = :a");
+    verifyA.bindValue(":a", aId);
+    QVERIFY(verifyA.exec());
+    QVERIFY(verifyA.next());
+    QCOMPARE(verifyA.value(0).toInt(), 1);
+    manager.lazyClose();
+}

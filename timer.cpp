@@ -1104,9 +1104,8 @@ qint64 Timer::reconcileOrphanCheckpoints(
     }
 
     const QDateTime now = QDateTime::currentDateTime();
-    std::vector<long long> finalizeIds;
+    std::vector<OrphanCheckpoint> toFinalize;
     std::vector<long long> dropIds;
-    qint64 recoveredSeconds = 0;
 
     for (const auto& orphan : orphans) {
         const bool tooShort = orphan.duration < kMinRecoverableOrphanDurationMs;
@@ -1117,13 +1116,23 @@ qint64 Timer::reconcileOrphanCheckpoints(
             continue;
         }
 
-        finalizeIds.push_back(orphan.id);
-        recoveredSeconds += orphan.duration / 1000;
+        toFinalize.push_back(orphan);
     }
 
-    if (!db_.reconcileUnfinalizedCheckpoints(finalizeIds, dropIds)) {
+    ReconcileResult reconcile = db_.reconcileUnfinalizedCheckpoints(toFinalize, dropIds);
+    if (!reconcile.ok) {
         Logger::Log("[DB] Failed to reconcile orphan checkpoints");
         return 0;
+    }
+
+    // The store atomically rejects orphans that overlap an existing finalised row.
+    // Only count seconds for rows the store actually finalised.
+    const std::vector<long long>& finalizeIds = reconcile.finalized;
+    qint64 recoveredSeconds = 0;
+    for (const auto& orphan : toFinalize) {
+        if (std::find(finalizeIds.begin(), finalizeIds.end(), orphan.id) != finalizeIds.end()) {
+            recoveredSeconds += orphan.duration / 1000;
+        }
     }
 
     if (!finalizeIds.empty()) {
@@ -1151,9 +1160,10 @@ qint64 Timer::reconcileOrphanCheckpoints(
         startup_recovery_notification_needed_ = showNotification;
     }
 
-    Logger::Log(QString("[DB] Orphan checkpoint reconciliation finished: finalized=%1, dropped=%2, recovered_seconds=%3")
+    Logger::Log(QString("[DB] Orphan checkpoint reconciliation finished: finalized=%1, dropped=%2, overlap_rejected=%3, recovered_seconds=%4")
         .arg(finalizeIds.size())
         .arg(dropIds.size())
+        .arg(reconcile.dropped.size())
         .arg(recoveredSeconds));
 
     return recoveredSeconds;
