@@ -891,10 +891,7 @@ std::optional<TimeDuration> Timer::getOngoingDuration() const
         return std::nullopt;
     }
     DurationType type = (mode_ == Mode::Activity) ? DurationType::Activity : DurationType::Pause;
-    const QString segmentId = session_.current_checkpoint_segment_id.isEmpty()
-        ? TimeDuration::createSegmentId()
-        : session_.current_checkpoint_segment_id;
-    return TimeDuration::fromTrusted(type, session_.segment_start_time, now, segmentId);
+    return TimeDuration::fromTrusted(type, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
 }
 
 qint64 Timer::getStartupRecoveredSeconds() const
@@ -1057,26 +1054,24 @@ void Timer::saveCheckpointInternal(const QDateTime& now)
     if (mode_ != Mode::Activity)        return;
     if (discardCrossMidnightOngoingAndStop(now)) return;
 
-    // Calculate current elapsed time for the ongoing segment
-    qint64 elapsed = timer_.elapsed();
-    if (elapsed <= 0) {
-        return; // No time elapsed yet
+    // Use wall-clock elapsed rather than timer_.elapsed() to stay correct across suspend.
+    const qint64 wallClockMs = session_.segment_start_time.msecsTo(now);
+    if (wallClockMs <= 0) {
+        return;
     }
 
     // Always Activity - we return early above if mode_ != Mode::Activity
     DurationType type = DurationType::Activity;
 
-    // Save checkpoint to database using the caller-provided timestamp.
-    // Pass session_.segment_start_time and session_.current_checkpoint_segment_id to update the specific row for this segment
     if (session_.current_checkpoint_segment_id.isEmpty()) {
         session_.beginNewSegment(session_.segment_start_time, settings_);
     }
-    bool success = db_.saveCheckpoint(type, elapsed, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
+    bool success = db_.saveCheckpoint(type, wallClockMs, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
 
     if (success) {
         Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms, SegmentId: %3")
             .arg(type == DurationType::Activity ? "Activity" : "Pause")
-            .arg(elapsed)
+            .arg(wallClockMs)
             .arg(session_.current_checkpoint_segment_id));
     } else {
         Logger::Log("[CHECKPOINT] Failed to save checkpoint to database");
