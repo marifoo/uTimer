@@ -1481,6 +1481,13 @@ std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
         const QDateTime startTime = QDateTime::fromString(query.value(3).toString(), Qt::ISODateWithMs).toLocalTime();
         const QDateTime endTime   = QDateTime::fromString(query.value(4).toString(), Qt::ISODateWithMs).toLocalTime();
         if (!startTime.isValid() || !endTime.isValid()) {
+            Logger::Log(QString("[DB] loadUnfinalizedCheckpoints: skipped row with invalid timestamp(s): start=%1 end=%2")
+                .arg(query.value(3).toString()).arg(query.value(4).toString()));
+            continue;
+        }
+        if (startTime >= endTime) {
+            Logger::Log(QString("[DB] loadUnfinalizedCheckpoints: skipped row with start >= end: start=%1 end=%2")
+                .arg(startTime.toString(Qt::ISODateWithMs)).arg(endTime.toString(Qt::ISODateWithMs)));
             continue;
         }
 
