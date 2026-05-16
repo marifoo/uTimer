@@ -55,6 +55,11 @@ struct SessionState {
     /// unsaved_durations) still needs to be persisted.
     bool has_unsaved_data = false;
 
+    /// Counts consecutive retry failures at the top of startTimer (None → Activity).
+    /// Reset to 0 on first success. When it reaches 3 the engine refuses to start
+    /// a new session until the user acknowledges the warning.
+    int consecutive_retry_failures = 0;
+
     // ---- Explicit transition methods ----
     // Each method logs the old→new state at debug level so that state
     // mutations are always traceable in the log output.

@@ -406,10 +406,18 @@ void Timer::startTimer(const QDateTime& now)
             Logger::Log("[DB] Retrying save of previously unsaved durations");
             if (appendDurationsChunkToDB(retry_source)) {
                 session_.clearUnsaved(settings_);
+                session_.consecutive_retry_failures = 0;
                 Logger::Log("[DB] Previously unsaved durations saved successfully");
             } else {
                 retry_succeeded = false;
-                Logger::Log("[DB] CRITICAL: Retry save failed - unsaved data retained for another retry");
+                session_.consecutive_retry_failures++;
+                Logger::Log(QString("[DB] CRITICAL: Retry save failed (consecutive=%1) - unsaved data retained")
+                    .arg(session_.consecutive_retry_failures));
+                if (session_.consecutive_retry_failures >= 3) {
+                    emit userWarning("Repeated save failures (" + QString::number(session_.consecutive_retry_failures) +
+                                     " consecutive). Please check your storage, then restart the application to retry.");
+                    return;
+                }
                 emit userWarning("Could not save previous session data. It is kept in memory and will be retried.");
             }
         }
@@ -926,8 +934,10 @@ bool Timer::appendDurationsChunkToDB(const std::deque<TimeDuration>& durations)
 
 bool Timer::updateDurationsInDB()
 {
-    if (session_.durations.empty())
+    if (session_.durations.empty()) {
+        session_.clearUnsaved(settings_);
         return true;
+    }
     return db_.commitSession(Timeline(session_.durations, std::nullopt));
 }
 

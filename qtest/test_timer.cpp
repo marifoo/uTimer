@@ -290,7 +290,7 @@ void TimerTest::test_timer_retry_failure_keeps_unsaved_state_and_durations()
     QVERIFY(!tracker.session_.durations.empty());
     const size_t sizeBeforeRetry = tracker.session_.durations.size();
 
-    // Retry still fails.
+    // Retry still fails -> must still be unsaved with data intact.
     tracker.useTimerViaButton(Button::Start);
     QVERIFY(tracker.session_.has_unsaved_data);
     QVERIFY(!tracker.session_.durations.empty());
