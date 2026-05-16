@@ -701,10 +701,21 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
         }
     }
 
-    // Prepare insert statement for batch insertion (storing times in UTC)
+    // Prepare upsert statement for batch insertion (storing times in UTC).
+    // ON CONFLICT(segment_id) preserves the autoincrement id (unlike INSERT OR REPLACE),
+    // which the reconciliation path relies on via OrphanCheckpoint.id, and avoids aborting
+    // the surrounding transaction when an Append re-encounters an existing segment_id.
     QSqlQuery query(db);
     query.prepare("INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-                  "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1)");
+                  "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1) "
+                  "ON CONFLICT(segment_id) DO UPDATE SET "
+                  "    type         = excluded.type, "
+                  "    duration     = excluded.duration, "
+                  "    start_date   = excluded.start_date, "
+                  "    start_time   = excluded.start_time, "
+                  "    end_date     = excluded.end_date, "
+                  "    end_time     = excluded.end_time, "
+                  "    is_finalized = excluded.is_finalized");
 
     // Insert each duration entry (convert to UTC for storage)
     for (const auto& d : durations) {

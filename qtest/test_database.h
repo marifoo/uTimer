@@ -87,6 +87,9 @@ private slots:
     // flushToDisc durable heartbeat (Issue 2)
     void test_flushToDisc_writes_heartbeat_row();
     void test_flushToDisc_idempotent();
+
+    // Step 2 (S1): saveDurations(Append) upserts on segment_id collision
+    void test_database_saveDurations_append_upserts_existing_segment_id();
 };
 
 #endif // TEST_DATABASE_H

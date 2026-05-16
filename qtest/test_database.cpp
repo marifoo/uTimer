@@ -1710,3 +1710,71 @@ void DatabaseTest::test_flushToDisc_idempotent()
     }
     QSqlDatabase::removeDatabase(connName2);
 }
+
+// ============================================================================
+// Step 2 (S1): saveDurations(Append) upserts on segment_id collision
+// ============================================================================
+
+/**
+ * Calling saveDurations(Append) a second time with a row whose segment_id
+ * already exists must update the row in place (not throw, not duplicate, and
+ * preserve the autoincrement `id`). The previous plain INSERT would abort the
+ * surrounding transaction on UNIQUE(segment_id) collision.
+ */
+void DatabaseTest::test_database_saveDurations_append_upserts_existing_segment_id()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    const QDateTime now = QDateTime::currentDateTime();
+    const QString segId = TimeDuration::createSegmentId();
+
+    // First Append: seed a single row with segment_id == segId.
+    std::deque<TimeDuration> first;
+    first.emplace_back(DurationType::Activity, now.addSecs(-60), now.addSecs(-30), segId);
+    QVERIFY(manager.saveDurations(first, TransactionMode::Append));
+
+    // Capture the autoincrement id assigned to that row.
+    qint64 originalRowId = -1;
+    {
+        QVERIFY(manager.lazyOpen());
+        QSqlQuery q(manager.db);
+        q.prepare("SELECT id FROM durations WHERE segment_id = :sid");
+        q.bindValue(":sid", segId);
+        QVERIFY(q.exec());
+        QVERIFY(q.next());
+        originalRowId = q.value(0).toLongLong();
+        QVERIFY(!q.next()); // exactly one row
+        manager.lazyClose();
+    }
+    QVERIFY(originalRowId > 0);
+
+    // Second Append: same segment_id, different type and time window.
+    std::deque<TimeDuration> second;
+    second.emplace_back(DurationType::Pause, now.addSecs(-20), now.addSecs(-5), segId);
+    QVERIFY(manager.saveDurations(second, TransactionMode::Append));
+
+    // Assert: still exactly one row for that segment_id, fields are updated,
+    // and the autoincrement id is unchanged.
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery verify(manager.db);
+    verify.prepare("SELECT id, type, duration, start_date, start_time, end_date, end_time "
+                   "FROM durations WHERE segment_id = :sid");
+    verify.bindValue(":sid", segId);
+    QVERIFY(verify.exec());
+    QVERIFY(verify.next());
+    QCOMPARE(verify.value(0).toLongLong(), originalRowId); // id preserved
+    QCOMPARE(verify.value(1).toInt(), static_cast<int>(DurationType::Pause));
+    QCOMPARE(verify.value(2).toLongLong(), second.front().duration);
+    const QDateTime expStartUtc = second.front().startTime.toUTC();
+    const QDateTime expEndUtc = second.front().endTime.toUTC();
+    QCOMPARE(verify.value(3).toString(), expStartUtc.date().toString(Qt::ISODate));
+    QCOMPARE(verify.value(4).toString(), expStartUtc.time().toString("HH:mm:ss.zzz"));
+    QCOMPARE(verify.value(5).toString(), expEndUtc.date().toString(Qt::ISODate));
+    QCOMPARE(verify.value(6).toString(), expEndUtc.time().toString("HH:mm:ss.zzz"));
+    QVERIFY(!verify.next()); // no duplicate
+    manager.lazyClose();
+}
