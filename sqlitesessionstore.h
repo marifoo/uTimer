@@ -80,6 +80,7 @@ private:
     bool validateSchema();
     bool ensureIsFinalizedColumn();
     bool ensureSegmentIdColumn();
+    bool ensureUtcColumns();
     bool ensureSettingsTable();
     BackupResult createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
     void performRetentionCleanup();

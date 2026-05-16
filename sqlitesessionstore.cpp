@@ -170,6 +170,8 @@ bool SqliteSessionStore::ensureSchema()
         "end_date DATE NOT NULL,"
         "end_time TEXT NOT NULL,"
         "is_finalized INTEGER NOT NULL DEFAULT 0,"
+        "start_utc TEXT,"
+        "end_utc TEXT,"
         "UNIQUE(segment_id)"
         ")"
     );
@@ -184,6 +186,10 @@ bool SqliteSessionStore::ensureSchema()
     }
 
     if (!ensureSegmentIdColumn()) {
+        return false;
+    }
+
+    if (!ensureUtcColumns()) {
         return false;
     }
 
@@ -209,6 +215,11 @@ bool SqliteSessionStore::ensureSchema()
     QSqlQuery finalizedStartIndexQuery(db);
     if (!finalizedStartIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_finalized_start ON durations(is_finalized, start_date, start_time) WHERE is_finalized = 1")) {
         Logger::Log("[DB] Warning: Failed to create finalized_start index: " + finalizedStartIndexQuery.lastError().text());
+    }
+
+    QSqlQuery startUtcIndexQuery(db);
+    if (!startUtcIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_start_utc ON durations(start_utc) WHERE is_finalized = 1")) {
+        Logger::Log("[DB] Warning: Failed to create start_utc index: " + startUtcIndexQuery.lastError().text());
     }
 
     // PRAGMA synchronous=NORMAL: in rollback journal mode this provides good
@@ -560,6 +571,71 @@ bool SqliteSessionStore::ensureSegmentIdColumn()
     return true;
 }
 
+bool SqliteSessionStore::ensureUtcColumns()
+{
+    QSqlQuery tableInfo(db);
+    if (!tableInfo.exec("PRAGMA table_info(durations)")) {
+        Logger::Log("[DB] Error checking table_info for utc column migration: " + tableInfo.lastError().text());
+        return false;
+    }
+
+    bool hasStartUtc = false;
+    bool hasEndUtc = false;
+    while (tableInfo.next()) {
+        const QString col = tableInfo.value(1).toString();
+        if (col == "start_utc") hasStartUtc = true;
+        else if (col == "end_utc")   hasEndUtc   = true;
+    }
+
+    if (hasStartUtc && hasEndUtc) {
+        return true;
+    }
+
+    Logger::Log("[DB] Migrating schema: adding start_utc / end_utc columns");
+
+    // Adding nullable columns is non-destructive — use ALTER TABLE (no table rebuild needed).
+    if (!hasStartUtc) {
+        QSqlQuery alter(db);
+        if (!alter.exec("ALTER TABLE durations ADD COLUMN start_utc TEXT")) {
+            Logger::Log("[DB] Error adding start_utc column: " + alter.lastError().text());
+            return false;
+        }
+    }
+    if (!hasEndUtc) {
+        QSqlQuery alter(db);
+        if (!alter.exec("ALTER TABLE durations ADD COLUMN end_utc TEXT")) {
+            Logger::Log("[DB] Error adding end_utc column: " + alter.lastError().text());
+            return false;
+        }
+    }
+
+    // Backfill existing rows by concatenating the stored UTC date/time parts.
+    // The WHERE clause makes this idempotent: rows already written by the dual-write
+    // path (Phase 1) already have start_utc set and are skipped.
+    if (!db.transaction()) {
+        Logger::Log("[DB] Error starting utc backfill transaction: " + db.lastError().text());
+        return false;
+    }
+    QSqlQuery backfill(db);
+    if (!backfill.exec(
+            "UPDATE durations "
+            "SET start_utc = start_date || 'T' || start_time || 'Z',"
+            "    end_utc   = end_date   || 'T' || end_time   || 'Z' "
+            "WHERE start_utc IS NULL")) {
+        db.rollback();
+        Logger::Log("[DB] Error backfilling utc columns: " + backfill.lastError().text());
+        return false;
+    }
+    if (!db.commit()) {
+        db.rollback();
+        Logger::Log("[DB] Error committing utc backfill: " + db.lastError().text());
+        return false;
+    }
+
+    Logger::Log("[DB] UTC column migration completed");
+    return true;
+}
+
 bool SqliteSessionStore::ensureSettingsTable()
 {
     QSqlQuery query(db);
@@ -780,8 +856,8 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
     // which the reconciliation path relies on via OrphanCheckpoint.id, and avoids aborting
     // the surrounding transaction when an Append re-encounters an existing segment_id.
     QSqlQuery query(db);
-    query.prepare("INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-                  "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1) "
+    query.prepare("INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized, start_utc, end_utc) "
+                  "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1, :start_utc, :end_utc) "
                   "ON CONFLICT(segment_id) DO UPDATE SET "
                   "    type         = excluded.type, "
                   "    duration     = excluded.duration, "
@@ -789,7 +865,9 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
                   "    start_time   = excluded.start_time, "
                   "    end_date     = excluded.end_date, "
                   "    end_time     = excluded.end_time, "
-                  "    is_finalized = excluded.is_finalized");
+                  "    is_finalized = excluded.is_finalized, "
+                  "    start_utc    = excluded.start_utc, "
+                  "    end_utc      = excluded.end_utc");
 
     // Insert each duration entry (convert to UTC for storage)
     for (const auto& d : durations) {
@@ -803,6 +881,8 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
         query.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
         query.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
         query.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
+        query.bindValue(":start_utc", startUtc.toString(Qt::ISODateWithMs));
+        query.bindValue(":end_utc", endUtc.toString(Qt::ISODateWithMs));
 
         if (!query.exec()) {
             db.rollback();
@@ -868,8 +948,8 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
 
     QSqlQuery finalizedInsert(db);
     finalizedInsert.prepare(
-        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1)"
+        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized, start_utc, end_utc) "
+        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1, :start_utc, :end_utc)"
     );
 
     for (const auto& d : historyDurations) {
@@ -883,6 +963,8 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
         finalizedInsert.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
         finalizedInsert.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
         finalizedInsert.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
+        finalizedInsert.bindValue(":start_utc", startUtc.toString(Qt::ISODateWithMs));
+        finalizedInsert.bindValue(":end_utc", endUtc.toString(Qt::ISODateWithMs));
 
         if (!finalizedInsert.exec()) {
             db.rollback();
@@ -893,8 +975,8 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
 
     QSqlQuery unfinalizedInsert(db);
     unfinalizedInsert.prepare(
-        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
+        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized, start_utc, end_utc) "
+        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0, :start_utc, :end_utc)"
     );
 
     for (const auto& d : currentSessionDurations) {
@@ -908,6 +990,8 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
         unfinalizedInsert.bindValue(":start_time", startUtc.time().toString("HH:mm:ss.zzz"));
         unfinalizedInsert.bindValue(":end_date", endUtc.date().toString(Qt::ISODate));
         unfinalizedInsert.bindValue(":end_time", endUtc.time().toString("HH:mm:ss.zzz"));
+        unfinalizedInsert.bindValue(":start_utc", startUtc.toString(Qt::ISODateWithMs));
+        unfinalizedInsert.bindValue(":end_utc", endUtc.toString(Qt::ISODateWithMs));
 
         if (!unfinalizedInsert.exec()) {
             db.rollback();
@@ -1138,15 +1222,19 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
         return false;
     }
 
+    const QString startUtcStr = startUtc.toString(Qt::ISODateWithMs);
+    const QString endUtcStr = endUtc.toString(Qt::ISODateWithMs);
+
     bool success = false;
     QSqlQuery updateQuery(db);
     updateQuery.prepare(
-        "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time, is_finalized = 0 "
+        "UPDATE durations SET duration = :duration, end_date = :end_date, end_time = :end_time, end_utc = :end_utc, is_finalized = 0 "
         "WHERE segment_id = :segment_id"
     );
     updateQuery.bindValue(":duration", duration);
     updateQuery.bindValue(":end_date", endDateStr);
     updateQuery.bindValue(":end_time", endTimeStr);
+    updateQuery.bindValue(":end_utc", endUtcStr);
     updateQuery.bindValue(":segment_id", segmentId);
 
     if (!updateQuery.exec()) {
@@ -1163,8 +1251,8 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
     } else {
         QSqlQuery insertQuery(db);
         insertQuery.prepare(
-            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-            "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0)"
+            "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized, start_utc, end_utc) "
+            "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 0, :start_utc, :end_utc)"
         );
         insertQuery.bindValue(":segment_id", segmentId);
         insertQuery.bindValue(":type", static_cast<int>(type));
@@ -1173,6 +1261,8 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
         insertQuery.bindValue(":start_time", startTimeStr);
         insertQuery.bindValue(":end_date", endDateStr);
         insertQuery.bindValue(":end_time", endTimeStr);
+        insertQuery.bindValue(":start_utc", startUtcStr);
+        insertQuery.bindValue(":end_utc", endUtcStr);
 
         if (!insertQuery.exec()) {
             db.rollback();
@@ -1244,13 +1334,14 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
     QSqlQuery updateQuery(db);
     updateQuery.prepare(
         "UPDATE durations SET type = :type, duration = :duration, start_date = :start_date, start_time = :start_time, "
-        "end_date = :end_date, end_time = :end_time, is_finalized = 1 WHERE segment_id = :segment_id"
+        "end_date = :end_date, end_time = :end_time, is_finalized = 1, start_utc = :start_utc, end_utc = :end_utc "
+        "WHERE segment_id = :segment_id"
     );
 
     QSqlQuery insertQuery(db);
     insertQuery.prepare(
-        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1)"
+        "INSERT INTO durations (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized, start_utc, end_utc) "
+        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, 1, :start_utc, :end_utc)"
     );
 
     int count = 0;
@@ -1264,6 +1355,8 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
         const QString startTime = startUtc.time().toString("HH:mm:ss.zzz");
         const QString endDate = endUtc.date().toString(Qt::ISODate);
         const QString endTime = endUtc.time().toString("HH:mm:ss.zzz");
+        const QString startUtcStr = startUtc.toString(Qt::ISODateWithMs);
+        const QString endUtcStr = endUtc.toString(Qt::ISODateWithMs);
 
         updateQuery.bindValue(":segment_id", d.segment_id);
         updateQuery.bindValue(":type", static_cast<int>(d.type));
@@ -1272,6 +1365,8 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
         updateQuery.bindValue(":start_time", startTime);
         updateQuery.bindValue(":end_date", endDate);
         updateQuery.bindValue(":end_time", endTime);
+        updateQuery.bindValue(":start_utc", startUtcStr);
+        updateQuery.bindValue(":end_utc", endUtcStr);
 
         if (!updateQuery.exec()) {
             db.rollback();
@@ -1287,6 +1382,8 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
             insertQuery.bindValue(":start_time", startTime);
             insertQuery.bindValue(":end_date", endDate);
             insertQuery.bindValue(":end_time", endTime);
+            insertQuery.bindValue(":start_utc", startUtcStr);
+            insertQuery.bindValue(":end_utc", endUtcStr);
 
             if (!insertQuery.exec()) {
                 db.rollback();
