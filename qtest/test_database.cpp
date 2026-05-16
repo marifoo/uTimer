@@ -923,6 +923,25 @@ void DatabaseTest::test_database_schema_validation_fresh_database()
     QVERIFY(manager.checkSchemaOnStartup());
 }
 
+void DatabaseTest::test_database_schema_creates_idx_finalized_start()
+{
+    resetDatabaseFile();
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    QVERIFY(manager.lazyOpen());
+    QSqlQuery query(manager.db);
+    QVERIFY(query.exec(
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'index' AND name = 'idx_finalized_start'"
+    ));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toString(), QString("idx_finalized_start"));
+}
+
 void DatabaseTest::test_database_schema_migration_adds_is_finalized_and_segment_id_marks_existing_rows()
 {
     resetDatabaseFile();

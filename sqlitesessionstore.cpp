@@ -182,6 +182,13 @@ bool SqliteSessionStore::lazyOpen()
         // Non-fatal: continue even if index creation fails
     }
 
+    // Partial index for overlap-detection queries on finalised rows.
+    QSqlQuery finalizedStartIndexQuery(db);
+    if (!finalizedStartIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_finalized_start ON durations(is_finalized, start_date, start_time) WHERE is_finalized = 1")) {
+        Logger::Log("[DB] Warning: Failed to create finalized_start index: " + finalizedStartIndexQuery.lastError().text());
+        // Non-fatal: continue even if index creation fails
+    }
+
     // Set synchronous mode for durability.
     //
     // In rollback journal mode (the default — this app does NOT use WAL),

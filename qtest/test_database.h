@@ -45,6 +45,7 @@ private slots:
     void test_database_millisecond_precision();
     void test_database_schema_validation_missing_start_date();
     void test_database_schema_validation_fresh_database();
+    void test_database_schema_creates_idx_finalized_start();
     void test_database_schema_migration_adds_is_finalized_and_segment_id_marks_existing_rows();
     void test_database_backup_file_creation();
     void test_database_backup_preserves_data();
