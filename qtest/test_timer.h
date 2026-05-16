@@ -95,6 +95,17 @@ private slots:
     void test_dialog_open_blocks_backpause();
     void test_dialog_open_defers_midnight_stop();
     void test_dialog_open_allows_lock_bookkeeping();
+
+    // Step 4: T1+T9 — Pause-merge removal tests
+    void test_T1_unpause_creates_new_pause_segment_with_fresh_id();
+    void test_T9_new_activity_segment_after_unpause_has_activity_type();
+
+    // Step 4: T10 — autopause flag cleared in startTimer
+    void test_T10_was_active_cleared_on_start_from_none();
+    void test_T10_was_active_cleared_on_start_from_pause();
+
+    // Step 4: T8 — destructor ordering (crash-absence smoke test)
+    void test_T8_destructor_does_not_crash_while_active();
 };
 
 #endif // TEST_TIMER_H

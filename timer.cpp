@@ -331,6 +331,11 @@ Timer::Timer(const Settings &settings, SessionStore& db, QObject *parent)
 
 Timer::~Timer()
 {
+    // T8: Stop and disconnect checkpointTimer_ before acquiring the mutex so
+    // that no in-flight slot can fire against a partially-destroyed object.
+    checkpointTimer_.stop();
+    checkpointTimer_.disconnect();
+    QMutexLocker locker(&mutex_);
     stopTimer(QDateTime::currentDateTime(), StopReason::Shutdown);
 }
 
@@ -349,17 +354,21 @@ Timer::~Timer()
  */
 void Timer::startTimer(const QDateTime& now)
 {
+    // T10: Clear autopause flag at the top of startTimer so both Pause→Activity
+    // and None→Activity paths start with a clean state.
+    was_active_before_autopause_ = false;
+
     if (mode_ == Mode::Pause) {
         Logger::Log("[DEBUG] Starting Timer from Pause - D=" + QString::number(session_.durations.size()));
-        qint64 t_pause = timer_.restart();
-        if (t_pause > 0) {
-            if (session_.durations.empty() || session_.durations.back().type != DurationType::Pause) {
-                addDuration(DurationType::Pause, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
-            } else {
-                session_.durations.back().endTime = now;
-                session_.durations.back().duration = session_.durations.back().startTime.msecsTo(now);
-            }
-        }
+        timer_.restart();
+
+        // T1+T9: Record the completed Pause segment with its own fresh segment_id
+        // (current_checkpoint_segment_id was assigned by finalizeActivityToPause).
+        // Do NOT reuse or mutate any prior Activity segment_id — that is the
+        // root bug T1 fixed. Timeline::normalized() handles merging adjacent
+        // same-type segments at DB-sync time.
+        addDuration(DurationType::Pause, session_.segment_start_time, now, session_.current_checkpoint_segment_id);
+
         mode_ = Mode::Activity;
         session_.beginNewSegment(now, settings_);
 

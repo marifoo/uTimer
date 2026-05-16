@@ -1319,3 +1319,190 @@ void TimerTest::test_dialog_open_allows_lock_bookkeeping()
 
     tracker.resumeCheckpoints();
 }
+
+// ============================================================================
+// Step 4: T1+T9 — Pause-merge removal tests
+// ============================================================================
+
+void TimerTest::test_T1_unpause_creates_new_pause_segment_with_fresh_id()
+{
+    // Verify that resuming from Pause (Pause→Activity) creates a new Pause
+    // segment whose segment_id is different from the preceding Activity
+    // segment_id. The old bug reused the Activity segment_id for the Pause row,
+    // corrupting the DB. Each segment must have its own unique id.
+
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    const QString activitySegId = tracker.session_.current_checkpoint_segment_id;
+
+    tracker.useTimerViaButton(Button::Pause);
+    QTest::qWait(10);
+    const QString pauseSegId = tracker.session_.current_checkpoint_segment_id;
+    const size_t dursBefore = tracker.session_.durations.size();
+
+    // Act: resume from Pause
+    tracker.useTimerViaButton(Button::Start);
+
+    // Assert: a new Pause segment was appended (not merged into the Activity)
+    QVERIFY(tracker.session_.durations.size() > dursBefore);
+    // The Pause segment just recorded must have its own id — neither empty,
+    // nor the same as the preceding Activity's id.
+    const TimeDuration& pauseEntry = tracker.session_.durations.back();
+    QCOMPARE(pauseEntry.type, DurationType::Pause);
+    QVERIFY2(!pauseEntry.segment_id.isEmpty(),
+             "Pause segment must have a non-empty segment_id");
+    QVERIFY2(pauseEntry.segment_id != activitySegId,
+             "Pause segment must not reuse the Activity segment_id (T1 regression)");
+    // The new Activity's segment_id must also be fresh
+    QVERIFY2(tracker.session_.current_checkpoint_segment_id != pauseSegId,
+             "New Activity segment must have a different id from the Pause segment");
+
+    tracker.useTimerViaButton(Button::Stop);
+}
+
+void TimerTest::test_T9_new_activity_segment_after_unpause_has_activity_type()
+{
+    // Verify that after resuming from Pause the engine is in Activity mode
+    // and the new ongoing segment type is Activity (not Pause or anything else).
+    // The old Pause-merge branch could cause type confusion.
+
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    tracker.useTimerViaButton(Button::Pause);
+    QTest::qWait(10);
+
+    // Act
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // Assert: engine is in Activity mode
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
+
+    // The ongoing duration must be Activity type
+    auto ongoing = tracker.getOngoingDuration();
+    QVERIFY(ongoing.has_value());
+    QCOMPARE(ongoing->type, DurationType::Activity);
+
+    // All completed Pause entries in durations must have type Pause,
+    // and all Activity entries must have type Activity — no type corruption.
+    for (const auto& d : tracker.session_.durations) {
+        QVERIFY(d.type == DurationType::Activity || d.type == DurationType::Pause);
+        // Segment ids must be non-empty (T1 invariant)
+        QVERIFY2(!d.segment_id.isEmpty(), "Every completed segment must have a non-empty segment_id");
+    }
+
+    tracker.useTimerViaButton(Button::Stop);
+}
+
+// ============================================================================
+// Step 4: T10 — autopause flag cleared in startTimer
+// ============================================================================
+
+void TimerTest::test_T10_was_active_cleared_on_start_from_none()
+{
+    // Verify that startTimer from None always clears was_active_before_autopause_,
+    // even when that flag was set before the call (e.g. by a previous lock event).
+
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    // Pre-set the flag to simulate a stale autopause state
+    tracker.was_active_before_autopause_ = true;
+
+    // Act: start from None
+    tracker.useTimerViaButton(Button::Start);
+
+    // Assert: flag is cleared regardless of prior value
+    QVERIFY2(!tracker.was_active_before_autopause_,
+             "was_active_before_autopause_ must be false after startTimer from None");
+
+    tracker.useTimerViaButton(Button::Stop);
+}
+
+void TimerTest::test_T10_was_active_cleared_on_start_from_pause()
+{
+    // Verify that startTimer from Pause always clears was_active_before_autopause_.
+
+    // Arrange
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    tracker.useTimerViaButton(Button::Pause);
+
+    // Simulate stale autopause flag (as if a LongOngoingLock set it before the pause)
+    tracker.was_active_before_autopause_ = true;
+
+    // Act: resume from Pause
+    tracker.useTimerViaButton(Button::Start);
+
+    // Assert: flag is cleared
+    QVERIFY2(!tracker.was_active_before_autopause_,
+             "was_active_before_autopause_ must be false after startTimer from Pause");
+
+    tracker.useTimerViaButton(Button::Stop);
+}
+
+// ============================================================================
+// Step 4: T8 — destructor ordering smoke test
+// ============================================================================
+
+void TimerTest::test_T8_destructor_does_not_crash_while_active()
+{
+    // Verify that destroying a Timer while it is actively running (and its
+    // checkpointTimer_ could in theory fire) does not crash or deadlock.
+    //
+    // The ordering fix (T8) stops and disconnects checkpointTimer_ before
+    // acquiring the mutex in ~Timer(). Without this fix, a queued slot
+    // firing during destruction could deadlock on the recursive mutex or
+    // access already-freed members.
+    //
+    // Direct unit-testing of destructor ordering is not feasible (we cannot
+    // reliably force a slot to fire exactly during destruction without a
+    // race condition in the test itself). This test instead serves as an
+    // absence-of-crash guard: if the fix is missing and a slot fires in the
+    // wrong window, this test may crash or deadlock during CI. The FakeSessionStore
+    // is used so no real DB I/O is needed.
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/checkpoint_interval_minutes", 1);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    FakeSessionStore fakeDb;
+
+    {
+        Timer tracker(settings, fakeDb);
+        tracker.useTimerViaButton(Button::Start);
+        QTest::qWait(10);
+        // tracker destroyed here while in Activity mode with checkpointTimer_ running
+    }
+
+    // If we reach here without a crash or deadlock, T8 is correct.
+    QVERIFY(true);
+}
