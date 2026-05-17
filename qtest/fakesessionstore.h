@@ -36,7 +36,7 @@ public:
     LoadResult loadDurations() override;
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
     bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
-                        const QDateTime& endTime, const QString& segmentId) override;
+                        const QDateTime& endTime, const SegmentId& segmentId) override;
     bool checkSchemaOnStartup() override;
     void flushToDisc() override;
     std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
@@ -62,7 +62,7 @@ public:
         qint64 duration;
         QDateTime startTime;
         QDateTime endTime;
-        QString segmentId;
+        SegmentId segmentId;
     };
     std::vector<CheckpointRecord> savedCheckpoints;
 

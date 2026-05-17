@@ -9,7 +9,7 @@ static TimeDuration mkId(DurationType type, qint64 startMs, qint64 endMs, const 
 {
     QDateTime start = QDateTime::fromMSecsSinceEpoch(startMs, Qt::UTC);
     QDateTime end = QDateTime::fromMSecsSinceEpoch(endMs, Qt::UTC);
-    return TimeDuration(type, start, end, id);
+    return TimeDuration::fromTrusted(type, start, end, SegmentId::fromString(id));
 }
 
 void CleanDurationsTest::test_cleanDurations_duplicateRemoval()
@@ -484,7 +484,7 @@ void CleanDurationsTest::test_cleanDurations_removedIds_branch1_nearDuplicate()
 
     // Assert
     QCOMPARE((int)d.size(), 1);
-    QCOMPARE(d[0].segment_id, QString("id-keep"));
+    QCOMPARE(d[0].segment_id.toString(), QString("id-keep"));
     QCOMPARE((int)removed.size(), 1);
     QCOMPARE(removed[0], QString("id-dup"));
 }
@@ -508,7 +508,7 @@ void CleanDurationsTest::test_cleanDurations_removedIds_branch2_currentStartsBef
 
     // Assert: subset removed, big kept
     QCOMPARE((int)d.size(), 1);
-    QCOMPARE(d[0].segment_id, QString("id-big"));
+    QCOMPARE(d[0].segment_id.toString(), QString("id-big"));
     QCOMPARE((int)removed.size(), 1);
     QCOMPARE(removed[0], QString("id-subset"));
 }
@@ -531,7 +531,7 @@ void CleanDurationsTest::test_cleanDurations_removedIds_branch3_leftOverlapJoin(
 
     // Assert: prevIt keeps its ID, it's ID is orphaned
     QCOMPARE((int)d.size(), 1);
-    QCOMPARE(d[0].segment_id, QString("id-prev"));
+    QCOMPARE(d[0].segment_id.toString(), QString("id-prev"));
     QCOMPARE(d[0].endTime.toMSecsSinceEpoch(), (qint64)1700);
     QCOMPARE(d[0].duration, (qint64)700);
     QCOMPARE((int)removed.size(), 1);
@@ -554,7 +554,7 @@ void CleanDurationsTest::test_cleanDurations_removedIds_branch4_overlapExtendFor
 
     // Assert
     QCOMPARE((int)d.size(), 1);
-    QCOMPARE(d[0].segment_id, QString("id-first"));
+    QCOMPARE(d[0].segment_id.toString(), QString("id-first"));
     QCOMPARE(d[0].endTime.toMSecsSinceEpoch(), (qint64)1500);
     QCOMPARE(d[0].duration, (qint64)1500);
     QCOMPARE((int)removed.size(), 1);
@@ -577,7 +577,7 @@ void CleanDurationsTest::test_cleanDurations_removedIds_branch5_subsetRemoval()
 
     // Assert
     QCOMPARE((int)d.size(), 1);
-    QCOMPARE(d[0].segment_id, QString("id-outer"));
+    QCOMPARE(d[0].segment_id.toString(), QString("id-outer"));
     QCOMPARE(d[0].duration, (qint64)2000);
     QCOMPARE((int)removed.size(), 1);
     QCOMPARE(removed[0], QString("id-inner"));
@@ -599,7 +599,7 @@ void CleanDurationsTest::test_cleanDurations_removedIds_branch6_smallGapMerge()
 
     // Assert
     QCOMPARE((int)d.size(), 1);
-    QCOMPARE(d[0].segment_id, QString("id-left"));
+    QCOMPARE(d[0].segment_id.toString(), QString("id-left"));
     QCOMPARE(d[0].endTime.toMSecsSinceEpoch(), (qint64)2000);
     QCOMPARE(d[0].duration, (qint64)2000);
     QCOMPARE((int)removed.size(), 1);
@@ -625,7 +625,7 @@ void CleanDurationsTest::test_cleanDurations_removedIds_branch7_slightOverlapMer
 
     // Assert
     QCOMPARE((int)d.size(), 1);
-    QCOMPARE(d[0].segment_id, QString("id-first"));
+    QCOMPARE(d[0].segment_id.toString(), QString("id-first"));
     QCOMPARE(d[0].endTime.toMSecsSinceEpoch(), (qint64)1800);
     QCOMPARE(d[0].duration, (qint64)1800);
     QCOMPARE((int)removed.size(), 1);
@@ -650,7 +650,7 @@ void CleanDurationsTest::test_cleanDurations_removedIds_chainMerge_returns_two_i
 
     // Assert: one surviving entry with id-A, two removed
     QCOMPARE((int)d.size(), 1);
-    QCOMPARE(d[0].segment_id, QString("id-A"));
+    QCOMPARE(d[0].segment_id.toString(), QString("id-A"));
     QCOMPARE(d[0].endTime.toMSecsSinceEpoch(), (qint64)3000);
     QCOMPARE(d[0].duration, (qint64)3000);
     QCOMPARE((int)removed.size(), 2);
@@ -673,6 +673,6 @@ void CleanDurationsTest::test_cleanDurations_removedIds_single_entry_returns_emp
 
     // Assert
     QCOMPARE((int)d.size(), 1);
-    QCOMPARE(d[0].segment_id, QString("id-only"));
+    QCOMPARE(d[0].segment_id.toString(), QString("id-only"));
     QVERIFY(removed.empty());
 }

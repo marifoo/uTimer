@@ -87,7 +87,7 @@ void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_
     const QDateTime now = QDateTime::currentDateTime();
     const QDateTime memoryStart = now.addSecs(-40).addMSecs(2);
     const QDateTime memoryEnd = now.addSecs(-10);
-    const QString segmentId = TimeDuration::createSegmentId();
+    const SegmentId segmentId = SegmentId::mint();
     tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memoryStart, memoryEnd, segmentId));
 
     std::deque<TimeDuration> dbDurations;
@@ -146,7 +146,7 @@ void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midn
             "(segment_id, type, start_utc, end_utc, is_finalized) "
             "VALUES (:sid, 0, :start_utc, :end_utc, 1)"
         );
-        q.bindValue(":sid", TimeDuration::createSegmentId());
+        q.bindValue(":sid", TimeDuration::createSegmentId().toString());
         q.bindValue(":start_utc", crossMidnightStart.toUTC().toString(Qt::ISODateWithMs));
         q.bindValue(":end_utc", crossMidnightEnd.toUTC().toString(Qt::ISODateWithMs));
         QVERIFY(q.exec());
@@ -233,7 +233,7 @@ void HistoryDialogTest::test_historydialog_split_action_splits_row()
     QDateTime start = QDateTime::currentDateTime().addSecs(-10);
     QDateTime end = QDateTime::currentDateTime().addSecs(-4);
     tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, start, end));
-    const QString originalSegmentId = tracker.session_.durations.back().segment_id;
+    const SegmentId originalSegmentId = tracker.session_.durations.back().segment_id;
 
     HistoryDialog dialog(tracker, settings);
     dialog.contextMenuRow_ = 0;
@@ -395,7 +395,7 @@ void HistoryDialogTest::test_historydialog_shows_load_reconciliation_banner()
     // Row with invalid type → will be skipped
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
                   "VALUES (:segment_id, 99, :start_utc, :end_utc, 1)");
-    query.bindValue(":segment_id", TimeDuration::createSegmentId());
+    query.bindValue(":segment_id", TimeDuration::createSegmentId().toString());
     query.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
@@ -403,7 +403,7 @@ void HistoryDialogTest::test_historydialog_shows_load_reconciliation_banner()
     // Row with valid type → loads normally; no stored duration to mismatch
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
                   "VALUES (:segment_id, 0, :start_utc, :end_utc, 1)");
-    query.bindValue(":segment_id", TimeDuration::createSegmentId());
+    query.bindValue(":segment_id", TimeDuration::createSegmentId().toString());
     query.bindValue(":start_utc", start.addSecs(10).toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.addSecs(10).toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
@@ -442,7 +442,7 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
     tracker.saveCheckpoint();
-    const QString oldCheckpointSegmentId = tracker.session_.current_checkpoint_segment_id;
+    const SegmentId oldCheckpointSegmentId = tracker.session_.id_tracker.current;
     QVERIFY(!oldCheckpointSegmentId.isEmpty());
 
     {
@@ -453,8 +453,8 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
         dialog.saveChanges();
     }
 
-    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
-    QCOMPARE(tracker.session_.current_checkpoint_segment_id, oldCheckpointSegmentId);
+    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
+    QCOMPARE(tracker.session_.id_tracker.current.toString(), oldCheckpointSegmentId.toString());
 
     QTest::qWait(20);
     tracker.saveCheckpoint();
@@ -484,7 +484,7 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
         checkpointIdQuery.prepare("SELECT segment_id FROM durations WHERE is_finalized = 0");
         QVERIFY(checkpointIdQuery.exec());
         QVERIFY(checkpointIdQuery.next());
-        QCOMPARE(checkpointIdQuery.value(0).toString(), oldCheckpointSegmentId);
+        QCOMPARE(checkpointIdQuery.value(0).toString(), oldCheckpointSegmentId.toString());
 
         db.close();
     }
@@ -627,7 +627,7 @@ void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_curren
 
         // Simulate crash: skip graceful stop/finalize.
         tracker.mode_ = Timer::Mode::None;
-        tracker.session_.current_checkpoint_segment_id.clear();
+        tracker.session_.id_tracker.clear();
     }
 
     {
@@ -718,9 +718,9 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
     const QDateTime dbEnd = now.addSecs(-10);
 
     tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
-    const QString checkpointSegmentBeforeSave = "checkpoint-before-save";
+    const SegmentId checkpointSegmentBeforeSave = SegmentId::fromString("checkpoint-before-save");
     const QDateTime checkpointStartBeforeSave = now.addSecs(-5);
-    tracker.session_.current_checkpoint_segment_id = checkpointSegmentBeforeSave;
+    tracker.session_.id_tracker.current = checkpointSegmentBeforeSave;
     tracker.session_.segment_start_time = checkpointStartBeforeSave;
 
     std::deque<TimeDuration> dbDurations;
@@ -768,7 +768,7 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
     QCOMPARE(tracker.session_.durations[0].type, DurationType::Activity);
     QCOMPARE(tracker.session_.durations[0].startTime, memStart);
     QCOMPARE(tracker.session_.durations[0].endTime, memEnd);
-    QCOMPARE(tracker.session_.current_checkpoint_segment_id, checkpointSegmentBeforeSave);
+    QCOMPARE(tracker.session_.id_tracker.current.toString(), checkpointSegmentBeforeSave.toString());
     QCOMPARE(tracker.session_.segment_start_time, checkpointStartBeforeSave);
 
     const QString verifyConnName = "historydialog_save_failure_verify";

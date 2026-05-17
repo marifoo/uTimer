@@ -70,7 +70,7 @@ void TimelineTest::test_N_withSegmentType_is_pure()
 void TimelineTest::test_O_withSplit_preserves_total_duration()
 {
     const qint64 base = 3'000'000;
-    const QString origId = "original-segment-id";
+    const SegmentId origId = SegmentId::fromString("original-segment-id");
 
     std::deque<TimeDuration> comp;
     comp.push_back(TimeDuration(DurationType::Activity, makeUtc(base), makeUtc(base + 10000), origId));
@@ -114,10 +114,10 @@ void TimelineTest::test_P_normalized_matches_cleanDurations()
     const qint64 base = 4'000'000;
 
     // Use fixed segment IDs so both copies start identical
-    const QString id1 = "id-activity-1";
-    const QString id2 = "id-activity-2";
-    const QString id3 = "id-pause-1";
-    const QString id4 = "id-pause-2";
+    const SegmentId id1 = SegmentId::fromString("id-activity-1");
+    const SegmentId id2 = SegmentId::fromString("id-activity-2");
+    const SegmentId id3 = SegmentId::fromString("id-pause-1");
+    const SegmentId id4 = SegmentId::fromString("id-pause-2");
 
     auto makeDeque = [&]() {
         std::deque<TimeDuration> d;

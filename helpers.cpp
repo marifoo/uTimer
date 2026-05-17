@@ -49,7 +49,7 @@ std::vector<QString> cleanDurations(std::deque<TimeDuration>* pDurations)
 	// Collect before-IDs
 	std::vector<QString> before;
 	for (const auto& d : *pDurations)
-		before.push_back(d.segment_id);
+		before.push_back(d.segment_id.toString());
 
 	Timeline t(*pDurations, std::nullopt);
 	Timeline normed = t.normalized();
@@ -60,7 +60,7 @@ std::vector<QString> cleanDurations(std::deque<TimeDuration>* pDurations)
 	for (const auto& id : before) {
 		bool found = false;
 		for (const auto& d : *pDurations)
-			if (d.segment_id == id) { found = true; break; }
+			if (d.segment_id.toString() == id) { found = true; break; }
 		if (!found)
 			removed.push_back(id);
 	}

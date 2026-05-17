@@ -76,14 +76,14 @@ Timeline Timeline::withSplit(size_t index, QDateTime at,
     const TimeDuration& original = copy.completed_[index];
     QDateTime origStart = original.startTime;
     QDateTime origEnd = original.endTime;
-    QString origId = original.segment_id;
+    SegmentId origId = original.segment_id;
 
     auto firstHalf = TimeDuration::create(first, origStart, at, origId);
     if (!firstHalf.has_value()) {
         Logger::Log("[SPLIT] Cross-day first half, aborting split");
         return *this;
     }
-    auto secondHalf = TimeDuration::create(second, at, origEnd, TimeDuration::createSegmentId());
+    auto secondHalf = TimeDuration::create(second, at, origEnd, SegmentId::mint());
     if (!secondHalf.has_value()) {
         Logger::Log("[SPLIT] Cross-day second half, aborting split");
         return *this;

@@ -17,7 +17,7 @@ bool FakeSessionStore::commitSession(const Timeline& session)
     callLog.append("commitSession");
     if (commitSessionResult) {
         // Mirror SqliteSessionStore: normalize internally, compute orphans, then upsert.
-        std::vector<QString> beforeIds;
+        std::vector<SegmentId> beforeIds;
         for (const auto& d : session.completed())
             beforeIds.push_back(d.segment_id);
 
@@ -84,7 +84,7 @@ EntriesForDateResult FakeSessionStore::hasEntriesForDate(const QDate& /*date*/)
 }
 
 bool FakeSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
-                                          const QDateTime& endTime, const QString& segmentId)
+                                          const QDateTime& endTime, const SegmentId& segmentId)
 {
     callLog.append("saveCheckpoint");
     if (saveCheckpointResult) {

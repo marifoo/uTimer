@@ -41,13 +41,13 @@ void TimerTest::test_timer_start_pause_resume_stop_and_checkpoints()
     QTest::qWait(10);
     QVERIFY(tracker.timer_.isValid());
     QCOMPARE(tracker.mode_, Timer::Mode::Activity);
-    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
 
     // Pause -> durations captured and checkpoint id reset
     tracker.useTimerViaButton(Button::Pause);
     QCOMPARE(tracker.mode_, Timer::Mode::Pause);
     QVERIFY(tracker.session_.durations.size() >= 1);
-    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
 
     // Resume -> Activity and timer restarted
     tracker.useTimerViaButton(Button::Start);
@@ -58,12 +58,12 @@ void TimerTest::test_timer_start_pause_resume_stop_and_checkpoints()
     // Trigger checkpoint manually
     QTest::qWait(100); // Ensure elapsed > 0
     tracker.saveCheckpointInternal(QDateTime::currentDateTime());
-    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
 
     // Stop -> move to None and durations flushed
     tracker.useTimerViaButton(Button::Stop);
     QCOMPARE(tracker.mode_, Timer::Mode::None);
-    QVERIFY(tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(tracker.session_.id_tracker.current.isEmpty());
 }
 
 void TimerTest::test_timer_backpause_resets_checkpoint_and_splits()
@@ -88,7 +88,7 @@ void TimerTest::test_timer_backpause_resets_checkpoint_and_splits()
 
     tracker.backpauseTimer(QDateTime::currentDateTime());
     QCOMPARE(tracker.mode_, Timer::Mode::Pause);
-    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
     QVERIFY(tracker.session_.durations.size() >= 2);
     // Sum should equal ~120s
     qint64 total = sumDurations(tracker.session_.durations, DurationType::Activity) +
@@ -314,14 +314,14 @@ void TimerTest::test_session_state_begin_new_segment()
     Timer tracker(settings, fakeDb);
 
     QDateTime startTime = QDateTime::currentDateTime();
-    QVERIFY(tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(tracker.session_.id_tracker.current.isEmpty());
     QVERIFY(!tracker.session_.segment_start_time.isValid());
 
     // Act
     tracker.session_.beginNewSegment(startTime, settings);
 
     // Assert
-    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
     QCOMPARE(tracker.session_.segment_start_time, startTime);
 }
 
@@ -334,13 +334,13 @@ void TimerTest::test_session_state_clear_segment()
     FakeSessionStore fakeDb;
     Timer tracker(settings, fakeDb);
     tracker.session_.beginNewSegment(QDateTime::currentDateTime(), settings);
-    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
 
     // Act
     tracker.session_.clearSegment(settings);
 
     // Assert
-    QVERIFY(tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(tracker.session_.id_tracker.current.isEmpty());
     QVERIFY(!tracker.session_.segment_start_time.isValid());
 }
 
@@ -449,7 +449,7 @@ void TimerTest::test_session_state_adopt_ongoing_segment()
     tracker.session_.adoptOngoingSegment(ongoing, settings);
 
     // Assert
-    QCOMPARE(tracker.session_.current_checkpoint_segment_id, ongoing.segment_id);
+    QCOMPARE(tracker.session_.id_tracker.current.toString(), ongoing.segment_id.toString());
     QCOMPARE(tracker.session_.segment_start_time, start);
 }
 
@@ -468,17 +468,17 @@ void TimerTest::test_session_state_start_to_pause_transition()
 
     // Assert: Activity mode, valid segment
     QCOMPARE(tracker.mode_, Timer::Mode::Activity);
-    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
     QVERIFY(tracker.session_.segment_start_time.isValid());
-    QString activitySegId = tracker.session_.current_checkpoint_segment_id;
+    SegmentId activitySegId = tracker.session_.id_tracker.current;
 
     // Act: pause
     tracker.useTimerViaButton(Button::Pause);
 
     // Assert: Pause mode, new segment id (different from Activity)
     QCOMPARE(tracker.mode_, Timer::Mode::Pause);
-    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
-    QVERIFY(tracker.session_.current_checkpoint_segment_id != activitySegId);
+    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
+    QVERIFY(tracker.session_.id_tracker.current != activitySegId);
     QVERIFY(tracker.session_.segment_start_time.isValid());
     QVERIFY(tracker.session_.durations.size() >= 1);
     QCOMPARE(tracker.session_.durations.back().type, DurationType::Activity);
@@ -497,7 +497,7 @@ void TimerTest::test_session_state_pause_to_activity_transition()
     tracker.useTimerViaButton(Button::Pause);
     QTest::qWait(10);
 
-    QString pauseSegId = tracker.session_.current_checkpoint_segment_id;
+    SegmentId pauseSegId = tracker.session_.id_tracker.current;
     size_t durationsBeforeResume = tracker.session_.durations.size();
 
     // Act: resume (Start from Pause)
@@ -505,8 +505,8 @@ void TimerTest::test_session_state_pause_to_activity_transition()
 
     // Assert: Activity mode, new segment id, pause duration recorded
     QCOMPARE(tracker.mode_, Timer::Mode::Activity);
-    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
-    QVERIFY(tracker.session_.current_checkpoint_segment_id != pauseSegId);
+    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
+    QVERIFY(tracker.session_.id_tracker.current != pauseSegId);
     QVERIFY(tracker.session_.durations.size() > durationsBeforeResume);
 }
 
@@ -520,14 +520,14 @@ void TimerTest::test_session_state_stop_clears_segment()
     Timer tracker(settings, fakeDb);
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(10);
-    QVERIFY(!tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
 
     // Act
     tracker.useTimerViaButton(Button::Stop);
 
     // Assert: None mode, segment cleared, durations cleared (saved to DB)
     QCOMPARE(tracker.mode_, Timer::Mode::None);
-    QVERIFY(tracker.session_.current_checkpoint_segment_id.isEmpty());
+    QVERIFY(tracker.session_.id_tracker.current.isEmpty());
     QVERIFY(!tracker.session_.segment_start_time.isValid());
     QVERIFY(!tracker.session_.has_unsaved_data);
 }
@@ -685,7 +685,7 @@ void TimerTest::test_pause_row_persisted_immediately_on_resume()
         // Simulate crash: destroy tracker without calling stopTimer.
         // Set mode to None to prevent destructor from saving a clean stop.
         tracker.mode_ = Timer::Mode::None;
-        tracker.session_.current_checkpoint_segment_id.clear();
+        tracker.session_.id_tracker.clear();
     }
 
     // Assert: re-read the DB and verify the Pause row survived the crash.
@@ -1347,11 +1347,11 @@ void TimerTest::test_T1_unpause_creates_new_pause_segment_with_fresh_id()
 
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(10);
-    const QString activitySegId = tracker.session_.current_checkpoint_segment_id;
+    const SegmentId activitySegId = tracker.session_.id_tracker.current;
 
     tracker.useTimerViaButton(Button::Pause);
     QTest::qWait(10);
-    const QString pauseSegId = tracker.session_.current_checkpoint_segment_id;
+    const SegmentId pauseSegId = tracker.session_.id_tracker.current;
     const size_t dursBefore = tracker.session_.durations.size();
 
     // Act: resume from Pause
@@ -1368,7 +1368,7 @@ void TimerTest::test_T1_unpause_creates_new_pause_segment_with_fresh_id()
     QVERIFY2(pauseEntry.segment_id != activitySegId,
              "Pause segment must not reuse the Activity segment_id (T1 regression)");
     // The new Activity's segment_id must also be fresh
-    QVERIFY2(tracker.session_.current_checkpoint_segment_id != pauseSegId,
+    QVERIFY2(tracker.session_.id_tracker.current != pauseSegId,
              "New Activity segment must have a different id from the Pause segment");
 
     tracker.useTimerViaButton(Button::Stop);
@@ -1538,7 +1538,7 @@ void TimerTest::test_T2_replaceCurrentDurations_skips_checkpoint_while_dialog_op
     // Build a plausible ongoing segment for replaceCurrentDurations to adopt.
     const QDateTime start = QDateTime::currentDateTime().addSecs(-60);
     const QDateTime end   = QDateTime::currentDateTime();
-    TimeDuration ongoing = TimeDuration::fromTrusted(DurationType::Activity, start, end, "seg-001");
+    TimeDuration ongoing = TimeDuration::fromTrusted(DurationType::Activity, start, end, SegmentId::fromString("seg-001"));
 
     tracker.beginExclusiveEdit();
     QVERIFY(tracker.dialog_open_);
@@ -1572,7 +1572,7 @@ void TimerTest::test_C6_replaceCurrentDurations_writes_checkpoint_after_endExclu
 
     const QDateTime start = QDateTime::currentDateTime().addSecs(-60);
     const QDateTime end   = QDateTime::currentDateTime();
-    TimeDuration ongoing = TimeDuration::fromTrusted(DurationType::Activity, start, end, "seg-002");
+    TimeDuration ongoing = TimeDuration::fromTrusted(DurationType::Activity, start, end, SegmentId::fromString("seg-002"));
 
     tracker.beginExclusiveEdit();
     tracker.endExclusiveEdit();
@@ -1600,7 +1600,7 @@ void TimerTest::test_S12_marker_error_skips_reconciliation()
     // Seed an orphan checkpoint that would normally be reconciled.
     OrphanCheckpoint orphan;
     orphan.id = 1;
-    orphan.segment_id = TimeDuration::createSegmentId();
+    orphan.segment_id = SegmentId::mint();
     orphan.type = DurationType::Activity;
     orphan.startTime = QDateTime::currentDateTime().addSecs(-120);
     orphan.endTime   = QDateTime::currentDateTime().addSecs(-60);

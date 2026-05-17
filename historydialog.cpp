@@ -491,7 +491,7 @@ void HistoryDialog::saveChanges()
 
     // Step A: Build unified timeline + origin map
     std::deque<TimeDuration> unifiedCompleted;
-    QHash<QString, bool> originIsMemory;  // segment_id → true if memory row
+    QHash<QString, bool> originIsMemory;  // segment_id.toString() → true if memory row
     std::optional<TimeDuration> ongoingDurationForSave;
 
     for (size_t i = 0; i < pages_.size(); ++i) {
@@ -499,7 +499,7 @@ void HistoryDialog::saveChanges()
         for (size_t row = 0; row < comp.size(); ++row) {
             unifiedCompleted.push_back(comp[row]);
             const bool isMemory = pages_[i].isCurrent && isMemoryRow_[i][row];
-            originIsMemory.insert(comp[row].segment_id, isMemory);
+            originIsMemory.insert(comp[row].segment_id.toString(), isMemory);
         }
         if (pages_[i].isCurrent) {
             ongoingDurationForSave = pendingTimelines_[i].ongoing();
@@ -515,7 +515,7 @@ void HistoryDialog::saveChanges()
     std::deque<TimeDuration> currentSessionDurations;
 
     for (const auto& d : normalised.completed()) {
-        auto it = originIsMemory.find(d.segment_id);
+        auto it = originIsMemory.find(d.segment_id.toString());
         // normalized() only carries existing segment_ids forward — this should never fire.
         Q_ASSERT(it != originIsMemory.end());
         const bool isMemory = (it == originIsMemory.end()) ? true : it.value();

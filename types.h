@@ -12,21 +12,53 @@ enum class LockEvent {None, Unlock, Lock, LongOngoingLock};
 
 enum class DurationType { Activity, Pause };
 
+/**
+ * Opaque, immutable segment identity.
+ *
+ * SegmentId wraps a UUID string to prevent empty-string IDs from
+ * propagating undetected.  fromString() asserts non-empty in debug
+ * builds; mint() always produces a fresh non-empty UUID.
+ *
+ * The default constructor produces an empty SegmentId (used when no
+ * segment is active, e.g. Mode::None in Timer).
+ */
+class SegmentId {
+public:
+    SegmentId() = default;
+
+    static SegmentId mint() {
+        return SegmentId(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    }
+
+    static SegmentId fromString(const QString& s) {
+        Q_ASSERT_X(!s.isEmpty(), "SegmentId::fromString", "segment_id must not be empty");
+        return SegmentId(s);
+    }
+
+    bool isEmpty() const { return value_.isEmpty(); }
+    const QString& toString() const { return value_; }
+
+    bool operator==(const SegmentId& o) const { return value_ == o.value_; }
+    bool operator!=(const SegmentId& o) const { return value_ != o.value_; }
+    bool operator<(const SegmentId& o) const { return value_ < o.value_; }
+
+private:
+    explicit SegmentId(const QString& s) : value_(s) {}
+    QString value_;
+};
+
 struct TimeDuration {
-    QString segment_id;
+    SegmentId segment_id;
     DurationType type;
     qint64 duration;
     QDateTime startTime;
     QDateTime endTime;
 
-    static QString createSegmentId()
-    {
-        return QUuid::createUuid().toString(QUuid::WithoutBraces);
-    }
+    static SegmentId createSegmentId() { return SegmentId::mint(); }
 
     // Factory: returns nullopt for cross-midnight, zero/negative duration, or invalid timestamps.
     static std::optional<TimeDuration> create(DurationType type, QDateTime start, QDateTime end,
-                                              const QString& segmentId = QString())
+                                              SegmentId segmentId = SegmentId{})
     {
         if (!start.isValid() || !end.isValid())
             return std::nullopt;
@@ -34,20 +66,20 @@ struct TimeDuration {
             return std::nullopt;
         if (start.date() != end.date())
             return std::nullopt;
-        return TimeDuration(type, start, end, segmentId);
+        return TimeDuration(type, start, end, std::move(segmentId));
     }
 
     // For transient (non-stored) durations that may legitimately cross day boundaries.
     static TimeDuration fromTrusted(DurationType type, QDateTime start, QDateTime end,
-                                    const QString& segmentId = QString())
+                                    SegmentId segmentId = SegmentId{})
     {
-        return TimeDuration(type, start, end, segmentId);
+        return TimeDuration(type, start, end, std::move(segmentId));
     }
 
 private:
     // Raw constructor — use create() or fromTrusted() at call sites.
-    TimeDuration(DurationType type, QDateTime start, QDateTime end, const QString& segmentId = QString())
-        : segment_id(segmentId.isEmpty() ? createSegmentId() : segmentId),
+    TimeDuration(DurationType type, QDateTime start, QDateTime end, SegmentId segmentId = SegmentId{})
+        : segment_id(segmentId.isEmpty() ? SegmentId::mint() : std::move(segmentId)),
           type(type), duration(start.msecsTo(end)), startTime(start), endTime(end) {
     }
 

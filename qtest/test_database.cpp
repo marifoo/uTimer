@@ -205,7 +205,7 @@ void DatabaseTest::test_exactMatching_upsertReplacesById()
     std::deque<TimeDuration> durations;
     durations.emplace_back(DurationType::Activity, start, end1);
     QVERIFY(manager.updateDurationsById(durations));
-    const QString stableSegmentId = durations.front().segment_id;
+    const SegmentId stableSegmentId = durations.front().segment_id;
 
     durations.clear();
     durations.emplace_back(DurationType::Activity, start, end2, stableSegmentId);
@@ -221,7 +221,7 @@ void DatabaseTest::test_exactMatching_upsertReplacesById()
             "SELECT COUNT(*), end_utc FROM durations "
             "WHERE segment_id = :segment_id"
         );
-        query.bindValue(":segment_id", durations.front().segment_id);
+        query.bindValue(":segment_id", durations.front().segment_id.toString());
         QVERIFY(query.exec());
         QVERIFY(query.next());
         QCOMPARE(query.value(0).toInt(), 1);
@@ -246,7 +246,7 @@ void DatabaseTest::test_checkpointPreservesStartTimeOnUpdateBySegmentId()
     QDateTime end1 = start.addSecs(5);
     QDateTime end2 = start.addSecs(15);
 
-    const QString checkpointSegmentId = TimeDuration::createSegmentId();
+    const SegmentId checkpointSegmentId = SegmentId::mint();
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, start.msecsTo(end1), start, end1, checkpointSegmentId));
 
     QDateTime driftedStart = start.addSecs(3600);
@@ -259,7 +259,7 @@ void DatabaseTest::test_checkpointPreservesStartTimeOnUpdateBySegmentId()
         QVERIFY(db.open());
         QSqlQuery query(db);
         query.prepare("SELECT start_utc, end_utc FROM durations WHERE segment_id = :segment_id");
-        query.bindValue(":segment_id", checkpointSegmentId);
+        query.bindValue(":segment_id", checkpointSegmentId.toString());
         QVERIFY(query.exec());
         QVERIFY(query.next());
         QCOMPARE(query.value(0).toString(), start.toUTC().toString(Qt::ISODateWithMs));
@@ -286,7 +286,7 @@ void DatabaseTest::test_clockDriftResilience_durationStoredFromElapsed()
     QDateTime end = start.addSecs(3600);
     const qint64 wallClockMs = start.msecsTo(end); // 3600000ms
 
-    const QString checkpointSegmentId = TimeDuration::createSegmentId();
+    const SegmentId checkpointSegmentId = SegmentId::mint();
     // The elapsed parameter is ignored for storage; only start/end UTC matter.
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 120'000, start, end, checkpointSegmentId));
 
@@ -297,7 +297,7 @@ void DatabaseTest::test_clockDriftResilience_durationStoredFromElapsed()
         QVERIFY(db.open());
         QSqlQuery query(db);
         query.prepare("SELECT start_utc, end_utc FROM durations WHERE segment_id = :segment_id");
-        query.bindValue(":segment_id", checkpointSegmentId);
+        query.bindValue(":segment_id", checkpointSegmentId.toString());
         QVERIFY(query.exec());
         QVERIFY(query.next());
         QCOMPARE(query.value(0).toString(), start.toUTC().toString(Qt::ISODateWithMs));
@@ -337,7 +337,7 @@ void DatabaseTest::test_loadDurations_skipsNegativeDurationRows()
         "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
         "VALUES (:segment_id, :type, :start_utc, :end_utc, 1)"
     );
-    query.bindValue(":segment_id", TimeDuration::createSegmentId());
+    query.bindValue(":segment_id", SegmentId::mint().toString());
     query.bindValue(":type", static_cast<int>(DurationType::Activity));
     query.bindValue(":start_utc", end.toUTC().toString(Qt::ISODateWithMs));   // reversed
     query.bindValue(":end_utc", start.toUTC().toString(Qt::ISODateWithMs));   // reversed
@@ -461,20 +461,20 @@ void DatabaseTest::test_database_checkpoint_single_row_per_segment()
 
     QDateTime start = QDateTime::currentDateTime();
     QDateTime end = start.addSecs(10);
-    const QString segmentId = TimeDuration::createSegmentId();
-    
+    const SegmentId segmentId = SegmentId::mint();
+
     // First checkpoint - creates new row
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, start, end, segmentId));
-    
+
     // Second checkpoint with same ID - should UPDATE existing row
     QDateTime newEnd = start.addSecs(20);
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 20000, start, newEnd, segmentId));
-    
+
     // Verify checkpoint row remains unfinalized and updated in place.
     QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     query.prepare("SELECT COUNT(*), end_utc, is_finalized FROM durations WHERE segment_id = :segment_id");
-    query.bindValue(":segment_id", segmentId);
+    query.bindValue(":segment_id", segmentId.toString());
     QVERIFY(query.exec());
     QVERIFY(query.next());
     QCOMPARE(query.value(0).toInt(), 1);
@@ -493,28 +493,28 @@ void DatabaseTest::test_database_checkpoint_missing_segment_reinserts_same_segme
 
     QDateTime start = QDateTime::currentDateTime();
     QDateTime end = start.addSecs(10);
-    const QString segmentId = TimeDuration::createSegmentId();
-    
+    const SegmentId segmentId = SegmentId::mint();
+
     // Create checkpoint
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, start, end, segmentId));
-    
+
     // Manually delete the checkpoint row (simulating retention cleanup)
     QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     query.prepare("DELETE FROM durations WHERE segment_id = :segment_id");
-    query.bindValue(":segment_id", segmentId);
+    query.bindValue(":segment_id", segmentId.toString());
     QVERIFY(query.exec());
     manager.lazyClose();
-    
+
     // Try to update checkpoint - should detect missing row and INSERT new one
     QDateTime newEnd = start.addSecs(20);
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 20000, start, newEnd, segmentId));
-    
+
     // Verify new checkpoint row exists as unfinalized
     QVERIFY(manager.ensureOpen());
     QSqlQuery verifyQuery(manager.db);
     verifyQuery.prepare("SELECT COUNT(*), end_utc, is_finalized FROM durations WHERE segment_id = :segment_id");
-    verifyQuery.bindValue(":segment_id", segmentId);
+    verifyQuery.bindValue(":segment_id", segmentId.toString());
     QVERIFY(verifyQuery.exec());
     QVERIFY(verifyQuery.next());
     QCOMPARE(verifyQuery.value(0).toInt(), 1);
@@ -533,20 +533,20 @@ void DatabaseTest::test_database_checkpoint_preserves_start_time()
 
     QDateTime originalStart = QDateTime::currentDateTime();
     QDateTime firstEnd = originalStart.addSecs(10);
-    const QString checkpointSegmentId = TimeDuration::createSegmentId();
-    
+    const SegmentId checkpointSegmentId = SegmentId::mint();
+
     // First checkpoint
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, originalStart, firstEnd, checkpointSegmentId));
-    
+
     // Update checkpoint with new end time (simulate ongoing timer)
     QDateTime secondEnd = originalStart.addSecs(30);
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, 30000, originalStart, secondEnd, checkpointSegmentId));
-    
+
     // Verify start_utc/end_utc are correct and the row is unfinalized.
     QVERIFY(manager.ensureOpen());
     QSqlQuery query(manager.db);
     query.prepare("SELECT start_utc, end_utc, is_finalized FROM durations WHERE segment_id = :segment_id");
-    query.bindValue(":segment_id", checkpointSegmentId);
+    query.bindValue(":segment_id", checkpointSegmentId.toString());
     QVERIFY(query.exec());
     QVERIFY(query.next());
     QCOMPARE(query.value(0).toString(), originalStart.toUTC().toString(Qt::ISODateWithMs));
@@ -663,7 +663,7 @@ void DatabaseTest::test_database_load_negative_duration()
     const QDateTime end = now.addSecs(5);
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
                  "VALUES (:segment_id, 0, :start_utc, :end_utc, 1)");
-    query.bindValue(":segment_id", TimeDuration::createSegmentId());
+    query.bindValue(":segment_id", SegmentId::mint().toString());
     query.bindValue(":start_utc", now.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
@@ -692,7 +692,7 @@ void DatabaseTest::test_database_load_start_after_end()
 
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
                  "VALUES (:segment_id, 0, :start_utc, :end_utc, 1)");
-    query.bindValue(":segment_id", TimeDuration::createSegmentId());
+    query.bindValue(":segment_id", SegmentId::mint().toString());
     query.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
@@ -719,7 +719,7 @@ void DatabaseTest::test_database_load_invalid_enum_type()
 
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
                  "VALUES (:segment_id, 99, :start_utc, :end_utc, 1)");
-    query.bindValue(":segment_id", TimeDuration::createSegmentId());
+    query.bindValue(":segment_id", SegmentId::mint().toString());
     query.bindValue(":start_utc", now.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
@@ -745,7 +745,7 @@ void DatabaseTest::test_database_load_duration_mismatch_tolerance()
     QSqlQuery query(manager.db);
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
                  "VALUES (:segment_id, 0, :start_utc, :end_utc, 1)");
-    query.bindValue(":segment_id", TimeDuration::createSegmentId());
+    query.bindValue(":segment_id", SegmentId::mint().toString());
     query.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
@@ -796,7 +796,7 @@ void DatabaseTest::test_database_load_invalid_type_increments_skipped_and_omits_
     const QDateTime end = start.addSecs(10);
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
                  "VALUES (:segment_id, 99, :start_utc, :end_utc, 1)");
-    query.bindValue(":segment_id", TimeDuration::createSegmentId());
+    query.bindValue(":segment_id", SegmentId::mint().toString());
     query.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
@@ -823,7 +823,7 @@ void DatabaseTest::test_database_load_200ms_mismatch_increments_repaired_and_use
     const QDateTime end = start.addMSecs(1000);
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
                  "VALUES (:segment_id, 0, :start_utc, :end_utc, 1)");
-    query.bindValue(":segment_id", TimeDuration::createSegmentId());
+    query.bindValue(":segment_id", SegmentId::mint().toString());
     query.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
@@ -1009,7 +1009,7 @@ void DatabaseTest::test_database_schema_migration_dropLegacyColumns_migrates_ste
 
     const QDateTime start = QDateTime(QDate(2025, 3, 10), QTime(9, 0, 0), Qt::UTC);
     const QDateTime end   = QDateTime(QDate(2025, 3, 10), QTime(9, 30, 0), Qt::UTC);
-    const QString sid = TimeDuration::createSegmentId();
+    const SegmentId sid = SegmentId::mint();
 
     const QString connName = "step9_seed";
     {
@@ -1039,7 +1039,7 @@ void DatabaseTest::test_database_schema_migration_dropLegacyColumns_migrates_ste
             " is_finalized, start_utc, end_utc) "
             "VALUES (:sid, 0, :dur, :sd, :st, :ed, :et, 1, :su, :eu)"
         );
-        q.bindValue(":sid", sid);
+        q.bindValue(":sid", sid.toString());
         q.bindValue(":dur", start.msecsTo(end));
         q.bindValue(":sd", start.date().toString(Qt::ISODate));
         q.bindValue(":st", start.time().toString("HH:mm:ss.zzz"));
@@ -1063,7 +1063,7 @@ void DatabaseTest::test_database_schema_migration_dropLegacyColumns_migrates_ste
     QCOMPARE(loaded.size(), static_cast<size_t>(1));
     QCOMPARE(loaded[0].startTime.toUTC(), start);
     QCOMPARE(loaded[0].endTime.toUTC(), end);
-    QCOMPARE(loaded[0].segment_id, sid);
+    QCOMPARE(loaded[0].segment_id.toString(), sid.toString());
 
     // start_date column is absent — legacy columns were dropped.
     QVERIFY(manager.ensureOpen());
@@ -1246,7 +1246,7 @@ void DatabaseTest::test_hasEntriesForDate_utc_positive_offset()
             "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
             "VALUES (:sid, 0, '2024-12-31T15:00:00.000Z', '2024-12-31T15:30:00.000Z', 1)"
         );
-        q.bindValue(":sid", TimeDuration::createSegmentId());
+        q.bindValue(":sid", SegmentId::mint().toString());
         QVERIFY(q.exec());
         db.close();
     }
@@ -1295,7 +1295,7 @@ void DatabaseTest::test_hasEntriesForDate_utc_negative_offset()
             "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
             "VALUES (:sid, 0, '2025-01-02T07:00:00.000Z', '2025-01-02T08:00:00.000Z', 1)"
         );
-        q.bindValue(":sid", TimeDuration::createSegmentId());
+        q.bindValue(":sid", SegmentId::mint().toString());
         QVERIFY(q.exec());
         db.close();
     }
@@ -1342,7 +1342,7 @@ void DatabaseTest::test_hasEntriesForDate_utc_regression()
             "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
             "VALUES (:sid, 0, '2025-06-15T11:00:00.000Z', '2025-06-15T12:00:00.000Z', 1)"
         );
-        q.bindValue(":sid", TimeDuration::createSegmentId());
+        q.bindValue(":sid", SegmentId::mint().toString());
         QVERIFY(q.exec());
         db.close();
     }
@@ -1391,14 +1391,14 @@ void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
             "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
             "VALUES (:sid, 0, :start_utc, :end_utc, 1)"
         );
-        query.bindValue(":sid", TimeDuration::createSegmentId());
+        query.bindValue(":sid", SegmentId::mint().toString());
         query.bindValue(":start_utc", oldStart.toUTC().toString(Qt::ISODateWithMs));
         query.bindValue(":end_utc", oldEnd.toUTC().toString(Qt::ISODateWithMs));
         QVERIFY(query.exec());
 
         const QDateTime recentStart = now.addSecs(-60);
         const QDateTime recentEnd = now;
-        query.bindValue(":sid", TimeDuration::createSegmentId());
+        query.bindValue(":sid", SegmentId::mint().toString());
         query.bindValue(":start_utc", recentStart.toUTC().toString(Qt::ISODateWithMs));
         query.bindValue(":end_utc", recentEnd.toUTC().toString(Qt::ISODateWithMs));
         QVERIFY(query.exec());
@@ -1553,9 +1553,9 @@ void DatabaseTest::test_T_commitSession_upserts_by_segment_id()
     SqliteSessionStore manager(settings);
 
     QDateTime now = QDateTime::currentDateTime();
-    QString segId = TimeDuration::createSegmentId();
+    SegmentId segId = SegmentId::mint();
     std::deque<TimeDuration> segs;
-    segs.emplace_back(DurationType::Activity, now.addSecs(-60), now, segId);
+    segs.push_back(TimeDuration::fromTrusted(DurationType::Activity, now.addSecs(-60), now, segId));
 
     // First save
     QVERIFY(manager.commitSession(Timeline(segs, std::nullopt)));
@@ -1568,7 +1568,7 @@ void DatabaseTest::test_T_commitSession_upserts_by_segment_id()
     auto loaded = manager.loadDurations();
     QCOMPARE(static_cast<int>(loaded.size()), 1);
     QCOMPARE(loaded.durations.front().type, DurationType::Pause);
-    QCOMPARE(loaded.durations.front().segment_id, segId);
+    QCOMPARE(loaded.durations.front().segment_id.toString(), segId.toString());
 }
 
 /**
@@ -1586,13 +1586,13 @@ void DatabaseTest::test_U_commitSession_orphan_cleanup_is_internal()
     SqliteSessionStore manager(settings);
 
     QDateTime now = QDateTime::currentDateTime();
-    QString segA = TimeDuration::createSegmentId();
-    QString segB = TimeDuration::createSegmentId();
+    SegmentId segA = SegmentId::mint();
+    SegmentId segB = SegmentId::mint();
 
     // Two adjacent Activity segments — will merge inside commitSession's normalized()
     std::deque<TimeDuration> twoSegs;
-    twoSegs.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-50), segA);
-    twoSegs.emplace_back(DurationType::Activity, now.addSecs(-50), now.addSecs(-1), segB);
+    twoSegs.push_back(TimeDuration::fromTrusted(DurationType::Activity, now.addSecs(-100), now.addSecs(-50), segA));
+    twoSegs.push_back(TimeDuration::fromTrusted(DurationType::Activity, now.addSecs(-50), now.addSecs(-1), segB));
 
     // Seed them via saveDurations (bypasses commitSession) so they're both in DB
     QVERIFY(manager.saveDurations(twoSegs, TransactionMode::Append));
@@ -1805,11 +1805,11 @@ void DatabaseTest::test_database_saveDurations_append_upserts_existing_segment_i
     SqliteSessionStore manager(settings);
 
     const QDateTime now = QDateTime::currentDateTime();
-    const QString segId = TimeDuration::createSegmentId();
+    const SegmentId segId = SegmentId::mint();
 
     // First Append: seed a single row with segment_id == segId.
     std::deque<TimeDuration> first;
-    first.emplace_back(DurationType::Activity, now.addSecs(-60), now.addSecs(-30), segId);
+    first.push_back(TimeDuration::fromTrusted(DurationType::Activity, now.addSecs(-60), now.addSecs(-30), segId));
     QVERIFY(manager.saveDurations(first, TransactionMode::Append));
 
     // Capture the autoincrement id assigned to that row.
@@ -1818,7 +1818,7 @@ void DatabaseTest::test_database_saveDurations_append_upserts_existing_segment_i
         QVERIFY(manager.ensureOpen());
         QSqlQuery q(manager.db);
         q.prepare("SELECT id FROM durations WHERE segment_id = :sid");
-        q.bindValue(":sid", segId);
+        q.bindValue(":sid", segId.toString());
         QVERIFY(q.exec());
         QVERIFY(q.next());
         originalRowId = q.value(0).toLongLong();
@@ -1829,7 +1829,7 @@ void DatabaseTest::test_database_saveDurations_append_upserts_existing_segment_i
 
     // Second Append: same segment_id, different type and time window.
     std::deque<TimeDuration> second;
-    second.emplace_back(DurationType::Pause, now.addSecs(-20), now.addSecs(-5), segId);
+    second.push_back(TimeDuration::fromTrusted(DurationType::Pause, now.addSecs(-20), now.addSecs(-5), segId));
     QVERIFY(manager.saveDurations(second, TransactionMode::Append));
 
     // Assert: still exactly one row for that segment_id, fields are updated,
@@ -1838,7 +1838,7 @@ void DatabaseTest::test_database_saveDurations_append_upserts_existing_segment_i
     QSqlQuery verify(manager.db);
     verify.prepare("SELECT id, type, start_utc, end_utc "
                    "FROM durations WHERE segment_id = :sid");
-    verify.bindValue(":sid", segId);
+    verify.bindValue(":sid", segId.toString());
     QVERIFY(verify.exec());
     QVERIFY(verify.next());
     QCOMPARE(verify.value(0).toLongLong(), originalRowId); // id preserved
@@ -1868,7 +1868,7 @@ static qint64 seedOrphanRow(SqliteSessionStore& manager,
         "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
         "VALUES (:segment_id, :type, :start_utc, :end_utc, 0)"
     );
-    q.bindValue(":segment_id", TimeDuration::createSegmentId());
+    q.bindValue(":segment_id", SegmentId::mint().toString());
     q.bindValue(":type", static_cast<int>(type));
     q.bindValue(":start_utc", startUtc.toString(Qt::ISODateWithMs));
     q.bindValue(":end_utc", endUtc.toString(Qt::ISODateWithMs));

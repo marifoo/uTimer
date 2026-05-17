@@ -164,7 +164,7 @@ bool SqliteSessionStore::ensureSchema()
     bool tableCreated = query_new.exec(
         "CREATE TABLE IF NOT EXISTS durations ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "segment_id TEXT NOT NULL,"
+        "segment_id TEXT NOT NULL CHECK(length(segment_id) > 0),"
         "type INTEGER NOT NULL,"
         "start_utc TEXT NOT NULL,"
         "end_utc TEXT NOT NULL,"
@@ -519,7 +519,7 @@ bool SqliteSessionStore::ensureSegmentIdColumn()
 
     int migratedRows = 0;
     while (selectRows.next()) {
-        insertNew.bindValue(":segment_id", TimeDuration::createSegmentId());
+        insertNew.bindValue(":segment_id", TimeDuration::createSegmentId().toString());
         insertNew.bindValue(":type", selectRows.value(0));
         insertNew.bindValue(":duration", selectRows.value(1));
         insertNew.bindValue(":start_date", selectRows.value(2));
@@ -656,7 +656,7 @@ bool SqliteSessionStore::dropLegacyColumns()
     if (!q.exec(
             "CREATE TABLE durations_new ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "segment_id TEXT NOT NULL,"
+            "segment_id TEXT NOT NULL CHECK(length(segment_id) > 0),"
             "type INTEGER NOT NULL,"
             "start_utc TEXT NOT NULL,"
             "end_utc TEXT NOT NULL,"
@@ -832,7 +832,7 @@ BackupResult SqliteSessionStore::createBackup(const std::deque<TimeDuration>& du
 bool SqliteSessionStore::commitSession(const Timeline& session)
 {
     // Collect before-normalization segment IDs
-    std::vector<QString> beforeIds;
+    std::vector<SegmentId> beforeIds;
     for (const auto& d : session.completed())
         beforeIds.push_back(d.segment_id);
 
@@ -846,7 +846,7 @@ bool SqliteSessionStore::commitSession(const Timeline& session)
         for (const auto& d : normed.completed())
             if (d.segment_id == id) { found = true; break; }
         if (!found)
-            orphanIds.push_back(id);
+            orphanIds.push_back(id.toString());
     }
 
     return updateDurationsById(normed.completed(), orphanIds);
@@ -936,7 +936,7 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
 
     // Insert each duration entry (convert to UTC for storage)
     for (const auto& d : durations) {
-        query.bindValue(":segment_id", d.segment_id);
+        query.bindValue(":segment_id", d.segment_id.toString());
         query.bindValue(":type", static_cast<int>(d.type));
         query.bindValue(":start_utc", d.startTime.toUTC().toString(Qt::ISODateWithMs));
         query.bindValue(":end_utc", d.endTime.toUTC().toString(Qt::ISODateWithMs));
@@ -1010,7 +1010,7 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
     );
 
     for (const auto& d : historyDurations) {
-        finalizedInsert.bindValue(":segment_id", d.segment_id);
+        finalizedInsert.bindValue(":segment_id", d.segment_id.toString());
         finalizedInsert.bindValue(":type", static_cast<int>(d.type));
         finalizedInsert.bindValue(":start_utc", d.startTime.toUTC().toString(Qt::ISODateWithMs));
         finalizedInsert.bindValue(":end_utc", d.endTime.toUTC().toString(Qt::ISODateWithMs));
@@ -1029,7 +1029,7 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
     );
 
     for (const auto& d : currentSessionDurations) {
-        unfinalizedInsert.bindValue(":segment_id", d.segment_id);
+        unfinalizedInsert.bindValue(":segment_id", d.segment_id.toString());
         unfinalizedInsert.bindValue(":type", static_cast<int>(d.type));
         unfinalizedInsert.bindValue(":start_utc", d.startTime.toUTC().toString(Qt::ISODateWithMs));
         unfinalizedInsert.bindValue(":end_utc", d.endTime.toUTC().toString(Qt::ISODateWithMs));
@@ -1095,7 +1095,7 @@ LoadResult SqliteSessionStore::loadDurations()
 
     // Parse each row and reconstruct TimeDuration objects
     while (query.next()) {
-        const QString segmentId = query.value(0).toString();
+        const SegmentId segmentId = SegmentId::fromString(query.value(0).toString());
         const int typeInt = query.value(1).toInt();
         const QDateTime startDateTime = QDateTime::fromString(query.value(2).toString(), Qt::ISODateWithMs).toLocalTime();
         const QDateTime endDateTime   = QDateTime::fromString(query.value(3).toString(), Qt::ISODateWithMs).toLocalTime();
@@ -1208,7 +1208,7 @@ EntriesForDateResult SqliteSessionStore::hasEntriesForDate(const QDate& date)
  * The caller (Timer) rotates current_checkpoint_segment_id_ on mode changes,
  * causing the next checkpoint to create a new row for the new segment.
  */
-bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const QString& segmentId)
+bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const SegmentId& segmentId)
 {
     QMutexLocker locker(&db_mutex_);
     Q_UNUSED(duration)  // duration is computed from timestamps at load; not stored
@@ -1238,7 +1238,7 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
         "WHERE segment_id = :segment_id"
     );
     updateQuery.bindValue(":end_utc", endUtcStr);
-    updateQuery.bindValue(":segment_id", segmentId);
+    updateQuery.bindValue(":segment_id", segmentId.toString());
 
     if (!updateQuery.exec()) {
         db.rollback();
@@ -1257,7 +1257,7 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
             "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
             "VALUES (:segment_id, :type, :start_utc, :end_utc, 0)"
         );
-        insertQuery.bindValue(":segment_id", segmentId);
+        insertQuery.bindValue(":segment_id", segmentId.toString());
         insertQuery.bindValue(":type", static_cast<int>(type));
         insertQuery.bindValue(":start_utc", startUtcStr);
         insertQuery.bindValue(":end_utc", endUtcStr);
@@ -1347,7 +1347,7 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
         const QString startUtcStr = d.startTime.toUTC().toString(Qt::ISODateWithMs);
         const QString endUtcStr   = d.endTime.toUTC().toString(Qt::ISODateWithMs);
 
-        updateQuery.bindValue(":segment_id", d.segment_id);
+        updateQuery.bindValue(":segment_id", d.segment_id.toString());
         updateQuery.bindValue(":type", static_cast<int>(d.type));
         updateQuery.bindValue(":start_utc", startUtcStr);
         updateQuery.bindValue(":end_utc", endUtcStr);
@@ -1359,7 +1359,7 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
         }
 
         if (updateQuery.numRowsAffected() == 0) {
-            insertQuery.bindValue(":segment_id", d.segment_id);
+            insertQuery.bindValue(":segment_id", d.segment_id.toString());
             insertQuery.bindValue(":type", static_cast<int>(d.type));
             insertQuery.bindValue(":start_utc", startUtcStr);
             insertQuery.bindValue(":end_utc", endUtcStr);
@@ -1493,7 +1493,7 @@ std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
 
         OrphanCheckpoint checkpoint;
         checkpoint.id = query.value(0).toLongLong();
-        checkpoint.segment_id = query.value(1).toString();
+        checkpoint.segment_id = SegmentId::fromString(query.value(1).toString());
         checkpoint.type = static_cast<DurationType>(typeInt);
         checkpoint.duration = startTime.msecsTo(endTime);
         checkpoint.startTime = startTime;

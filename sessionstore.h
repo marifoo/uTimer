@@ -33,7 +33,7 @@
  */
 struct OrphanCheckpoint {
     long long id = -1;
-    QString segment_id;
+    SegmentId segment_id;
     DurationType type = DurationType::Activity;
     qint64 duration = 0;
     QDateTime startTime;
@@ -108,7 +108,7 @@ public:
     // interpreted in the system local time zone.
     virtual EntriesForDateResult hasEntriesForDate(const QDate& localDate) = 0;
     virtual bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
-                                const QDateTime& endTime, const QString& segmentId) = 0;
+                                const QDateTime& endTime, const SegmentId& segmentId) = 0;
     virtual bool checkSchemaOnStartup() = 0;
     virtual void flushToDisc() = 0;
     virtual std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() = 0;
