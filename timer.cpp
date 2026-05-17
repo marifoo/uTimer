@@ -766,10 +766,10 @@ Timeline Timer::snapshot() const
     return Timeline(session_.durations, getOngoingDuration());
 }
 
-std::deque<TimeDuration> Timer::getCurrentDurations() const
+Timeline Timer::getCurrentDurations() const
 {
     QMutexLocker locker(&mutex_);
-    return session_.durations;  // copy under lock
+    return Timeline(session_.durations, std::nullopt);
 }
 
 void Timer::setDurationType(size_t idx, DurationType type)
@@ -863,7 +863,7 @@ void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations
 #endif
 }
 
-void Timer::applyEdits(const Timeline& edited)
+void Timer::commit(const Timeline& edited)
 {
     replaceCurrentDurations(edited.completed(), edited.ongoing());
 }

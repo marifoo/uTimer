@@ -482,7 +482,7 @@ void HistoryDialog::saveChanges()
                 pendingTimelines_[0].completed(), fresh);
         } else if (!fresh.has_value() && cur.has_value()) {
             // Engine has no valid ongoing (e.g. cross-midnight after a deferred
-            // midnight stop). Clear it so applyEdits does not anchor a stale
+            // midnight stop). Clear it so commit() does not anchor a stale
             // start time in session_, which would orphan a checkpoint row.
             pendingTimelines_[0] = Timeline(
                 pendingTimelines_[0].completed(), std::nullopt);
@@ -561,7 +561,7 @@ void HistoryDialog::saveChanges()
     // Atomically update Timer's in-memory durations and checkpoint tracking.
     // replaceCurrentDurations couples both operations so callers cannot forget to
     // reset checkpoint tracking after replacing durations — the compiler enforces it.
-    timetracker_.applyEdits(Timeline(currentMemoryDurations, ongoingDurationForSave));
+    timetracker_.commit(Timeline(currentMemoryDurations, ongoingDurationForSave));
     Logger::Log("[HISTORY] Updated Timer current session and checkpoint tracking");
 }
 

@@ -894,8 +894,8 @@ void HistoryDialogTest::test_R_round_trip_type_toggle_via_accept()
     }
 
     // Timer reflects the change
-    QCOMPARE(tracker.getCurrentDurations().size(), static_cast<size_t>(1));
-    QCOMPARE(tracker.getCurrentDurations()[0].type, DurationType::Pause);
+    QCOMPARE(tracker.getCurrentDurations().completed().size(), static_cast<size_t>(1));
+    QCOMPARE(tracker.getCurrentDurations().completed()[0].type, DurationType::Pause);
 }
 
 // ============================================================================
@@ -925,8 +925,8 @@ void HistoryDialogTest::test_S_cancel_preserves_state()
     }
 
     // Timer is unchanged — still Activity
-    QCOMPARE(tracker.getCurrentDurations().size(), static_cast<size_t>(1));
-    QCOMPARE(tracker.getCurrentDurations()[0].type, DurationType::Activity);
+    QCOMPARE(tracker.getCurrentDurations().completed().size(), static_cast<size_t>(1));
+    QCOMPARE(tracker.getCurrentDurations().completed()[0].type, DurationType::Activity);
 }
 
 void HistoryDialogTest::test_saveChanges_deduplicates_cross_bucket_overlaps()

@@ -243,10 +243,12 @@ public:
     qint64 getActiveTime() const;
     qint64 getPauseTime() const;
     Timeline snapshot() const;
-    std::deque<TimeDuration> getCurrentDurations() const;
+    Timeline getCurrentDurations() const;
     void replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
                                  const std::optional<TimeDuration>& ongoing = std::nullopt);
-    void applyEdits(const Timeline& edited);
+    // Atomically replaces the live session with `edited`.
+    // Precondition: caller holds no Timer locks.
+    void commit(const Timeline& edited);
     std::deque<TimeDuration> getDurationsHistory();
     std::pair<int, int> getLastHistoryLoadStats() const;
     std::optional<TimeDuration> getOngoingDuration() const;

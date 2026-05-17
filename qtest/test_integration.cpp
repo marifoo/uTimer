@@ -249,7 +249,7 @@ void IntegrationTest::test_integration_memory_db_consistency()
     // Pause
     tracker.useTimerViaButton(Button::Pause);
     auto memoryDurations = tracker.getCurrentDurations();
-    QVERIFY(memoryDurations.size() >= 1);
+    QVERIFY(memoryDurations.completed().size() >= 1);
     
     // Resume -> Activity for 50ms
     tracker.useTimerViaButton(Button::Start);
