@@ -72,7 +72,7 @@ void HistoryDialogTest::test_historydialog_createPages_includes_current_db_ongoi
     QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(1));
     QVERIFY(dialog.pendingTimelines_[0].ongoing().has_value());
     QVERIFY(dialog.pendingTimelines_[0].ongoing()->duration > 0);
-    QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(1));
+    QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(1));
 }
 
 void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_time_drift()
@@ -97,8 +97,8 @@ void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_
     HistoryDialog dialog(tracker, settings);
     QCOMPARE(dialog.pages_.size(), static_cast<size_t>(1));
     QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(1));
-    QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(1));
-    QCOMPARE(dialog.isMemoryRow_[0][0], true);  // originated from session_.durations
+    QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(1));
+    QCOMPARE(dialog.originIsMemory_.value(dialog.pendingTimelines_[0].completed()[0].segment_id.toString()), true);
     QCOMPARE(dialog.pendingTimelines_[0].completed()[0].startTime, memoryStart);
     QCOMPARE(dialog.pendingTimelines_[0].completed()[0].endTime, memoryEnd);
 }
@@ -286,9 +286,9 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
     QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
 
     HistoryDialog dialog(tracker, settings);
-    QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(2));
-    QCOMPARE(dialog.isMemoryRow_[0][0], true);   // memory row
-    QCOMPARE(dialog.isMemoryRow_[0][1], false);  // DB row
+    QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.originIsMemory_.value(dialog.pendingTimelines_[0].completed()[0].segment_id.toString()), true);
+    QCOMPARE(dialog.originIsMemory_.value(dialog.pendingTimelines_[0].completed()[1].segment_id.toString()), false);
 
     dialog.contextMenuRow_ = 0;
     dialog.contextMenuPage_ = 0;
@@ -306,10 +306,9 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
 
     dialog.onSplitRow();
     QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(3));
-    QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(3));
-    QCOMPARE(dialog.isMemoryRow_[0][0], true);   // first half: memory
-    QCOMPARE(dialog.isMemoryRow_[0][1], true);   // second half: memory (same origin as first)
-    QCOMPARE(dialog.isMemoryRow_[0][2], false);  // DB row unchanged
+    QCOMPARE(dialog.originIsMemory_.value(dialog.pendingTimelines_[0].completed()[0].segment_id.toString()), true);
+    QCOMPARE(dialog.originIsMemory_.value(dialog.pendingTimelines_[0].completed()[1].segment_id.toString()), true);
+    QCOMPARE(dialog.originIsMemory_.value(dialog.pendingTimelines_[0].completed()[2].segment_id.toString()), false);
 
     dialog.done(QDialog::Accepted);
     dialog.saveChanges();
@@ -362,9 +361,9 @@ void HistoryDialogTest::test_historydialog_split_non_today_db_row_survives_save_
 
     dialog.onSplitRow();
     QCOMPARE(dialog.pendingTimelines_[1].completed().size(), static_cast<size_t>(2));
-    QCOMPARE(dialog.isMemoryRow_[1].size(), static_cast<size_t>(2));
-    QCOMPARE(dialog.isMemoryRow_[1][0], false);  // historical DB row
-    QCOMPARE(dialog.isMemoryRow_[1][1], false);  // historical DB row
+    QCOMPARE(dialog.pendingTimelines_[1].completed().size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.originIsMemory_.value(dialog.pendingTimelines_[1].completed()[0].segment_id.toString()), false);
+    QCOMPARE(dialog.originIsMemory_.value(dialog.pendingTimelines_[1].completed()[1].segment_id.toString()), false);
 
     dialog.done(QDialog::Accepted);
     dialog.saveChanges();
@@ -728,9 +727,9 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
     QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
 
     HistoryDialog dialog(tracker, settings);
-    QCOMPARE(dialog.isMemoryRow_[0].size(), static_cast<size_t>(2));
-    QCOMPARE(dialog.isMemoryRow_[0][0], true);   // memory row
-    QCOMPARE(dialog.isMemoryRow_[0][1], false);  // DB row
+    QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.originIsMemory_.value(dialog.pendingTimelines_[0].completed()[0].segment_id.toString()), true);
+    QCOMPARE(dialog.originIsMemory_.value(dialog.pendingTimelines_[0].completed()[1].segment_id.toString()), false);
 
     dialog.pendingTimelines_[0] = dialog.pendingTimelines_[0].withSegmentType(0, DurationType::Pause);
 

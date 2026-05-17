@@ -120,14 +120,15 @@ void HistoryDialog::createPages()
     std::sort(historyDates.begin(), historyDates.end(), std::greater<QDate>()); // Most recent first
 
     std::deque<TimeDuration> currentPageCompleted;
-    std::vector<bool> currentPageIsMemory;
     currentPageCompleted.insert(currentPageCompleted.end(), currentDurations.begin(), currentDurations.end());
-    currentPageIsMemory.insert(currentPageIsMemory.end(), currentDurations.size(), true);
+    for (const auto& d : currentDurations)
+        originIsMemory_.insert(d.segment_id.toString(), true);
 
     auto todayIt = historyByDay.find(today);
     if (todayIt != historyByDay.end()) {
         currentPageCompleted.insert(currentPageCompleted.end(), todayIt->begin(), todayIt->end());
-        currentPageIsMemory.insert(currentPageIsMemory.end(), todayIt->size(), false);
+        for (const auto& d : *todayIt)
+            originIsMemory_.insert(d.segment_id.toString(), false);
     }
 
     // Build currentPageDurations for the Page struct (includes ongoing for title count)
@@ -155,20 +156,14 @@ void HistoryDialog::createPages()
         });
     }
 
-    // Initialize pendingTimelines_ and isMemoryRow_
     pendingTimelines_.reserve(pages_.size());
-    isMemoryRow_.reserve(pages_.size());
-
-    // Page 0: completed = currentPageCompleted (no ongoing), ongoing = sessionSnapshot.ongoing()
     pendingTimelines_.push_back(Timeline(currentPageCompleted, ongoingOpt));
-    isMemoryRow_.push_back(currentPageIsMemory);
 
     for (size_t i = 1; i < pages_.size(); ++i) {
         pendingTimelines_.push_back(Timeline(pages_[i].durations, std::nullopt));
-        isMemoryRow_.push_back(std::vector<bool>(pages_[i].durations.size(), false));
+        for (const auto& d : pages_[i].durations)
+            originIsMemory_.insert(d.segment_id.toString(), false);
     }
-
-    assertPendingOriginsInvariant();
 }
 
 void HistoryDialog::setupUI()
@@ -269,19 +264,6 @@ QString HistoryDialog::getLoadReconciliationMessage() const
     return buildLoadReconciliationMessage();
 }
 
-void HistoryDialog::assertPendingOriginsInvariant() const
-{
-#ifndef QT_NO_DEBUG
-    Q_ASSERT_X(isMemoryRow_.size() == pendingTimelines_.size(),
-        "HistoryDialog::assertPendingOriginsInvariant",
-        "isMemoryRow_ and pendingTimelines_ must have same page count");
-    for (size_t i = 0; i < pendingTimelines_.size(); ++i) {
-        Q_ASSERT_X(isMemoryRow_[i].size() == pendingTimelines_[i].completed().size(),
-            "HistoryDialog::assertPendingOriginsInvariant",
-            "isMemoryRow_[i] must have same row count as pendingTimelines_[i].completed()");
-    }
-#endif
-}
 
 void HistoryDialog::updateTotalsLabel(uint idx)
 {
@@ -372,31 +354,28 @@ void HistoryDialog::updateTable(uint idx)
         box->setEnabled(true);
         table_->setCellWidget(row, 3, box);
 
-        connect(box, &QCheckBox::stateChanged, this, [this, capturedPageIdx = idx, capturedRow = row](int state) {
-            // Reject stale events from checkboxes on other pages
-            if (capturedPageIdx != pageIndex_) {
+        const SegmentId segId = d.segment_id;
+        connect(box, &QCheckBox::stateChanged, this, [this, capturedPageIdx = idx, segId](int state) {
+            if (capturedPageIdx != pageIndex_)
+                return;
+            const auto& comp = pendingTimelines_[capturedPageIdx].completed();
+            auto it = std::find_if(comp.begin(), comp.end(),
+                [&segId](const TimeDuration& td) { return td.segment_id == segId; });
+            if (it == comp.end()) {
+                Logger::Log(QString("[WARNING] Checkbox callback: segment_id not found"));
                 return;
             }
-
-            if (capturedRow >= static_cast<int>(pendingTimelines_[capturedPageIdx].completed().size())) {
-                Logger::Log(QString("[WARNING] Checkbox callback: Invalid row %1").arg(capturedRow));
-                return;
-            }
-
+            const size_t currentRow = static_cast<size_t>(std::distance(comp.begin(), it));
             DurationType newType = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
-            pendingTimelines_[capturedPageIdx] = pendingTimelines_[capturedPageIdx].withSegmentType(
-                static_cast<size_t>(capturedRow), newType);
-            assertPendingOriginsInvariant();
+            pendingTimelines_[capturedPageIdx] = pendingTimelines_[capturedPageIdx].withSegmentType(currentRow, newType);
+            const int displayRow = static_cast<int>(currentRow);
             QString typeStr = newType == DurationType::Activity ? "Activity  " : "Pause  ";
-
-            if (table_->item(capturedRow, 0)) {
-                table_->item(capturedRow, 0)->setText(typeStr);
+            if (table_->item(displayRow, 0)) {
+                table_->item(displayRow, 0)->setText(typeStr);
                 updateTotalsLabel(capturedPageIdx);
-
                 for (int col = 0; col < table_->columnCount(); ++col) {
-                    if (table_->item(capturedRow, col)) {
-                        table_->item(capturedRow, col)->setBackground(QColor(180, 216, 228, 255));
-                    }
+                    if (table_->item(displayRow, col))
+                        table_->item(displayRow, col)->setBackground(QColor(180, 216, 228, 255));
                 }
             }
         });
@@ -489,36 +468,31 @@ void HistoryDialog::saveChanges()
         }
     }
 
-    // Step A: Build unified timeline + origin map
+    // Step A: Build unified timeline
     std::deque<TimeDuration> unifiedCompleted;
-    QHash<QString, bool> originIsMemory;  // segment_id.toString() → true if memory row
     std::optional<TimeDuration> ongoingDurationForSave;
 
     for (size_t i = 0; i < pages_.size(); ++i) {
         const auto& comp = pendingTimelines_[i].completed();
-        for (size_t row = 0; row < comp.size(); ++row) {
-            unifiedCompleted.push_back(comp[row]);
-            const bool isMemory = pages_[i].isCurrent && isMemoryRow_[i][row];
-            originIsMemory.insert(comp[row].segment_id.toString(), isMemory);
-        }
-        if (pages_[i].isCurrent) {
+        for (const auto& d : comp)
+            unifiedCompleted.push_back(d);
+        if (pages_[i].isCurrent)
             ongoingDurationForSave = pendingTimelines_[i].ongoing();
-        }
     }
 
     // Step B: Normalize once across all buckets
     Timeline normalised = Timeline(unifiedCompleted, std::nullopt).normalized();
 
-    // Step C: Re-split using the origin map
+    // Step C: Re-split using originIsMemory_
     std::deque<TimeDuration> historyDurations;
     std::deque<TimeDuration> currentMemoryDurations;
     std::deque<TimeDuration> currentSessionDurations;
 
     for (const auto& d : normalised.completed()) {
-        auto it = originIsMemory.find(d.segment_id.toString());
+        auto it = originIsMemory_.find(d.segment_id.toString());
         // normalized() only carries existing segment_ids forward — this should never fire.
-        Q_ASSERT(it != originIsMemory.end());
-        const bool isMemory = (it == originIsMemory.end()) ? true : it.value();
+        Q_ASSERT(it != originIsMemory_.end());
+        const bool isMemory = (it == originIsMemory_.end()) ? true : it.value();
         if (isMemory) {
             currentMemoryDurations.push_back(d);
             currentSessionDurations.push_back(d);
@@ -663,15 +637,19 @@ void HistoryDialog::onSplitRow()
         DurationType firstType = dlg.getFirstSegmentType();
         DurationType secondType = dlg.getSecondSegmentType();
 
-        // Perform the split via pure Timeline operation
+        // Capture the original segment_id before the split.
+        const QString origId = completed[row].segment_id.toString();
+        const bool wasMemory = originIsMemory_.value(origId, true);
+        const size_t prevSize = completed.size();
+
         pendingTimelines_[idx] = pendingTimelines_[idx].withSplit(
             static_cast<size_t>(row), dlg.getSplitTime(), firstType, secondType);
 
-        // Update isMemoryRow_: insert entry for second half with same value as first
-        bool wasMemory = isMemoryRow_[idx][static_cast<size_t>(row)];
-        isMemoryRow_[idx].insert(isMemoryRow_[idx].begin() + row + 1, wasMemory);
-
-        assertPendingOriginsInvariant();
+        // Register the second-half's new segment_id with the same origin as the first.
+        // Only if the split actually happened (size grew by 1).
+        const auto& newComp = pendingTimelines_[idx].completed();
+        if (newComp.size() > prevSize && row + 1 < static_cast<int>(newComp.size()))
+            originIsMemory_.insert(newComp[row + 1].segment_id.toString(), wasMemory);
 
         updateTable(idx);
     }
@@ -812,8 +790,6 @@ HistoryDialog::~HistoryDialog() {
     }
 
     pendingTimelines_.clear();
-    isMemoryRow_.clear();
-    assertPendingOriginsInvariant();
 
     // Resume checkpoints now that dialog is closed
     timetracker_.endExclusiveEdit();

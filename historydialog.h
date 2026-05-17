@@ -4,6 +4,7 @@
 #include <QDialog>
 #include <QDate>
 #include <QMap>
+#include <QHash>
 #include <optional>
 #include <vector>
 #include <deque>
@@ -35,7 +36,7 @@ private:
     const Settings& settings_;
     std::vector<Page> pages_;
     std::vector<Timeline> pendingTimelines_;
-    std::vector<std::vector<bool>> isMemoryRow_;  // true = originated from session_.durations
+    QHash<QString, bool> originIsMemory_;  // segment_id.toString() → true if memory row
     uint pageIndex_;
     int contextMenuRow_ = -1;
     int contextMenuPage_ = -1;
@@ -50,7 +51,6 @@ private:
     void createPages();
     void updateTotalsLabel(uint idx);
     void updateTable(uint idx);
-    void assertPendingOriginsInvariant() const;
     void saveChanges();
     void showContextMenu(const QPoint& pos);
     QString buildLoadReconciliationMessage() const;
