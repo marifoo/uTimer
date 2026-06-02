@@ -52,6 +52,8 @@ private slots:
 
     void test_saveChanges_deduplicates_cross_bucket_overlaps();
     void test_saveChanges_noop_save_unchanged();
+    void test_H3_ongoing_type_edit_preserved_when_engine_stops();
+    void test_H4_overlap_cancel_aborts_save();
 };
 
 #endif // TEST_HISTORYDIALOG_H

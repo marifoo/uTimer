@@ -956,6 +956,17 @@ void HistoryDialogTest::test_saveChanges_deduplicates_cross_bucket_overlaps()
 
     HistoryDialog dialog(tracker, settings);
     dialog.done(QDialog::Accepted);
+
+    // H4: confirm the overlap-merge dialog
+    QTimer::singleShot(0, []() {
+        for (QWidget* widget : QApplication::topLevelWidgets()) {
+            auto* mb = qobject_cast<QMessageBox*>(widget);
+            if (mb && mb->windowTitle() == "Overlapping Segments") {
+                mb->button(QMessageBox::Yes)->click();
+                return;
+            }
+        }
+    });
     dialog.saveChanges();
 
     // Read back DB and verify exactly one Activity row covering 10:00-10:45
@@ -1040,4 +1051,106 @@ void HistoryDialogTest::test_saveChanges_noop_save_unchanged()
         sqlDb.close();
     }
     QSqlDatabase::removeDatabase(connName);
+}
+
+void HistoryDialogTest::test_H3_ongoing_type_edit_preserved_when_engine_stops()
+{
+    // H3 bug scenario: engine is still running when saveChanges() is called.
+    // Without the ongoingRowModified_ guard, saveChanges() would refresh the
+    // ongoing end-time from the engine and overwrite the user's Pause edit back
+    // to Activity (the engine's type). With the guard, the user's edit wins.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(20);
+
+    HistoryDialog dialog(tracker, settings);
+    QVERIFY(dialog.pendingTimelines_[0].ongoing().has_value());
+    QCOMPARE(dialog.pendingTimelines_[0].ongoing()->type, DurationType::Activity);
+
+    // User edits ongoing type to Pause
+    auto ongoing = dialog.pendingTimelines_[0].ongoing().value();
+    ongoing.type = DurationType::Pause;
+    dialog.pendingTimelines_[0] = Timeline(dialog.pendingTimelines_[0].completed(), ongoing);
+    dialog.ongoingRowModified_ = true;
+
+    // Engine is still running (Activity mode) — saveChanges() would overwrite type to Activity
+    // without the H3 guard (ongoingRowModified_ == true).
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
+
+    dialog.done(QDialog::Accepted);
+    dialog.saveChanges();
+
+    // H3: user's Pause type is preserved in the DB (unfinalized row), not overwritten
+    // by the engine's Activity type refresh.
+    const QString connName = "historydialog_h3_check";
+    {
+        QSqlDatabase sqlDb = QSqlDatabase::addDatabase("QSQLITE", connName);
+        sqlDb.setDatabaseName(db_path_);
+        QVERIFY(sqlDb.open());
+        QSqlQuery q(sqlDb);
+        QVERIFY(q.exec("SELECT type FROM durations WHERE is_finalized = 0"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), static_cast<int>(DurationType::Pause));
+        sqlDb.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+}
+
+void HistoryDialogTest::test_H4_overlap_cancel_aborts_save()
+{
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    const QDate today = QDate::currentDate();
+    const QDateTime dbStart(today, QTime(11, 0, 0), Qt::UTC);
+    const QDateTime dbEnd(today, QTime(11, 30, 0), Qt::UTC);
+    const QDateTime memStart(today, QTime(11, 15, 0), Qt::UTC);
+    const QDateTime memEnd(today, QTime(11, 45, 0), Qt::UTC);
+
+    std::deque<TimeDuration> dbDurations;
+    dbDurations.emplace_back(DurationType::Activity, dbStart, dbEnd);
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+
+    HistoryDialog dialog(tracker, settings);
+
+    QTimer::singleShot(0, []() {
+        for (QWidget* widget : QApplication::topLevelWidgets()) {
+            auto* mb = qobject_cast<QMessageBox*>(widget);
+            if (mb && mb->windowTitle() == "Overlapping Segments") {
+                mb->button(QMessageBox::No)->click();
+                return;
+            }
+        }
+    });
+
+    dialog.done(QDialog::Accepted);
+    dialog.saveChanges();
+
+    // H4: save aborted — DB should still have exactly 1 finalized row (original)
+    const QString connName = "historydialog_h4_cancel";
+    {
+        QSqlDatabase sqlDb = QSqlDatabase::addDatabase("QSQLITE", connName);
+        sqlDb.setDatabaseName(db_path_);
+        QVERIFY(sqlDb.open());
+        QSqlQuery q(sqlDb);
+        QVERIFY(q.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 1"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 1);
+        sqlDb.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    // Timer session unchanged: still has 1 memory row
+    QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(1));
 }

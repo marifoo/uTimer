@@ -403,8 +403,23 @@ void HistoryDialog::updateTable(uint idx)
 
         QCheckBox* box = new QCheckBox(table_);
         box->setChecked(og.type == DurationType::Activity);
-        box->setEnabled(false);
+        box->setEnabled(true);
         table_->setCellWidget(row, 3, box);
+
+        connect(box, &QCheckBox::stateChanged, this, [this, capturedPageIdx = idx, displayRow = row](int state) {
+            if (capturedPageIdx != pageIndex_) return;
+            if (!pendingTimelines_[capturedPageIdx].ongoing().has_value()) return;
+            DurationType newType = (state == Qt::Checked) ? DurationType::Activity : DurationType::Pause;
+            auto ongoing = pendingTimelines_[capturedPageIdx].ongoing().value();
+            ongoing.type = newType;
+            pendingTimelines_[capturedPageIdx] = Timeline(pendingTimelines_[capturedPageIdx].completed(), ongoing);
+            ongoingRowModified_ = true;
+            const QString ts = newType == DurationType::Activity ? "Activity  " : "Pause  ";
+            if (table_->item(displayRow, 0)) {
+                table_->item(displayRow, 0)->setText(ts);
+                updateTotalsLabel(capturedPageIdx);
+            }
+        });
     }
 
     // Update navigation button states
@@ -447,10 +462,8 @@ void HistoryDialog::saveChanges()
         return;
     }
 
-    // Refresh ongoing end-time from engine (Issue 8 / Issue 3 Layer C).
-    // Skip if the user explicitly edited the ongoing slot — a rotated
-    // segment_id (e.g. after a split) signals a deliberate edit.
-    if (!pendingTimelines_.empty() && pages_[0].isCurrent) {
+    // Refresh ongoing end-time from engine unless the user edited the ongoing row.
+    if (!ongoingRowModified_ && !pendingTimelines_.empty() && pages_[0].isCurrent) {
         const auto fresh = timetracker_.getOngoingDuration();
         const auto& cur  = pendingTimelines_[0].ongoing();
         const bool stillSameOngoing =
@@ -480,8 +493,17 @@ void HistoryDialog::saveChanges()
             ongoingDurationForSave = pendingTimelines_[i].ongoing();
     }
 
-    // Step B: Normalize once across all buckets
+    // Step B: Normalize once across all buckets; confirm if merges will occur (H4).
+    const size_t preNormalizeSize = unifiedCompleted.size();
     Timeline normalised = Timeline(unifiedCompleted, std::nullopt).normalized();
+    if (normalised.completed().size() < preNormalizeSize) {
+        const auto answer = QMessageBox::question(this, "Overlapping Segments",
+            "Overlapping segments were detected and will be merged. Continue?",
+            QMessageBox::Yes | QMessageBox::No);
+        if (answer != QMessageBox::Yes) {
+            return;
+        }
+    }
 
     // Step C: Re-split using originIsMemory_
     std::deque<TimeDuration> historyDurations;

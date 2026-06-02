@@ -37,6 +37,7 @@ private:
     std::vector<Page> pages_;
     std::vector<Timeline> pendingTimelines_;
     QHash<QString, bool> originIsMemory_;  // segment_id.toString() → true if memory row
+    bool ongoingRowModified_ = false;
     uint pageIndex_;
     int contextMenuRow_ = -1;
     int contextMenuPage_ = -1;
