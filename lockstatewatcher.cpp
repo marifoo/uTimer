@@ -40,8 +40,21 @@ struct ScopedLibrary {
 #endif
 
 #ifdef Q_OS_LINUX
+#include <QDBusConnection>
+#include <QDBusInterface>
 #include <QDBusMessage>
 #include <QDBusVariant>
+#include <optional>
+
+namespace {
+enum class LinuxLockMethod {
+	SystemdLogind,
+	FreedesktopScreenSaver,
+	GnomeScreenSaver,
+	KdeScreenSaver
+};
+static std::optional<LinuxLockMethod> linux_lock_method_;
+} // namespace
 #endif
 
 LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent)

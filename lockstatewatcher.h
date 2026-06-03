@@ -5,19 +5,12 @@
 #include <QElapsedTimer>
 #include <deque>
 #include <memory>
-#include <optional>
 #include <QString>
 #include "settings.h"
 #include "types.h"
 
 #ifdef Q_OS_WIN
 #include <Windows.h>
-#endif
-
-#ifdef Q_OS_LINUX
-#include <QDBusConnection>
-#include <QDBusInterface>
-#include <QDBusReply>
 #endif
 
 
@@ -33,13 +26,6 @@ private:
 	const std::deque<bool> buffer_for_unlock;
 
 #ifdef Q_OS_LINUX
-	enum class LinuxLockMethod {
-		SystemdLogind,
-		FreedesktopScreenSaver,
-		GnomeScreenSaver,
-		KdeScreenSaver
-	};
-	std::optional<LinuxLockMethod> linux_lock_method_;
 	bool initializeLinuxLockDetection();
 	bool querySystemdLogind();
 	bool queryScreenSaverDBus(const QString &service, const QString &path, const QString &interface);
