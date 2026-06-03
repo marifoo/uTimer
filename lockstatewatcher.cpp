@@ -53,7 +53,7 @@ enum class LinuxLockMethod {
 	GnomeScreenSaver,
 	KdeScreenSaver
 };
-static std::optional<LinuxLockMethod> linux_lock_method_; // single instance assumed (constructed once by MainWin)
+static std::optional<LinuxLockMethod> linux_lock_method_; // single instance assumed (constructed once in main())
 } // namespace
 #endif
 
