@@ -48,6 +48,16 @@ MainWin::MainWin(Settings& settings, Timer& timetracker, SessionStore& db,
 		content_widget_->setGUItoStop();
 	});
 
+	// Engine-driven start/pause: GUI follows the engine's confirmed transitions.
+	connect(&timetracker_, &Timer::started,
+	        this, [this](bool fromPause) {
+		content_widget_->setGUItoActivity(fromPause);
+	});
+	connect(&timetracker_, &Timer::paused,
+	        this, [this]() {
+		content_widget_->setGUItoPause();
+	});
+
 	// Engine-driven autopause/autoresume: sync GUI when lock events cause transitions.
 	connect(&timetracker_, &Timer::modeChanged,
 	        this, [this](Timer::PauseCause cause) {

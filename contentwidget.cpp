@@ -149,10 +149,8 @@ void ContentWidget::applyStartupSettingsToGui()
 void ContentWidget::pressedStartPauseButton()
 {
 	if (timetracker_.isActive()) {
-		setGUItoPause();
 		emit pressedButton(Button::Pause);
 	} else {
-		setGUItoActivity(timetracker_.isPaused());
 		emit pressedButton(Button::Start);
 	}
 }

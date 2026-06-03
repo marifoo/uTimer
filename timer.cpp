@@ -430,6 +430,7 @@ void Timer::startTimer(const QDateTime& now)
         }
         day_boundary_watcher_.armScheduledStop(now);
         Logger::Log("[TIMER] > Timer unpaused");
+        emit started(true);
         return;
     }
     if (mode_ == Mode::None) {
@@ -505,6 +506,7 @@ void Timer::startTimer(const QDateTime& now)
         }
         day_boundary_watcher_.armScheduledStop(now);
         Logger::Log("[TIMER] >> Timer started");
+        emit started(false);
         return;
     }
     Logger::Log("[DEBUG] Trying to Start Timer from Mode Activity - D=" + QString::number(session_.durations.size()));
@@ -526,6 +528,7 @@ void Timer::pauseTimer(const QDateTime& now)
     session_.beginNewSegment(now);
     checkpointTimer_.stop();
     Logger::Log("[TIMER] Timer paused <");
+    emit paused();
 }
 
 /**

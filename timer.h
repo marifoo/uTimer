@@ -286,6 +286,13 @@ public slots:
 signals:
     void userWarning(const QString& text);
     void stopped(Timer::StopReason reason);
+    /// Emitted after a successful None→Activity or Pause→Activity transition.
+    /// fromPause is true when the previous mode was Pause (resume), false for a
+    /// fresh start from None.
+    void started(bool fromPause);
+    /// Emitted after a successful Activity→Pause transition (user-driven only;
+    /// lock-driven autopause is covered by modeChanged(LockAutopause)).
+    void paused();
     /// Emitted when a lock-driven autopause or autoresume occurs so the GUI
     /// can follow without maintaining its own was_active_before_autopause_ flag.
     void modeChanged(Timer::PauseCause cause);
