@@ -1106,12 +1106,11 @@ bool Timer::discardCrossMidnightOngoingAndStop(const QDateTime& now)
         }
     }
 
-    mode_ = Mode::None;
-    session_.clearSegment();
-    checkpointTimer_.stop();
-    day_boundary_watcher_.cancel();
-    was_active_before_autopause_ = false;
-    emit stopped(StopReason::MidnightWatchdog);
+    // Reuse stopTimer for teardown. The cross-midnight ongoing segment is
+    // silently discarded by addDuration (TimeDuration::create rejects it).
+    // durations is already empty (or marked unsaved above), so the
+    // updateDurationsInDB call inside stopTimer is a no-op.
+    stopTimer(now, StopReason::MidnightWatchdog);
     return true;
 }
 
