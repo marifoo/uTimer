@@ -168,7 +168,7 @@ LockEvent LockStateWatcher::determineLockEvent(bool session_locked)
  * 1. Query current lock state via platform-specific isSessionLocked()
  * 2. Feed state into debounce buffer via determineLockEvent()
  * 3. On Lock: Start lock_timer_, emit Lock event
- * 4. On Unlock: Emit Unlock event (only if autopause enabled)
+ * 4. On Unlock: Emit Unlock event
  * 5. While locked: Check if lock_timer_ exceeded threshold → emit LongOngoingLock
  *
  * The lock_timer_ is invalidated after emitting LongOngoingLock to prevent
@@ -196,8 +196,7 @@ void LockStateWatcher::update()
 			Logger::Log("[LOCK] Current Lock Duration = " + QString::number(lock_timer_.elapsed()) + "ms");
 		lock_timer_.invalidate();
 		Logger::Log("[LOCK] Ongoing Lock is long enough to be counted as a Pause");
-		if (settings_.isAutopauseEnabled())
-			emit desktopLockEvent(LockEvent::LongOngoingLock);
+		emit desktopLockEvent(LockEvent::LongOngoingLock);
 	}
 }
 
