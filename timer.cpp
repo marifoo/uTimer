@@ -388,6 +388,51 @@ Timer::~Timer()
 }
 
 /**
+ * Retries saving previously unsaved durations at the start of a new session.
+ *
+ * Three outcomes:
+ * - Success: clears unsaved state, returns true (startTimer continues)
+ * - FatalError/CallerBug: returns false (startTimer aborts)
+ * - TransientError: increments retry counter; returns false if max retries
+ *   reached (abort with warning), returns true otherwise (warn-and-continue)
+ */
+bool Timer::retryUnsavedDurations()
+{
+    // Use unsaved_durations if present to keep retries idempotent.
+    const std::deque<TimeDuration>& retry_source = session_.unsaved_durations.empty() ? session_.durations : session_.unsaved_durations;
+    if (!session_.has_unsaved_data || retry_source.empty()) {
+        return true;
+    }
+
+    Logger::Log("[DB] Retrying save of previously unsaved durations");
+    const SessionStoreResult retryResult = appendDurationsChunkToDB(retry_source);
+    if (retryResult.ok()) {
+        session_.clearUnsaved();
+        session_.consecutive_retry_failures = 0;
+        Logger::Log("[DB] Previously unsaved durations saved successfully");
+        return true;
+    }
+    if (retryResult.category == SessionStoreResult::FatalError
+        || retryResult.category == SessionStoreResult::CallerBug) {
+        // Already handled by handleDbResult inside appendDurationsChunkToDB
+        if (retryResult.category == SessionStoreResult::FatalError)
+            session_.consecutive_retry_failures = 3;
+        return false;
+    }
+    // TransientError
+    session_.consecutive_retry_failures++;
+    Logger::Log(QString("[DB] CRITICAL: Retry save failed (consecutive=%1) - unsaved data retained")
+        .arg(session_.consecutive_retry_failures));
+    if (session_.consecutive_retry_failures >= 3) {
+        emit userWarning("Repeated save failures (" + QString::number(session_.consecutive_retry_failures) +
+                         " consecutive). Please check your storage, then restart the application to retry.");
+        return false;
+    }
+    emit userWarning("Could not save previous session data. It is kept in memory and will be retried.");
+    return true;
+}
+
+/**
  * Transitions timer to Activity mode. Behavior depends on current state:
  * - From Pause: Records pause duration, persists it immediately to DB for
  *   crash safety, then switches to Activity
@@ -438,39 +483,8 @@ void Timer::startTimer(const QDateTime& now)
     if (mode_ == Mode::None) {
         Logger::Log("[DEBUG] Starting Timer from Stopped - D=" + QString::number(session_.durations.size()));
 
-        bool retry_succeeded = true;
-
-        // Try to save any unsaved data from previous failed save attempt.
-        // Use unsaved_durations if present to keep retries idempotent.
-        const std::deque<TimeDuration>& retry_source = session_.unsaved_durations.empty() ? session_.durations : session_.unsaved_durations;
-        if (session_.has_unsaved_data && !retry_source.empty()) {
-            Logger::Log("[DB] Retrying save of previously unsaved durations");
-            const SessionStoreResult retryResult = appendDurationsChunkToDB(retry_source);
-            if (retryResult.ok()) {
-                session_.clearUnsaved();
-                session_.consecutive_retry_failures = 0;
-                Logger::Log("[DB] Previously unsaved durations saved successfully");
-            } else if (retryResult.category == SessionStoreResult::FatalError
-                       || retryResult.category == SessionStoreResult::CallerBug) {
-                // Already handled by handleDbResult inside appendDurationsChunkToDB
-                retry_succeeded = false;
-                if (retryResult.category == SessionStoreResult::FatalError)
-                    session_.consecutive_retry_failures = 3;
-                return;
-            } else {
-                // TransientError
-                retry_succeeded = false;
-                session_.consecutive_retry_failures++;
-                Logger::Log(QString("[DB] CRITICAL: Retry save failed (consecutive=%1) - unsaved data retained")
-                    .arg(session_.consecutive_retry_failures));
-                if (session_.consecutive_retry_failures >= 3) {
-                    emit userWarning("Repeated save failures (" + QString::number(session_.consecutive_retry_failures) +
-                                     " consecutive). Please check your storage, then restart the application to retry.");
-                    return;
-                }
-                emit userWarning("Could not save previous session data. It is kept in memory and will be retried.");
-            }
-        }
+        if (!retryUnsavedDurations()) return;
+        const bool retry_succeeded = !session_.has_unsaved_data;
 
         unsigned int boot_time_sec = settings_.getBootTimeSec();
         bool shouldAddBootTime = false;

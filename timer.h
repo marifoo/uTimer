@@ -201,6 +201,9 @@ private:
     /// named context.  Does NOT affect control flow — callers decide what to do
     /// after calling this.
     void handleDbResult(const SessionStoreResult& result, const QString& context);
+    // Retries saving previously unsaved durations at the start of a new session.
+    // Returns true if startTimer should continue, false if it should abort.
+    bool retryUnsavedDurations();
     qint64 reconcileOrphanCheckpoints(
         const std::deque<OrphanCheckpoint>& orphans,
         const std::optional<MarkerResult>& markerResult);
