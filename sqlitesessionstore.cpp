@@ -829,7 +829,7 @@ BackupResult SqliteSessionStore::createBackup(const std::deque<TimeDuration>& du
  * computes orphaned segment IDs, and delegates to updateDurationsById()
  * with the clean deque and orphan list. Callers never see removedSegmentIds.
  */
-bool SqliteSessionStore::commitSession(const Timeline& session)
+SessionStoreResult SqliteSessionStore::commitSession(const Timeline& session)
 {
     // Collect before-normalization segment IDs
     std::vector<SegmentId> beforeIds;
@@ -849,7 +849,9 @@ bool SqliteSessionStore::commitSession(const Timeline& session)
             orphanIds.push_back(id.toString());
     }
 
-    return updateDurationsById(normed.completed(), orphanIds);
+    return updateDurationsById(normed.completed(), orphanIds)
+        ? SessionStoreResult::success()
+        : SessionStoreResult::transient("updateDurationsById failed");
 }
 
 /**
@@ -1208,19 +1210,24 @@ EntriesForDateResult SqliteSessionStore::hasEntriesForDate(const QDate& date)
  * The caller (Timer) rotates current_checkpoint_segment_id_ on mode changes,
  * causing the next checkpoint to create a new row for the new segment.
  */
-bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const SegmentId& segmentId)
+SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const SegmentId& segmentId)
 {
     QMutexLocker locker(&db_mutex_);
     Q_UNUSED(duration)  // duration is computed from timestamps at load; not stored
 
+    if (segmentId.isEmpty()) {
+        Logger::Log("[DB] saveCheckpoint: empty segment_id — caller bug");
+        return SessionStoreResult::callerBug("saveCheckpoint called with empty segment_id");
+    }
+
     // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
-        return true;
+        return SessionStoreResult::success();
     }
 
     if (!ensureOpen()) {
         Logger::Log("[DB] Could not open DB to save checkpoint");
-        return false;
+        return SessionStoreResult::fatal("DB connection could not be opened");
     }
 
     const QString startUtcStr = startTime.toUTC().toString(Qt::ISODateWithMs);
@@ -1228,7 +1235,7 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
 
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting transaction for checkpoint: " + db.lastError().text());
-        return false;
+        return SessionStoreResult::transient("Failed to start checkpoint transaction: " + db.lastError().text());
     }
 
     bool success = false;
@@ -1243,7 +1250,7 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
     if (!updateQuery.exec()) {
         db.rollback();
         Logger::Log("[DB] Error updating checkpoint by segment_id: " + updateQuery.lastError().text());
-        return false;
+        return SessionStoreResult::transient("Failed to update checkpoint: " + updateQuery.lastError().text());
     }
 
     if (updateQuery.numRowsAffected() > 0) {
@@ -1265,7 +1272,7 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
         if (!insertQuery.exec()) {
             db.rollback();
             Logger::Log("[DB] Error inserting checkpoint by segment_id: " + insertQuery.lastError().text());
-            return false;
+            return SessionStoreResult::transient("Failed to insert checkpoint: " + insertQuery.lastError().text());
         }
 
         success = db.commit();
@@ -1280,7 +1287,9 @@ bool SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, cons
     }
 #endif
 
-    return success;
+    return success
+        ? SessionStoreResult::success()
+        : SessionStoreResult::transient("Checkpoint transaction commit failed: " + db.lastError().text());
 }
 
 /**

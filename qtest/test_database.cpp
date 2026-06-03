@@ -247,10 +247,10 @@ void DatabaseTest::test_checkpointPreservesStartTimeOnUpdateBySegmentId()
     QDateTime end2 = start.addSecs(15);
 
     const SegmentId checkpointSegmentId = SegmentId::mint();
-    QVERIFY(manager.saveCheckpoint(DurationType::Activity, start.msecsTo(end1), start, end1, checkpointSegmentId));
+    QVERIFY(manager.saveCheckpoint(DurationType::Activity, start.msecsTo(end1), start, end1, checkpointSegmentId).ok());
 
     QDateTime driftedStart = start.addSecs(3600);
-    QVERIFY(manager.saveCheckpoint(DurationType::Activity, start.msecsTo(end2), driftedStart, end2, checkpointSegmentId));
+    QVERIFY(manager.saveCheckpoint(DurationType::Activity, start.msecsTo(end2), driftedStart, end2, checkpointSegmentId).ok());
 
     const QString connName = "checkpoint_query";
     {
@@ -288,7 +288,7 @@ void DatabaseTest::test_clockDriftResilience_durationStoredFromElapsed()
 
     const SegmentId checkpointSegmentId = SegmentId::mint();
     // The elapsed parameter is ignored for storage; only start/end UTC matter.
-    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 120'000, start, end, checkpointSegmentId));
+    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 120'000, start, end, checkpointSegmentId).ok());
 
     const QString connName = "drift_query";
     {
@@ -464,11 +464,11 @@ void DatabaseTest::test_database_checkpoint_single_row_per_segment()
     const SegmentId segmentId = SegmentId::mint();
 
     // First checkpoint - creates new row
-    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, start, end, segmentId));
+    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, start, end, segmentId).ok());
 
     // Second checkpoint with same ID - should UPDATE existing row
     QDateTime newEnd = start.addSecs(20);
-    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 20000, start, newEnd, segmentId));
+    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 20000, start, newEnd, segmentId).ok());
 
     // Verify checkpoint row remains unfinalized and updated in place.
     QVERIFY(manager.ensureOpen());
@@ -496,7 +496,7 @@ void DatabaseTest::test_database_checkpoint_missing_segment_reinserts_same_segme
     const SegmentId segmentId = SegmentId::mint();
 
     // Create checkpoint
-    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, start, end, segmentId));
+    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, start, end, segmentId).ok());
 
     // Manually delete the checkpoint row (simulating retention cleanup)
     QVERIFY(manager.ensureOpen());
@@ -508,7 +508,7 @@ void DatabaseTest::test_database_checkpoint_missing_segment_reinserts_same_segme
 
     // Try to update checkpoint - should detect missing row and INSERT new one
     QDateTime newEnd = start.addSecs(20);
-    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 20000, start, newEnd, segmentId));
+    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 20000, start, newEnd, segmentId).ok());
 
     // Verify new checkpoint row exists as unfinalized
     QVERIFY(manager.ensureOpen());
@@ -536,11 +536,11 @@ void DatabaseTest::test_database_checkpoint_preserves_start_time()
     const SegmentId checkpointSegmentId = SegmentId::mint();
 
     // First checkpoint
-    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, originalStart, firstEnd, checkpointSegmentId));
+    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 10000, originalStart, firstEnd, checkpointSegmentId).ok());
 
     // Update checkpoint with new end time (simulate ongoing timer)
     QDateTime secondEnd = originalStart.addSecs(30);
-    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 30000, originalStart, secondEnd, checkpointSegmentId));
+    QVERIFY(manager.saveCheckpoint(DurationType::Activity, 30000, originalStart, secondEnd, checkpointSegmentId).ok());
 
     // Verify start_utc/end_utc are correct and the row is unfinalized.
     QVERIFY(manager.ensureOpen());
@@ -1558,11 +1558,11 @@ void DatabaseTest::test_T_commitSession_upserts_by_segment_id()
     segs.push_back(TimeDuration::fromTrusted(DurationType::Activity, now.addSecs(-60), now, segId));
 
     // First save
-    QVERIFY(manager.commitSession(Timeline(segs, std::nullopt)));
+    QVERIFY(manager.commitSession(Timeline(segs, std::nullopt)).ok());
 
     // Mutate the type and save again with the same segment_id
     segs.front().type = DurationType::Pause;
-    QVERIFY(manager.commitSession(Timeline(segs, std::nullopt)));
+    QVERIFY(manager.commitSession(Timeline(segs, std::nullopt)).ok());
 
     // Should have exactly one row
     auto loaded = manager.loadDurations();
@@ -1600,7 +1600,7 @@ void DatabaseTest::test_U_commitSession_orphan_cleanup_is_internal()
 
     // Now commitSession with the same two segments — commitSession normalizes
     // internally, merges them into one, and deletes the orphan (segB)
-    QVERIFY(manager.commitSession(Timeline(twoSegs, std::nullopt)));
+    QVERIFY(manager.commitSession(Timeline(twoSegs, std::nullopt)).ok());
 
     auto loaded = manager.loadDurations();
     QCOMPARE(static_cast<int>(loaded.size()), 1);
@@ -1677,7 +1677,7 @@ void DatabaseTest::test_W_backup_created_before_replaceAll_not_commitSession()
     int countAfterSeed = afterSeed.size();
 
     // commitSession should NOT create new backup files
-    QVERIFY(manager.commitSession(Timeline(segs, std::nullopt)));
+    QVERIFY(manager.commitSession(Timeline(segs, std::nullopt)).ok());
     QStringList afterCommit = appDir.entryList(QStringList() << "*.backup", QDir::Files);
     QCOMPARE(afterCommit.size(), countAfterSeed); // no new backup
 

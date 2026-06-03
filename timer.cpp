@@ -449,11 +449,25 @@ void Timer::startTimer(const QDateTime& now)
         const std::deque<TimeDuration>& retry_source = session_.unsaved_durations.empty() ? session_.durations : session_.unsaved_durations;
         if (session_.has_unsaved_data && !retry_source.empty()) {
             Logger::Log("[DB] Retrying save of previously unsaved durations");
-            if (appendDurationsChunkToDB(retry_source)) {
+            const SessionStoreResult retryResult = appendDurationsChunkToDB(retry_source);
+            if (retryResult.ok()) {
                 session_.clearUnsaved(settings_);
                 session_.consecutive_retry_failures = 0;
                 Logger::Log("[DB] Previously unsaved durations saved successfully");
+            } else if (retryResult.category == SessionStoreResult::FatalError) {
+                // FatalError already emitted userWarning in appendDurationsChunkToDB.
+                // Refuse new sessions by capping the retry counter.
+                retry_succeeded = false;
+                session_.consecutive_retry_failures = 3;
+                Logger::Log("[DB] CRITICAL: Fatal DB error on retry - refusing new session");
+                return;
+            } else if (retryResult.category == SessionStoreResult::CallerBug) {
+                // CallerBug: retrying won't help; log and abort without incrementing counter.
+                retry_succeeded = false;
+                Logger::Log("[DB] CRITICAL: Retry save caller bug - unsaved data retained");
+                return;
             } else {
+                // TransientError: increment counter and possibly warn.
                 retry_succeeded = false;
                 session_.consecutive_retry_failures++;
                 Logger::Log(QString("[DB] CRITICAL: Retry save failed (consecutive=%1) - unsaved data retained")
@@ -900,11 +914,21 @@ void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations
         return;
     }
 
-    db_.saveCheckpoint(seg.type,
-                       seg.duration,
-                       seg.startTime,
-                       seg.endTime,
-                       session_.id_tracker.current);
+    const SessionStoreResult cpResult = db_.saveCheckpoint(seg.type,
+                                                           seg.duration,
+                                                           seg.startTime,
+                                                           seg.endTime,
+                                                           session_.id_tracker.current);
+    if (cpResult.ok()) {
+        // success — nothing to do
+    } else if (cpResult.category == SessionStoreResult::CallerBug) {
+        Logger::Log("[CHECKPOINT] replaceCurrentDurations: saveCheckpoint caller bug: " + cpResult.message);
+    } else if (cpResult.category == SessionStoreResult::FatalError) {
+        Logger::Log("[CHECKPOINT] replaceCurrentDurations: Fatal DB error saving checkpoint: " + cpResult.message);
+        emit userWarning("Database error while saving checkpoint: " + cpResult.message);
+    } else {
+        Logger::Log("[CHECKPOINT] replaceCurrentDurations: saveCheckpoint failed: " + cpResult.message);
+    }
 #ifndef QT_NO_DEBUG
     checkDurationInvariants();
 #endif
@@ -967,14 +991,20 @@ bool Timer::canMarkCleanShutdown() const
 
 bool Timer::appendDurationsToDB()
 {
-    return appendDurationsChunkToDB(session_.durations);
+    return appendDurationsChunkToDB(session_.durations).ok();
 }
 
-bool Timer::appendDurationsChunkToDB(const std::deque<TimeDuration>& durations)
+SessionStoreResult Timer::appendDurationsChunkToDB(const std::deque<TimeDuration>& durations)
 {
     if (durations.empty())
-        return true;
-    return db_.commitSession(Timeline(durations, std::nullopt));
+        return SessionStoreResult::success();
+    const SessionStoreResult result = db_.commitSession(Timeline(durations, std::nullopt));
+    if (result.category == SessionStoreResult::CallerBug) {
+        Logger::Log("[DB] CRITICAL: commitSession caller bug: " + result.message);
+    } else if (result.category == SessionStoreResult::FatalError) {
+        emit userWarning("Database error: " + result.message);
+    }
+    return result;
 }
 
 bool Timer::updateDurationsInDB()
@@ -983,7 +1013,13 @@ bool Timer::updateDurationsInDB()
         session_.clearUnsaved(settings_);
         return true;
     }
-    bool ok = db_.commitSession(Timeline(session_.durations, std::nullopt));
+    const SessionStoreResult result = db_.commitSession(Timeline(session_.durations, std::nullopt));
+    if (result.category == SessionStoreResult::CallerBug) {
+        Logger::Log("[DB] CRITICAL: commitSession caller bug: " + result.message);
+    } else if (result.category == SessionStoreResult::FatalError) {
+        emit userWarning("Database error: " + result.message);
+    }
+    const bool ok = result.ok();
 #ifndef QT_NO_DEBUG
     if (ok) {
         checkCrossLayerInvariants();
@@ -1127,15 +1163,20 @@ void Timer::saveCheckpointInternal(const QDateTime& now)
     if (session_.id_tracker.current.isEmpty()) {
         session_.beginNewSegment(session_.segment_start_time, settings_);
     }
-    bool success = db_.saveCheckpoint(type, wallClockMs, session_.segment_start_time, now, session_.id_tracker.current);
+    const SessionStoreResult result = db_.saveCheckpoint(type, wallClockMs, session_.segment_start_time, now, session_.id_tracker.current);
 
-    if (success) {
+    if (result.ok()) {
         Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms, SegmentId: %3")
             .arg(type == DurationType::Activity ? "Activity" : "Pause")
             .arg(wallClockMs)
             .arg(session_.id_tracker.current.toString()));
+    } else if (result.category == SessionStoreResult::CallerBug) {
+        Logger::Log("[CHECKPOINT] CRITICAL: saveCheckpoint caller bug: " + result.message);
+    } else if (result.category == SessionStoreResult::FatalError) {
+        Logger::Log("[CHECKPOINT] Fatal DB error saving checkpoint: " + result.message);
+        emit userWarning("Database error while saving checkpoint: " + result.message);
     } else {
-        Logger::Log("[CHECKPOINT] Failed to save checkpoint to database");
+        Logger::Log("[CHECKPOINT] Failed to save checkpoint to database: " + result.message);
     }
 }
 

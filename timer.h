@@ -197,7 +197,7 @@ private:
     bool discardCrossMidnightOngoingAndStop(const QDateTime& now);
     EntriesForDateResult hasEntriesForDate(const QDate& date);
     void saveCheckpointInternal(const QDateTime& now);  // Internal checkpoint save (called when mutex already held)
-    bool appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
+    SessionStoreResult appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
     qint64 reconcileOrphanCheckpoints(
         const std::deque<OrphanCheckpoint>& orphans,
         const std::optional<MarkerResult>& markerResult);

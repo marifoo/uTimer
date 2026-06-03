@@ -19,6 +19,7 @@
 #define SESSIONSTORE_H
 
 #include <QDateTime>
+#include <QString>
 #include <deque>
 #include <optional>
 #include <vector>
@@ -96,19 +97,44 @@ struct MarkerResult {
     Status status = Status::NotFound;
 };
 
+/**
+ * Typed result returned by SessionStore operations that write to the database.
+ *
+ * Category semantics:
+ *   Success       — operation completed successfully.
+ *   TransientError — a recoverable failure (e.g. SQL execution error); the
+ *                   caller may retry.
+ *   CallerBug     — invalid input supplied by the caller (e.g. empty segment_id);
+ *                   retrying with the same arguments will not help. Log as critical.
+ *   FatalError    — unrecoverable failure (e.g. DB connection lost); the caller
+ *                   should emit a user warning and refuse new sessions.
+ */
+struct SessionStoreResult {
+    enum Category { Success, TransientError, CallerBug, FatalError };
+    Category category;
+    QString message;
+    bool ok() const { return category == Success; }
+    static SessionStoreResult success() { return {Success, {}}; }
+    static SessionStoreResult transient(QString msg) { return {TransientError, std::move(msg)}; }
+    static SessionStoreResult callerBug(QString msg) { return {CallerBug, std::move(msg)}; }
+    static SessionStoreResult fatal(QString msg) { return {FatalError, std::move(msg)}; }
+};
+
 class SessionStore
 {
 public:
     virtual ~SessionStore() = default;
 
-    virtual bool commitSession(const Timeline& session) = 0;
+    /// @pre All segment_ids in the timeline must be non-empty
+    virtual SessionStoreResult commitSession(const Timeline& session) = 0;
     virtual bool replaceAll(const Timeline& history, const Timeline& session) = 0;
     virtual LoadResult loadDurations() = 0;
     // Returns Yes iff at least one finalised row's end falls on `localDate`
     // interpreted in the system local time zone.
     virtual EntriesForDateResult hasEntriesForDate(const QDate& localDate) = 0;
-    virtual bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
-                                const QDateTime& endTime, const SegmentId& segmentId) = 0;
+    /// @pre segmentId must be non-empty
+    virtual SessionStoreResult saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
+                                              const QDateTime& endTime, const SegmentId& segmentId) = 0;
     virtual bool checkSchemaOnStartup() = 0;
     virtual void flushToDisc() = 0;
     virtual std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() = 0;

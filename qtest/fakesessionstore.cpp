@@ -12,10 +12,10 @@ FakeSessionStore::FakeSessionStore()
 {
 }
 
-bool FakeSessionStore::commitSession(const Timeline& session)
+SessionStoreResult FakeSessionStore::commitSession(const Timeline& session)
 {
     callLog.append("commitSession");
-    if (commitSessionResult) {
+    if (commitSessionResult.ok()) {
         // Mirror SqliteSessionStore: normalize internally, compute orphans, then upsert.
         std::vector<SegmentId> beforeIds;
         for (const auto& d : session.completed())
@@ -91,11 +91,14 @@ EntriesForDateResult FakeSessionStore::hasEntriesForDate(const QDate& /*date*/)
     return entriesForDateResult;
 }
 
-bool FakeSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
-                                          const QDateTime& endTime, const SegmentId& segmentId)
+SessionStoreResult FakeSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
+                                                     const QDateTime& endTime, const SegmentId& segmentId)
 {
     callLog.append("saveCheckpoint");
-    if (saveCheckpointResult) {
+    if (segmentId.isEmpty()) {
+        return SessionStoreResult::callerBug("empty segment_id");
+    }
+    if (saveCheckpointResult.ok()) {
         // Check whether this segment_id already has a checkpoint record.
         // Multiple saves for the same segment_id are expected (it is an upsert/update),
         // so we allow them — we only assert that no *different* finalized row already owns this id.

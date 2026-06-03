@@ -40,11 +40,11 @@ public:
     explicit SqliteSessionStore(const Settings& settings, QObject *parent = nullptr);
     ~SqliteSessionStore();
 
-    bool commitSession(const Timeline& session) override;
+    SessionStoreResult commitSession(const Timeline& session) override;
     bool replaceAll(const Timeline& history, const Timeline& session) override;
     LoadResult loadDurations() override;
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
-    bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const SegmentId& segmentId) override;
+    SessionStoreResult saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const SegmentId& segmentId) override;
     bool checkSchemaOnStartup() override;
     void flushToDisc() override;
     std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;

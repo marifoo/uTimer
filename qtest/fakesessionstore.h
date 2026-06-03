@@ -32,12 +32,12 @@ public:
 
     // ---- SessionStore interface ----
 
-    bool commitSession(const Timeline& session) override;
+    SessionStoreResult commitSession(const Timeline& session) override;
     bool replaceAll(const Timeline& history, const Timeline& session) override;
     LoadResult loadDurations() override;
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
-    bool saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
-                        const QDateTime& endTime, const SegmentId& segmentId) override;
+    SessionStoreResult saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
+                                      const QDateTime& endTime, const SegmentId& segmentId) override;
     bool checkSchemaOnStartup() override;
     void flushToDisc() override;
     std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
@@ -69,9 +69,9 @@ public:
 
     // ---- Configurable return values ----
 
-    bool commitSessionResult = true;
+    SessionStoreResult commitSessionResult = SessionStoreResult::success();
     bool replaceDurationsResult = true;
-    bool saveCheckpointResult = true;
+    SessionStoreResult saveCheckpointResult = SessionStoreResult::success();
     bool checkSchemaResult = true;
     bool reconcileResult = true;
     bool setMarkerResult = true;
