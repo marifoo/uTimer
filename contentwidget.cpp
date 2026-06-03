@@ -41,6 +41,20 @@ ContentWidget::ContentWidget(Settings & settings, Timer &timetracker, QWidget *p
 	QObject::connect(pintotop_button_, SIGNAL(clicked()), this, SLOT(pressedPinToTopButton()));
 	QObject::connect(autopause_button_, SIGNAL(clicked()), this, SLOT(pressedAutoPauseButton()));
 	QObject::connect(show_history_button_, SIGNAL(clicked()), this, SLOT(pressedShowHistoryButton()));
+
+	connect(&timetracker_, &Timer::stopped,
+	        this, [this](Timer::StopReason) { setGUItoStop(); });
+	connect(&timetracker_, &Timer::started,
+	        this, [this](bool fromPause) { setGUItoActivity(fromPause); });
+	connect(&timetracker_, &Timer::paused,
+	        this, [this]() { setGUItoPause(); });
+	connect(&timetracker_, &Timer::modeChanged,
+	        this, [this](Timer::PauseCause cause) {
+		if (cause == Timer::PauseCause::LockAutopause)
+			setGUItoPause();
+		else if (cause == Timer::PauseCause::LockResume)
+			setGUItoActivity(true);
+	});
 }
 
 void ContentWidget::setupGUI()

@@ -41,32 +41,6 @@ MainWin::MainWin(Settings& settings, Timer& timetracker, SessionStore& db,
 	setWindowFlags(windowFlags() &(~Qt::WindowMaximizeButtonHint));
 
 	connect(health_monitor_, &HealthMonitor::warningTriggered, this, &MainWin::showMsgBox);
-
-	// Engine-driven stop: sync GUI immediately when the engine stops.
-	connect(&timetracker_, &Timer::stopped,
-	        this, [this](Timer::StopReason) {
-		content_widget_->setGUItoStop();
-	});
-
-	// Engine-driven start/pause: GUI follows the engine's confirmed transitions.
-	connect(&timetracker_, &Timer::started,
-	        this, [this](bool fromPause) {
-		content_widget_->setGUItoActivity(fromPause);
-	});
-	connect(&timetracker_, &Timer::paused,
-	        this, [this]() {
-		content_widget_->setGUItoPause();
-	});
-
-	// Engine-driven autopause/autoresume: sync GUI when lock events cause transitions.
-	connect(&timetracker_, &Timer::modeChanged,
-	        this, [this](Timer::PauseCause cause) {
-		if (cause == Timer::PauseCause::LockAutopause) {
-			content_widget_->setGUItoPause();
-		} else if (cause == Timer::PauseCause::LockResume) {
-			content_widget_->setGUItoActivity(true);
-		}
-	});
 }
 
 void MainWin::setupCentralWidget(Settings& settings, Timer& timetracker)
@@ -227,8 +201,6 @@ void MainWin::start()
 void MainWin::shutdown(bool force_direct)
 {
 	shutdown_coordinator_.run(force_direct);
-	// GUI sync stays in MainWin: coordinator has no ContentWidget dependency
-	content_widget_->setGUItoStop();
 }
 
 void MainWin::onAboutToQuit()

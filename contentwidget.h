@@ -71,6 +71,8 @@ public slots:
 	void pressedPinToTopButton();
 	void pressedAutoPauseButton();
 	void pressedShowHistoryButton();
+
+private slots:
 	void setGUItoActivity(bool wasPaused = false);
 	void setGUItoStop();
 	void setGUItoPause();
