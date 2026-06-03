@@ -148,11 +148,11 @@ void ContentWidget::applyStartupSettingsToGui()
 
 void ContentWidget::pressedStartPauseButton()
 {
-	if (gui_mode_ == GuiMode::Activity) {
+	if (timetracker_.isActive()) {
 		setGUItoPause();
 		emit pressedButton(Button::Pause);
 	} else {
-		setGUItoActivity();
+		setGUItoActivity(timetracker_.isPaused());
 		emit pressedButton(Button::Start);
 	}
 }
@@ -209,22 +209,21 @@ void ContentWidget::resetPauseTimeTooltip()
 	pause_time_->setToolTip("");
 }
 
-void ContentWidget::manageTooltipsForActivity()
+void ContentWidget::manageTooltipsForActivity(bool wasPaused)
 {
-	if (gui_mode_ == GuiMode::Stopped) {
+	if (!wasPaused) {
 		activity_time_tooltip_base_ = "h overall since " + QTime::currentTime().toString("HH:mm") + " o'clock";
 		setActivityTimeTooltip();
 		resetPauseTimeTooltip();
 		starttime_value_->setText(QTime::currentTime().toString("HH:mm"));
-	} else if (gui_mode_ == GuiMode::Pause) {
+	} else {
 		setPauseTimeTooltip();
 	}
 }
 
-void ContentWidget::setGUItoActivity()
+void ContentWidget::setGUItoActivity(bool wasPaused)
 {
-	manageTooltipsForActivity();
-	gui_mode_ = GuiMode::Activity;
+	manageTooltipsForActivity(wasPaused);
 
 	startpause_button_->setText("PAUSE");
 	activity_time_->setStyleSheet("QLabel {color : green; }");
@@ -233,7 +232,6 @@ void ContentWidget::setGUItoActivity()
 
 void ContentWidget::setGUItoStop()
 {
-	gui_mode_ = GuiMode::Stopped;
 	startpause_button_->setText("START");
 	activity_time_->setStyleSheet("QLabel {color : black; }");
 	pause_time_->setStyleSheet("QLabel { color : black; }");
@@ -242,7 +240,6 @@ void ContentWidget::setGUItoStop()
 
 void ContentWidget::setGUItoPause()
 {
-	gui_mode_ = GuiMode::Pause;
 	startpause_button_->setText("CONTINUE");
 	activity_time_->setStyleSheet("QLabel {color : black; }");
 	pause_time_->setStyleSheet("QLabel { color : green; }");
@@ -259,20 +256,11 @@ void ContentWidget::updateTimes()
 
 QString ContentWidget::getTooltip()
 {
-	if (gui_mode_ == GuiMode::Pause)
+	if (timetracker_.isPaused())
 		return QString("µTimer:  In Pause (Overall " + pause_time_->text() + ")");
-	else if (gui_mode_ == GuiMode::Activity)
+	else if (timetracker_.isActive())
 		return QString("µTimer:  In Activity (Overall " + convTimeStrToDurationStr(activity_time_->text()) + "h / " + activity_time_->text() + ")");
 	else
 		return QString("µTimer:  Timing inactive");
 }
 
-bool ContentWidget::isGUIinActivity()
-{
-	return gui_mode_ == GuiMode::Activity;
-}
-
-bool ContentWidget::isGUIinPause()
-{
-	return gui_mode_ == GuiMode::Pause;
-}

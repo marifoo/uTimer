@@ -246,6 +246,10 @@ private:
 #endif // QT_NO_DEBUG
 
 public:
+    bool isActive() const  { QMutexLocker lk(&mutex_); return mode_ == Mode::Activity; }
+    bool isPaused() const  { QMutexLocker lk(&mutex_); return mode_ == Mode::Pause; }
+    bool isStopped() const { QMutexLocker lk(&mutex_); return mode_ == Mode::None; }
+
     explicit Timer(const Settings & settings, SessionStore& db, QObject *parent = nullptr);
     ~Timer();
 

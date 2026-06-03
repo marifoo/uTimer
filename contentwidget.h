@@ -44,9 +44,6 @@ private:
 	QString autopause_tooltip2_;
 	QString activity_time_tooltip_base_;
 
-	enum class GuiMode { Stopped, Activity, Pause };
-	GuiMode gui_mode_ = GuiMode::Stopped;
-
 	void setupGUI();
 	void setupTimeRows();
 	void setupButtonRows();
@@ -54,14 +51,12 @@ private:
 	void setActivityTimeTooltip(const QString &hours = "0.00");
 	void setPauseTimeTooltip();
 	void resetPauseTimeTooltip();
-	void manageTooltipsForActivity();
-        
+	void manageTooltipsForActivity(bool wasPaused);
+
 public:
 	explicit ContentWidget(Settings &settings, Timer& timetracker, QWidget *parent = nullptr);
 	void updateTimes();
 	QString getTooltip();
-	bool isGUIinActivity();
-	bool isGUIinPause();
 
 signals:
 	void minToTray();
@@ -76,7 +71,7 @@ public slots:
 	void pressedPinToTopButton();
 	void pressedAutoPauseButton();
 	void pressedShowHistoryButton();
-	void setGUItoActivity();
+	void setGUItoActivity(bool wasPaused = false);
 	void setGUItoStop();
 	void setGUItoPause();
 };

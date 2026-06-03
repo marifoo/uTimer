@@ -54,7 +54,7 @@ MainWin::MainWin(Settings& settings, Timer& timetracker, SessionStore& db,
 		if (cause == Timer::PauseCause::LockAutopause) {
 			content_widget_->setGUItoPause();
 		} else if (cause == Timer::PauseCause::LockResume) {
-			content_widget_->setGUItoActivity();
+			content_widget_->setGUItoActivity(true);
 		}
 	});
 }
@@ -90,7 +90,7 @@ void MainWin::update()
 	content_widget_->updateTimes();
 	tray_icon_->setToolTip(content_widget_->getTooltip());
 
-	if (content_widget_->isGUIinActivity()
+	if (timetracker_.isActive()
 	    && (settings_.showTooMuchActivityWarning() || settings_.showNoPauseWarning())) {
 		health_monitor_->check(timetracker_.getActiveTime(), timetracker_.getPauseTime());
 	}
