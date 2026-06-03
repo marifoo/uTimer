@@ -15,6 +15,12 @@ public:
     Timeline(std::deque<TimeDuration> completed,
              std::optional<TimeDuration> ongoing);
 
+    // Factory for cross-midnight or other non-same-day rows that must bypass the
+    // same-day invariant check. Only use when the caller has verified the data is
+    // intentionally cross-midnight (e.g. pre-existing DB rows being preserved as-is).
+    static Timeline fromUnchecked(std::deque<TimeDuration> completed,
+                                  std::optional<TimeDuration> ongoing = std::nullopt);
+
     const std::deque<TimeDuration>& completed() const;
     const std::optional<TimeDuration>& ongoing() const;
 

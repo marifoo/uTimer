@@ -17,6 +17,15 @@ Timeline::Timeline(std::deque<TimeDuration> completed,
 #endif
 }
 
+Timeline Timeline::fromUnchecked(std::deque<TimeDuration> completed,
+                                 std::optional<TimeDuration> ongoing)
+{
+    Timeline t;
+    t.completed_ = std::move(completed);
+    t.ongoing_ = std::move(ongoing);
+    return t;
+}
+
 const std::deque<TimeDuration>& Timeline::completed() const
 {
     return completed_;

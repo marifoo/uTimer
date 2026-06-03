@@ -105,9 +105,8 @@ void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_
 
 void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midnight_row_by_start_date()
 {
-    // Updated for Task 0: cross-midnight rows are now dropped at load time by
-    // TimeDuration::create(). This test verifies that a stale cross-midnight row
-    // injected directly into the DB is silently dropped when HistoryDialog loads.
+    // H2: cross-midnight rows are now loaded (via fromTrusted) and bucketed on BOTH
+    // the start-date page (canonical) and the end-date page (continuation/display-only).
     resetDatabaseFile();
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
@@ -115,15 +114,12 @@ void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midn
     SqliteSessionStore db(settings);
     Timer tracker(settings, db);
 
-    // Inject a cross-midnight row directly into the DB via raw SQL,
-    // bypassing Timeline so we don't trip assertSameDayInvariant().
-    const QDate startDate = QDate::currentDate().addDays(-1);
-    const QDateTime crossMidnightStart(startDate, QTime(23, 59, 50));
-    const QDateTime crossMidnightEnd = crossMidnightStart.addSecs(20);
+    const QDate yesterday = QDate::currentDate().addDays(-1);
+    const QDateTime crossMidnightStart(yesterday, QTime(23, 59, 50));
+    const QDateTime crossMidnightEnd = crossMidnightStart.addSecs(20); // ends today
 
-    // First, trigger DB creation by saving a valid row (then we'll replace it).
+    // Trigger DB creation by saving a valid same-day row for yesterday.
     {
-        const QDate yesterday = QDate::currentDate().addDays(-1);
         const QDateTime validStart(yesterday, QTime(10, 0, 0));
         const QDateTime validEnd(yesterday, QTime(10, 30, 0));
         auto validSeg = TimeDuration::create(DurationType::Activity, validStart, validEnd);
@@ -133,7 +129,7 @@ void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midn
         QVERIFY(tracker.replaceAll(Timeline(std::move(init), std::nullopt), Timeline({}, std::nullopt)));
     }
 
-    // Now insert the cross-midnight row directly via SQL.
+    // Insert the cross-midnight row directly via SQL (bypassing same-day invariant).
     {
         const QString connName = QString("test_cross_midnight_%1").arg(
             reinterpret_cast<quintptr>(&db));
@@ -155,16 +151,24 @@ void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midn
         QSqlDatabase::removeDatabase(connName);
     }
 
-    // HistoryDialog loads durations — loadDurations() drops cross-midnight rows.
+    // H2: cross-midnight row is loaded. It appears as crossMidnight on yesterday's
+    // page (display-only canonical) and as a continuation on today's page.
     HistoryDialog dialog(tracker, settings);
 
-    // The cross-midnight row is dropped. The valid same-day row remains, so the
-    // dialog shows 2 pages: today (current, empty) and yesterday (with 1 valid row).
+    // 2 pages: today (isCurrent) and yesterday.
     QCOMPARE(dialog.pages_.size(), static_cast<size_t>(2));
     QCOMPARE(dialog.pages_[0].isCurrent, true);
-    QCOMPARE(dialog.pages_[0].durations.size(), static_cast<size_t>(0));
     QCOMPARE(dialog.pages_[1].isCurrent, false);
-    QCOMPARE(dialog.pages_[1].durations.size(), static_cast<size_t>(1));
+
+    // Yesterday: 1 same-day canonical row + 1 cross-midnight (display-only).
+    QCOMPARE(dialog.pages_[1].durations.size(), static_cast<size_t>(1));     // valid same-day
+    QCOMPARE(dialog.pages_[1].crossMidnight.size(), static_cast<size_t>(1)); // cross-midnight canonical
+    QCOMPARE(dialog.pages_[1].continuations.size(), static_cast<size_t>(0));
+
+    // Today's page has the cross-midnight row as a continuation (display-only).
+    QCOMPARE(dialog.pages_[0].continuations.size(), static_cast<size_t>(1));
+    QCOMPARE(dialog.pages_[0].continuations[0].startTime.date(), yesterday);
+    QCOMPARE(dialog.pages_[0].crossMidnight.size(), static_cast<size_t>(0));
 }
 
 void HistoryDialogTest::test_historydialog_checkbox_toggle_updates_pending_and_totals()
@@ -1153,4 +1157,122 @@ void HistoryDialogTest::test_H4_overlap_cancel_aborts_save()
 
     // Timer session unchanged: still has 1 memory row
     QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(1));
+}
+
+void HistoryDialogTest::test_H2_midnight_crossing_shown_on_both_pages()
+{
+    // A cross-midnight segment (starts 23:30 yesterday, ends 00:30 today) must appear
+    // on BOTH day pages. The start-day (yesterday) page holds the canonical (editable)
+    // copy; the end-day (today) page holds a display-only continuation copy.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    const QDate yesterday = QDate::currentDate().addDays(-1);
+    const QDateTime segStart(yesterday, QTime(23, 30, 0));
+    const QDateTime segEnd = segStart.addSecs(3600); // ends at 00:30 today
+
+    // Insert cross-midnight segment directly via SQL.
+    {
+        const QString connName = "h2_test_setup";
+        QSqlDatabase rawDb = QSqlDatabase::addDatabase("QSQLITE", connName);
+        rawDb.setDatabaseName(db_path_);
+        // DB may not exist yet — seed it via replaceAll first.
+        rawDb.close();
+        rawDb = QSqlDatabase();
+        QSqlDatabase::removeDatabase(connName);
+    }
+    // Seed DB to create the schema.
+    QVERIFY(tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt)));
+    {
+        const QString connName = "h2_insert";
+        QSqlDatabase rawDb = QSqlDatabase::addDatabase("QSQLITE", connName);
+        rawDb.setDatabaseName(db_path_);
+        QVERIFY(rawDb.open());
+        QSqlQuery q(rawDb);
+        q.prepare(
+            "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+            "VALUES (:sid, 0, :s, :e, 1)"
+        );
+        q.bindValue(":sid", TimeDuration::createSegmentId().toString());
+        q.bindValue(":s", segStart.toUTC().toString(Qt::ISODateWithMs));
+        q.bindValue(":e", segEnd.toUTC().toString(Qt::ISODateWithMs));
+        QVERIFY(q.exec());
+        rawDb.close();
+        rawDb = QSqlDatabase();
+        QSqlDatabase::removeDatabase(connName);
+    }
+
+    HistoryDialog dialog(tracker, settings);
+
+    // Two pages: today (isCurrent) and yesterday.
+    QCOMPARE(dialog.pages_.size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.pages_[0].isCurrent, true);
+    QCOMPARE(dialog.pages_[1].isCurrent, false);
+
+    // Yesterday page: cross-midnight row is in crossMidnight (display-only canonical),
+    // not in durations (which holds only same-day editable rows).
+    QCOMPARE(dialog.pages_[1].durations.size(), static_cast<size_t>(0));
+    QCOMPARE(dialog.pages_[1].crossMidnight.size(), static_cast<size_t>(1));
+    QCOMPARE(dialog.pages_[1].crossMidnight[0].startTime.date(), yesterday);
+    QCOMPARE(dialog.pages_[1].continuations.size(), static_cast<size_t>(0));
+
+    // Today page: continuation copy (display-only).
+    QCOMPARE(dialog.pages_[0].continuations.size(), static_cast<size_t>(1));
+    QCOMPARE(dialog.pages_[0].continuations[0].startTime.date(), yesterday);
+    QCOMPARE(dialog.pages_[0].continuations[0].endTime.date(), QDate::currentDate());
+    QCOMPARE(dialog.pages_[0].crossMidnight.size(), static_cast<size_t>(0));
+
+    // Both show the same segment_id.
+    QCOMPARE(dialog.pages_[0].continuations[0].segment_id,
+             dialog.pages_[1].crossMidnight[0].segment_id);
+
+    // Cross-midnight row is NOT in pendingTimelines_ (Timeline rejects cross-midnight).
+    // It is preserved in crossMidnightRows_ for saving.
+    QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(0));
+    QCOMPARE(dialog.pendingTimelines_[1].completed().size(), static_cast<size_t>(0));
+    QCOMPARE(dialog.crossMidnightRows_.size(), static_cast<size_t>(1));
+}
+
+void HistoryDialogTest::test_H6_split_dialog_preset_from_source_row_type()
+{
+    // H6: onSplitRow() presets SplitDialog's first-segment type to match the
+    // source row's type. An Activity source row presets Activity→Pause;
+    // a Pause source row presets Pause→Activity.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    const QDateTime now = QDateTime::currentDateTime();
+    // Source row is Pause
+    tracker.session_.durations.push_back(
+        TimeDuration(DurationType::Pause, now.addSecs(-10), now.addSecs(-4)));
+
+    HistoryDialog dialog(tracker, settings);
+    dialog.contextMenuRow_ = 0;
+    dialog.contextMenuPage_ = 0;
+
+    DurationType capturedFirst = DurationType::Activity; // will be overwritten
+    QTimer::singleShot(0, [&capturedFirst]() {
+        for (QWidget* widget : QApplication::topLevelWidgets()) {
+            auto* split = qobject_cast<SplitDialog*>(widget);
+            if (!split) continue;
+            capturedFirst = split->getFirstSegmentType();
+            split->accept();
+            return;
+        }
+    });
+
+    dialog.onSplitRow();
+
+    // The dialog should have been preset to Pause (matching the source row).
+    QCOMPARE(capturedFirst, DurationType::Pause);
+    // Split should have produced 2 rows
+    QCOMPARE(dialog.pendingTimelines_[0].completed().size(), static_cast<size_t>(2));
 }

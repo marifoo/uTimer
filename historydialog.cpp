@@ -100,8 +100,13 @@ void HistoryDialog::createPages()
         currentComparableDurations.push_back(ongoingOpt.value());
     }
 
-    // Group historical durations by date
+    // Group historical durations by date.
+    // Same-day rows go into historyByDay (editable via Timeline/pendingTimelines_).
+    // Cross-midnight rows go into crossMidnightByStartDay (display-only canonical)
+    // and continuationsByEndDay (display-only spillover on end date).
     QMap<QDate, std::deque<TimeDuration>> historyByDay;
+    QMap<QDate, std::deque<TimeDuration>> crossMidnightByStartDay;
+    QMap<QDate, std::deque<TimeDuration>> continuationsByEndDay;
     for (const auto& d : historyDurations) {
         const bool isDuplicateOfCurrent = std::any_of(
             currentComparableDurations.begin(),
@@ -114,9 +119,29 @@ void HistoryDialog::createPages()
         if (isDuplicateOfCurrent) {
             continue;
         }
-        historyByDay[d.startTime.date()].push_back(d);
+        if (d.startTime.date() != d.endTime.date()) {
+            // Segments spanning more than one calendar boundary cannot occur in normal
+            // Timer operation and have no safe display bucketing — skip them entirely.
+            if (d.endTime.toLocalTime().date() > d.startTime.toLocalTime().date().addDays(1)) {
+                qWarning("[HISTORY] createPages: skipping segment spanning >1 calendar boundary (segment_id: %s)",
+                         qPrintable(d.segment_id.toString()));
+                continue;
+            }
+            // Cross-midnight: show on start-day (canonical) and end-day (continuation).
+            crossMidnightByStartDay[d.startTime.date()].push_back(d);
+            continuationsByEndDay[d.endTime.date()].push_back(d);
+            crossMidnightRows_.push_back(d);
+            originIsMemory_.insert(d.segment_id.toString(), false);
+        } else {
+            historyByDay[d.startTime.date()].push_back(d);
+        }
     }
-    QList<QDate> historyDates = historyByDay.keys();
+    // Collect all dates that need a page.
+    QSet<QDate> allDatesSet;
+    for (const QDate& d : historyByDay.keys()) allDatesSet.insert(d);
+    for (const QDate& d : crossMidnightByStartDay.keys()) allDatesSet.insert(d);
+    for (const QDate& d : continuationsByEndDay.keys()) allDatesSet.insert(d);
+    QList<QDate> historyDates = allDatesSet.values();
     std::sort(historyDates.begin(), historyDates.end(), std::greater<QDate>()); // Most recent first
 
     std::deque<TimeDuration> currentPageCompleted;
@@ -138,20 +163,42 @@ void HistoryDialog::createPages()
     }
 
     // Add today page (current session + today's DB + ongoing)
-    pages_.push_back({
-        QString("Today (entries: ") + QString::number(currentPageDurations.size()) + QString(")"),
-        currentPageDurations,
-        true
-    });
+    {
+        std::deque<TimeDuration> todayCrossMidnight;
+        auto cmIt = crossMidnightByStartDay.find(today);
+        if (cmIt != crossMidnightByStartDay.end()) todayCrossMidnight = *cmIt;
+
+        std::deque<TimeDuration> todayConts;
+        auto contIt = continuationsByEndDay.find(today);
+        if (contIt != continuationsByEndDay.end()) todayConts = *contIt;
+
+        pages_.push_back({
+            QString("Today (entries: ") + QString::number(currentPageDurations.size()) + QString(")"),
+            currentPageDurations,
+            todayCrossMidnight,
+            todayConts,
+            true
+        });
+    }
 
     // Add historical pages (one per day)
     for (const QDate& date : historyDates) {
         if (date == today) {
             continue;
         }
+        std::deque<TimeDuration> crossMidnight;
+        auto cmIt = crossMidnightByStartDay.find(date);
+        if (cmIt != crossMidnightByStartDay.end()) crossMidnight = *cmIt;
+
+        std::deque<TimeDuration> conts;
+        auto contIt = continuationsByEndDay.find(date);
+        if (contIt != continuationsByEndDay.end()) conts = *contIt;
+
         pages_.push_back({
             date.toString("yyyy-MM-dd") + QString(" (entries: ") + QString::number(historyByDay[date].size()) + QString(")"),
             historyByDay[date],
+            crossMidnight,
+            conts,
             false
         });
     }
@@ -308,8 +355,12 @@ void HistoryDialog::updateTable(uint idx)
 
     const auto& comp = pendingTimelines_[idx].completed();
     const bool hasOngoing = pendingTimelines_[idx].ongoing().has_value();
+    const auto& crossMidnight = pages_[idx].crossMidnight;
+    const auto& conts = pages_[idx].continuations;
     int rowCount = static_cast<int>(comp.size());
     if (hasOngoing) ++rowCount;
+    rowCount += static_cast<int>(crossMidnight.size());
+    rowCount += static_cast<int>(conts.size());
     table_->setRowCount(rowCount);
 
     updateTotalsLabel(idx);
@@ -422,6 +473,54 @@ void HistoryDialog::updateTable(uint idx)
         });
     }
 
+    // Populate cross-midnight canonical rows (spans midnight, display-only on start-day page)
+    {
+        const QColor grayBg(200, 200, 200, 180);
+        int baseRow = static_cast<int>(comp.size()) + (hasOngoing ? 1 : 0);
+        for (int i = 0; i < static_cast<int>(crossMidnight.size()); ++i) {
+            const auto& d = crossMidnight[i];
+            int row = baseRow + i;
+            QString typeStr = (d.type == DurationType::Activity ? "Activity  " : "Pause  ");
+            typeStr += "(spans midnight)";
+            QTableWidgetItem* typeItem = new QTableWidgetItem(typeStr);
+            QTableWidgetItem* startEndItem = new QTableWidgetItem(
+                d.startTime.toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss"));
+            QTableWidgetItem* durationItem = new QTableWidgetItem(convMSecToTimeStr(d.duration) + "  ");
+            for (auto* item : {typeItem, startEndItem, durationItem}) {
+                item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
+                item->setBackground(grayBg);
+            }
+            table_->setItem(row, 0, typeItem);
+            table_->setItem(row, 1, startEndItem);
+            table_->setItem(row, 2, durationItem);
+        }
+    }
+
+    // Populate continuation rows (display-only cross-midnight spillover on end-day page)
+    if (!conts.empty()) {
+        const QColor grayBg(200, 200, 200, 180);
+        int baseRow = static_cast<int>(comp.size()) + (hasOngoing ? 1 : 0)
+                      + static_cast<int>(crossMidnight.size());
+        for (int i = 0; i < static_cast<int>(conts.size()); ++i) {
+            const auto& d = conts[i];
+            int row = baseRow + i;
+            QString typeStr = (d.type == DurationType::Activity ? "Activity  " : "Pause  ");
+            typeStr += "(cont.)";
+            QTableWidgetItem* typeItem = new QTableWidgetItem(typeStr);
+            QTableWidgetItem* startEndItem = new QTableWidgetItem(
+                d.startTime.toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss"));
+            QTableWidgetItem* durationItem = new QTableWidgetItem(convMSecToTimeStr(d.duration) + "  ");
+            for (auto* item : {typeItem, startEndItem, durationItem}) {
+                item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
+                item->setBackground(grayBg);
+            }
+            table_->setItem(row, 0, typeItem);
+            table_->setItem(row, 1, startEndItem);
+            table_->setItem(row, 2, durationItem);
+            // Column 3: no checkbox for continuation rows
+        }
+    }
+
     // Update navigation button states
     prevButton_->setEnabled(pageIndex_ < pages_.size() - 1);
     nextButton_->setEnabled(pageIndex_ > 0);
@@ -481,7 +580,7 @@ void HistoryDialog::saveChanges()
         }
     }
 
-    // Step A: Build unified timeline
+    // Step A: Build unified timeline (same-day rows only; cross-midnight handled separately)
     std::deque<TimeDuration> unifiedCompleted;
     std::optional<TimeDuration> ongoingDurationForSave;
 
@@ -494,6 +593,8 @@ void HistoryDialog::saveChanges()
     }
 
     // Step B: Normalize once across all buckets; confirm if merges will occur (H4).
+    // Cross-midnight rows are not included in normalization (Timeline rejects them);
+    // they are preserved as-is and appended after normalization.
     const size_t preNormalizeSize = unifiedCompleted.size();
     Timeline normalised = Timeline(unifiedCompleted, std::nullopt).normalized();
     if (normalised.completed().size() < preNormalizeSize) {
@@ -523,6 +624,13 @@ void HistoryDialog::saveChanges()
         }
     }
 
+    // Cross-midnight rows are preserved as-is in the history bucket.
+    // They cannot go through Timeline normalization (same-day invariant), so they
+    // are appended after normalization and saved via fromUnchecked().
+    for (const auto& d : crossMidnightRows_)
+        historyDurations.push_back(d);
+    crossMidnightRows_.clear();
+
     // Save historical + current-session durations to DB
     if (ongoingDurationForSave.has_value()) {
         currentSessionDurations.push_back(ongoingDurationForSave.value());
@@ -535,7 +643,7 @@ void HistoryDialog::saveChanges()
             .arg(currentSessionDurations.size()));
 
         dbSaveSucceeded = timetracker_.replaceAll(
-            Timeline(historyDurations, std::nullopt),
+            Timeline::fromUnchecked(historyDurations),
             Timeline(currentSessionDurations, std::nullopt));
         if (!dbSaveSucceeded) {
             Logger::Log("[HISTORY] CRITICAL: Failed to save durations to DB");
@@ -571,6 +679,15 @@ void HistoryDialog::showContextMenu(const QPoint& pos)
         && row == static_cast<int>(pendingTimelines_[pageIndex_].completed().size())
         && pendingTimelines_[pageIndex_].ongoing().has_value()) {
         return;
+    }
+
+    // Don't allow split on continuation rows (display-only)
+    if (pageIndex_ < pages_.size()) {
+        const int canonicalRows = static_cast<int>(pendingTimelines_[pageIndex_].completed().size())
+                                  + (pendingTimelines_[pageIndex_].ongoing().has_value() ? 1 : 0);
+        if (row >= canonicalRows) {
+            return;
+        }
     }
 
     contextMenuRow_ = row;
@@ -632,8 +749,9 @@ void HistoryDialog::onSplitRow()
         return;
     }
 
-    // Show split dialog
+    // Show split dialog; preset type based on source row (Activity→Pause or Pause→Activity).
     SplitDialog dlg(start, end, this);
+    dlg.setFirstSegmentType(duration.type);
     if (dlg.exec() == QDialog::Accepted) {
         QDateTime splitTime = dlg.getSplitTime();
         qint64 firstDuration = start.msecsTo(splitTime);

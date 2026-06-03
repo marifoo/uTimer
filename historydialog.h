@@ -28,7 +28,9 @@ class HistoryDialog : public QDialog
 private:
     struct Page {
         QString title;
-        std::deque<TimeDuration> durations;
+        std::deque<TimeDuration> durations;          // same-day canonical (editable) rows
+        std::deque<TimeDuration> crossMidnight;      // cross-midnight rows starting on this day (display-only)
+        std::deque<TimeDuration> continuations;      // cross-midnight rows ending on this day (display-only)
         bool isCurrent;
     };
 
@@ -37,6 +39,7 @@ private:
     std::vector<Page> pages_;
     std::vector<Timeline> pendingTimelines_;
     QHash<QString, bool> originIsMemory_;  // segment_id.toString() → true if memory row
+    std::deque<TimeDuration> crossMidnightRows_;  // cross-midnight rows preserved through save
     bool ongoingRowModified_ = false;
     uint pageIndex_;
     int contextMenuRow_ = -1;

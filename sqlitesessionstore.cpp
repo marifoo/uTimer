@@ -1126,16 +1126,16 @@ LoadResult SqliteSessionStore::loadDurations()
             continue;
         }
 
-        // Create TimeDuration with explicit start/end times
-        auto seg = TimeDuration::create(type, startDateTime, endDateTime, segmentId);
-        if (!seg.has_value()) {
-            Logger::Log(QString("[DB] Dropped cross-midnight row at load: %1 → %2")
+        // Create TimeDuration — cross-midnight rows are accepted via fromTrusted() so
+        // that createPages() can bucket them onto both the start-date and end-date pages.
+        if (startDateTime.msecsTo(endDateTime) <= 0) {
+            Logger::Log(QString("[DB] Dropped zero/negative-duration row at load: %1 → %2")
                 .arg(startDateTime.toString(Qt::ISODateWithMs))
                 .arg(endDateTime.toString(Qt::ISODateWithMs)));
             result.skipped++;
             continue;
         }
-        result.durations.emplace_back(std::move(*seg));
+        result.durations.emplace_back(TimeDuration::fromTrusted(type, startDateTime, endDateTime, segmentId));
     }
 
     // Rollback is idiomatic for read-only transactions: no writes were made,

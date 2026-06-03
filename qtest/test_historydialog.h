@@ -54,6 +54,8 @@ private slots:
     void test_saveChanges_noop_save_unchanged();
     void test_H3_ongoing_type_edit_preserved_when_engine_stops();
     void test_H4_overlap_cancel_aborts_save();
+    void test_H2_midnight_crossing_shown_on_both_pages();
+    void test_H6_split_dialog_preset_from_source_row_type();
 };
 
 #endif // TEST_HISTORYDIALOG_H
