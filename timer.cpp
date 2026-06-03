@@ -192,7 +192,8 @@ Timer::StateSnapshot Timer::takeStateSnapshot() const
         session_.durations.size(),
         session_.id_tracker.current,
         session_.segment_start_time,
-        session_.has_unsaved_data
+        session_.has_unsaved_data,
+        mode_
     };
 }
 
@@ -210,7 +211,8 @@ Timer::StateGuard::~StateGuard()
     bool changed = (exit.durations_size != entry_.durations_size)
                 || (exit.segment_id != entry_.segment_id)
                 || (exit.segment_start_time != entry_.segment_start_time)
-                || (exit.has_unsaved_data != entry_.has_unsaved_data);
+                || (exit.has_unsaved_data != entry_.has_unsaved_data)
+                || (exit.mode != entry_.mode);
     if (changed) {
         qWarning("[STATE-GUARD] Unacknowledged state mutation in %s: "
                  "durations %zu->%zu, segId '%s'->'%s', unsaved %d->%d",

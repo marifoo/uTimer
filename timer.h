@@ -212,6 +212,7 @@ private:
         SegmentId segment_id;
         QDateTime segment_start_time;
         bool has_unsaved_data;
+        Mode mode;
     };
     StateSnapshot takeStateSnapshot() const;
 
