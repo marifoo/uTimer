@@ -29,6 +29,7 @@ bool FakeSessionStore::commitSession(const Timeline& session)
             for (const auto& d : normed.completed())
                 if (d.segment_id == id) { stillPresent = true; break; }
             if (!stillPresent) {
+                committedSegmentIds.remove(id.toString());
                 for (auto it = storedDurations.begin(); it != storedDurations.end(); ) {
                     if (it->segment_id == id)
                         it = storedDurations.erase(it);
@@ -38,7 +39,7 @@ bool FakeSessionStore::commitSession(const Timeline& session)
             }
         }
 
-        // Upsert normalized segments
+        // Upsert normalized segments; enforce UNIQUE(segment_id) for new inserts.
         for (const auto& d : normed.completed()) {
             bool found = false;
             for (auto& existing : storedDurations) {
@@ -49,6 +50,10 @@ bool FakeSessionStore::commitSession(const Timeline& session)
                 }
             }
             if (!found) {
+                Q_ASSERT_X(!committedSegmentIds.contains(d.segment_id.toString()),
+                           "FakeSessionStore::commitSession",
+                           "UNIQUE(segment_id) violation: duplicate segment_id submitted");
+                committedSegmentIds.insert(d.segment_id.toString());
                 storedDurations.push_back(d);
             }
         }
@@ -61,11 +66,14 @@ bool FakeSessionStore::replaceAll(const Timeline& history, const Timeline& sessi
     callLog.append("replaceAll");
     if (replaceDurationsResult) {
         storedDurations.clear();
+        committedSegmentIds.clear();
         for (const auto& d : history.completed()) {
             storedDurations.push_back(d);
+            committedSegmentIds.insert(d.segment_id.toString());
         }
         for (const auto& d : session.completed()) {
             storedDurations.push_back(d);
+            committedSegmentIds.insert(d.segment_id.toString());
         }
     }
     return replaceDurationsResult;
@@ -88,6 +96,22 @@ bool FakeSessionStore::saveCheckpoint(DurationType type, qint64 duration, const 
 {
     callLog.append("saveCheckpoint");
     if (saveCheckpointResult) {
+        // Check whether this segment_id already has a checkpoint record.
+        // Multiple saves for the same segment_id are expected (it is an upsert/update),
+        // so we allow them — we only assert that no *different* finalized row already owns this id.
+        bool alreadySaved = false;
+        for (const auto& cp : savedCheckpoints) {
+            if (cp.segmentId == segmentId) {
+                alreadySaved = true;
+                break;
+            }
+        }
+        // A segment_id that was finalized via commitSession must not also appear as a
+        // checkpoint (that would mean Timer submitted the same id to two separate paths).
+        Q_ASSERT_X(!committedSegmentIds.contains(segmentId.toString()),
+                   "FakeSessionStore::saveCheckpoint",
+                   "UNIQUE(segment_id) violation: segment_id already committed via commitSession");
+        (void)alreadySaved; // Multiple checkpoint saves for the same id are fine (upsert).
         savedCheckpoints.push_back({type, duration, startTime, endTime, segmentId});
     }
     return saveCheckpointResult;

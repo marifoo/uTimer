@@ -296,6 +296,53 @@ void Timer::checkDurationInvariants() const
     }
 }
 
+/**
+ * Cross-layer invariant: for each in-memory segment, the DB must contain
+ * either no row (not yet committed) or exactly one finalized row with a
+ * matching segment_id. Called after every successful commitSession() in
+ * updateDurationsInDB() to catch divergence between memory and storage.
+ */
+void Timer::checkCrossLayerInvariants() const
+{
+    if (session_.durations.empty()) {
+        return;
+    }
+
+    // Load the current DB state once.
+    LoadResult dbResult = db_.loadDurations();
+
+    for (const auto& seg : session_.durations) {
+        if (seg.segment_id.isEmpty()) {
+            continue; // Already caught by checkDurationInvariants()
+        }
+
+        int matchCount = 0;
+        for (const auto& dbRow : dbResult.durations) {
+            if (dbRow.segment_id == seg.segment_id) {
+                ++matchCount;
+                // Fields must match.
+                if (dbRow.type != seg.type
+                    || dbRow.startTime != seg.startTime
+                    || dbRow.endTime != seg.endTime) {
+                    qWarning("[CROSS-LAYER] Segment %s: DB row fields mismatch memory "
+                             "(type %d vs %d, start %s vs %s, end %s vs %s)",
+                             qPrintable(seg.segment_id.toString()),
+                             static_cast<int>(dbRow.type), static_cast<int>(seg.type),
+                             qPrintable(dbRow.startTime.toString(Qt::ISODateWithMs)),
+                             qPrintable(seg.startTime.toString(Qt::ISODateWithMs)),
+                             qPrintable(dbRow.endTime.toString(Qt::ISODateWithMs)),
+                             qPrintable(seg.endTime.toString(Qt::ISODateWithMs)));
+                }
+            }
+        }
+
+        if (matchCount > 1) {
+            qWarning("[CROSS-LAYER] Segment %s: expected 0 or 1 DB rows, found %d",
+                     qPrintable(seg.segment_id.toString()), matchCount);
+        }
+    }
+}
+
 #endif // QT_NO_DEBUG
 
 // ============================================================================
@@ -936,7 +983,13 @@ bool Timer::updateDurationsInDB()
         session_.clearUnsaved(settings_);
         return true;
     }
-    return db_.commitSession(Timeline(session_.durations, std::nullopt));
+    bool ok = db_.commitSession(Timeline(session_.durations, std::nullopt));
+#ifndef QT_NO_DEBUG
+    if (ok) {
+        checkCrossLayerInvariants();
+    }
+#endif
+    return ok;
 }
 
 bool Timer::replaceAll(const Timeline& history, const Timeline& session)

@@ -234,6 +234,12 @@ private:
     /// Violations are logged via qWarning (not fatal) so they are visible
     /// in test output and debug runs without crashing the application.
     void checkDurationInvariants() const;
+
+    /// Cross-layer invariant check: for each segment in session_.durations,
+    /// queries the DB and asserts either no row exists for that segment_id, or
+    /// exactly one finalized row with matching fields. Called after successful
+    /// db_.commitSession() calls in updateDurationsInDB().
+    void checkCrossLayerInvariants() const;
 #endif // QT_NO_DEBUG
 
 public:

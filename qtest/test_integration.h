@@ -55,6 +55,12 @@ private slots:
     void test_fakeStore_finalizeIfNoOverlap_mirrors_sqlite_semantics();
     void test_fakeStore_reconcile_reports_finalized_and_overlap_dropped();
     void test_timer_reconcileOrphans_excludes_overlap_dropped_from_recovered_seconds();
+
+    // Step 19 (C9 timezone): parameterized timezone tests for hasEntriesForDate.
+    void test_hasEntriesForDate_timezone_data();
+    void test_hasEntriesForDate_timezone();
+    void test_midnight_boundary_timezone_data();
+    void test_midnight_boundary_timezone();
 };
 
 #endif // TEST_INTEGRATION_H

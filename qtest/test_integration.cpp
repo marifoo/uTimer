@@ -2,6 +2,9 @@
 #include "fakesessionstore.h"
 #include <QtTest>
 #include <QSignalSpy>
+#ifdef Q_OS_UNIX
+#include <time.h>
+#endif
 
 using TestCommon::createSettingsFile;
 using TestCommon::mk;
@@ -853,4 +856,136 @@ void IntegrationTest::test_timer_reconcileOrphans_excludes_overlap_dropped_from_
 
     // Only A's 60 seconds are counted; B was overlap-dropped by the store.
     QCOMPARE(tracker.getStartupRecoveredSeconds(), (qint64)60);
+}
+
+// ============================================================================
+// Step 19 (C9 timezone): parameterized timezone tests
+// ============================================================================
+
+namespace {
+// RAII helper that saves the current TZ env-var and restores it on destruction.
+struct TzGuard {
+    std::optional<QByteArray> saved;
+
+    TzGuard() {
+        const char* tz = getenv("TZ");
+        saved = tz ? std::make_optional(QByteArray(tz)) : std::nullopt;
+    }
+
+    void set(const QByteArray& tz) {
+        qputenv("TZ", tz);
+#ifdef Q_OS_UNIX
+        tzset();
+#endif
+    }
+
+    ~TzGuard() {
+        if (saved)
+            qputenv("TZ", *saved);
+        else
+            qunsetenv("TZ");
+#ifdef Q_OS_UNIX
+        tzset();
+#endif
+    }
+};
+} // anonymous namespace
+
+/**
+ * Data provider: three timezones exercised in hasEntriesForDate tests.
+ */
+void IntegrationTest::test_hasEntriesForDate_timezone_data()
+{
+    QTest::addColumn<QString>("timezone");
+    QTest::newRow("UTC")              << "Etc/UTC";
+    QTest::newRow("Europe/Berlin")    << "Europe/Berlin";
+    QTest::newRow("America/Los_Angeles") << "America/Los_Angeles";
+}
+
+/**
+ * For each timezone: insert a finalized row that starts exactly at noon on
+ * 2025-06-15 local time, then ask hasEntriesForDate for that date.
+ * Must return Yes regardless of timezone offset.
+ */
+void IntegrationTest::test_hasEntriesForDate_timezone()
+{
+    QFETCH(QString, timezone);
+
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 30));
+
+    TzGuard guard;
+    guard.set(timezone.toLatin1());
+
+    // Construct noon on 2025-06-15 in the current (faked) local timezone.
+    const QDate testDate(2025, 6, 15);
+    const QDateTime localNoon(testDate, QTime(12, 0, 0), Qt::LocalTime);
+    const QDateTime localNoonEnd = localNoon.addSecs(3600); // 1 hour session
+
+    SqliteSessionStore db(settings);
+    std::deque<TimeDuration> durations;
+    durations.emplace_back(TimeDuration::fromTrusted(DurationType::Activity, localNoon, localNoonEnd));
+    QVERIFY(db.saveDurations(durations, TransactionMode::Append));
+
+    // hasEntriesForDate must find this entry.
+    QCOMPARE(db.hasEntriesForDate(testDate), EntriesForDateResult::Yes);
+
+    // An adjacent date must not find it.
+    QCOMPARE(db.hasEntriesForDate(testDate.addDays(1)), EntriesForDateResult::No);
+    QCOMPARE(db.hasEntriesForDate(testDate.addDays(-1)), EntriesForDateResult::No);
+}
+
+/**
+ * Data provider: timezones for the midnight boundary reconciliation test.
+ */
+void IntegrationTest::test_midnight_boundary_timezone_data()
+{
+    QTest::addColumn<QString>("timezone");
+    QTest::newRow("UTC")              << "Etc/UTC";
+    QTest::newRow("Europe/Berlin")    << "Europe/Berlin";
+    QTest::newRow("America/Los_Angeles") << "America/Los_Angeles";
+}
+
+/**
+ * Midnight boundary: a session that ends at 23:59:59 local on 2025-06-14
+ * must appear under 2025-06-14, not 2025-06-15 — even across DST offsets.
+ * A session starting at 00:00:01 on 2025-06-15 belongs to 2025-06-15.
+ */
+void IntegrationTest::test_midnight_boundary_timezone()
+{
+    QFETCH(QString, timezone);
+
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 30));
+
+    TzGuard guard;
+    guard.set(timezone.toLatin1());
+
+    // Entry A: ends one second before local midnight on 2025-06-14.
+    const QDate day14(2025, 6, 14);
+    const QDateTime endOfDay14(day14, QTime(23, 59, 59), Qt::LocalTime);
+    const QDateTime startOfDay14 = endOfDay14.addSecs(-60);
+
+    // Entry B: starts one second after local midnight → 2025-06-15.
+    const QDate day15(2025, 6, 15);
+    const QDateTime startOfDay15(day15, QTime(0, 0, 1), Qt::LocalTime);
+    const QDateTime endOfDay15 = startOfDay15.addSecs(60);
+
+    SqliteSessionStore db(settings);
+    std::deque<TimeDuration> durations;
+    durations.emplace_back(TimeDuration::fromTrusted(DurationType::Activity, startOfDay14, endOfDay14));
+    durations.emplace_back(TimeDuration::fromTrusted(DurationType::Activity, startOfDay15, endOfDay15));
+    QVERIFY(db.saveDurations(durations, TransactionMode::Append));
+
+    // Boundary: 2025-06-14 must see entry A; entry B must not bleed into it.
+    QCOMPARE(db.hasEntriesForDate(day14), EntriesForDateResult::Yes);
+    QCOMPARE(db.hasEntriesForDate(day15), EntriesForDateResult::Yes);
+
+    // A date with no entries must return No.
+    QCOMPARE(db.hasEntriesForDate(day14.addDays(-1)), EntriesForDateResult::No);
+    QCOMPARE(db.hasEntriesForDate(day15.addDays(1)),  EntriesForDateResult::No);
 }

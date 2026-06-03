@@ -18,6 +18,7 @@
 
 #include "sessionstore.h"
 #include "timeline.h"
+#include <QSet>
 #include <QStringList>
 #include <deque>
 #include <optional>
@@ -74,6 +75,10 @@ public:
     bool checkSchemaResult = true;
     bool reconcileResult = true;
     bool setMarkerResult = true;
+
+    /// Set of segment_ids that have been committed via commitSession().
+    /// Used to enforce UNIQUE(segment_id): duplicate submissions Q_ASSERT-fail.
+    QSet<QString> committedSegmentIds;
 
     /// Pre-loaded durations returned by loadDurations(). Tests populate this.
     LoadResult loadDurationsResult;
