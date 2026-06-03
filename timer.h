@@ -181,7 +181,6 @@ private:
     void stopTimer(const QDateTime& now, StopReason reason);
     void pauseTimer(const QDateTime& now);
     void backpauseTimer(const QDateTime& now);
-    void finalizeActivityToPause(const QDateTime& pauseSegmentStart);
     // Appends a single same-day segment to session_.durations.
     // Silently discards segments where startTime.date() != endTime.date()
     // (last-line defence for cross-midnight). DayBoundaryWatcher's scheduled
