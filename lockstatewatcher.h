@@ -42,9 +42,7 @@ private:
 	std::optional<LinuxLockMethod> linux_lock_method_;
 	bool initializeLinuxLockDetection();
 	bool querySystemdLogind();
-	bool queryFreedesktopScreenSaver();
-	bool queryGnomeScreenSaver();
-	bool queryKdeScreenSaver();
+	bool queryScreenSaverDBus(const QString &service, const QString &path, const QString &interface);
 #endif
 
 	bool isSessionLocked();

@@ -122,11 +122,11 @@ bool LockStateWatcher::isSessionLocked()
 		case LinuxLockMethod::SystemdLogind:
 			return querySystemdLogind();
 		case LinuxLockMethod::FreedesktopScreenSaver:
-			return queryFreedesktopScreenSaver();
+			return queryScreenSaverDBus("org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver", "org.freedesktop.ScreenSaver");
 		case LinuxLockMethod::GnomeScreenSaver:
-			return queryGnomeScreenSaver();
+			return queryScreenSaverDBus("org.gnome.ScreenSaver", "/org/gnome/ScreenSaver", "org.gnome.ScreenSaver");
 		case LinuxLockMethod::KdeScreenSaver:
-			return queryKdeScreenSaver();
+			return queryScreenSaverDBus("org.kde.screensaver", "/ScreenSaver", "org.kde.screensaver");
 	}
 	Q_UNREACHABLE();
 #else
@@ -283,50 +283,9 @@ bool LockStateWatcher::querySystemdLogind()
 	return false;
 }
 
-bool LockStateWatcher::queryFreedesktopScreenSaver()
+bool LockStateWatcher::queryScreenSaverDBus(const QString &service, const QString &path, const QString &interface)
 {
-	QDBusMessage msg = QDBusMessage::createMethodCall(
-		"org.freedesktop.ScreenSaver",
-		"/org/freedesktop/ScreenSaver",
-		"org.freedesktop.ScreenSaver",
-		"GetActive"
-	);
-
-	// Use short timeout (100ms) to avoid blocking GUI
-	QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 100);
-
-	if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
-		return reply.arguments().first().toBool();
-	}
-	return false;
-}
-
-bool LockStateWatcher::queryGnomeScreenSaver()
-{
-	QDBusMessage msg = QDBusMessage::createMethodCall(
-		"org.gnome.ScreenSaver",
-		"/org/gnome/ScreenSaver",
-		"org.gnome.ScreenSaver",
-		"GetActive"
-	);
-
-	// Use short timeout (100ms) to avoid blocking GUI
-	QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 100);
-
-	if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
-		return reply.arguments().first().toBool();
-	}
-	return false;
-}
-
-bool LockStateWatcher::queryKdeScreenSaver()
-{
-	QDBusMessage msg = QDBusMessage::createMethodCall(
-		"org.kde.screensaver",
-		"/ScreenSaver",
-		"org.kde.screensaver",
-		"GetActive"
-	);
+	QDBusMessage msg = QDBusMessage::createMethodCall(service, path, interface, "GetActive");
 
 	// Use short timeout (100ms) to avoid blocking GUI
 	QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 100);
