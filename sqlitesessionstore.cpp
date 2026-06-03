@@ -462,10 +462,7 @@ BackupResult SqliteSessionStore::createBackup(const std::deque<TimeDuration>& du
 SessionStoreResult SqliteSessionStore::commitSession(const Timeline& session)
 {
     const auto [normed, orphanIds] = session.normalizedWithRemovedIds();
-    const SessionStoreResult result = updateDurationsById(normed.completed(), orphanIds);
-    if (!result.ok())
-        Logger::Log("[DB] commitSession: updateDurationsById failed: " + result.message);
-    return result;
+    return updateDurationsById(normed.completed(), orphanIds);
 }
 
 /**

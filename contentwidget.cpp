@@ -223,8 +223,8 @@ void ContentWidget::manageTooltipsForActivity()
 
 void ContentWidget::setGUItoActivity()
 {
-	gui_mode_ = GuiMode::Activity;
 	manageTooltipsForActivity();
+	gui_mode_ = GuiMode::Activity;
 
 	startpause_button_->setText("PAUSE");
 	activity_time_->setStyleSheet("QLabel {color : green; }");
