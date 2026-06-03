@@ -113,6 +113,12 @@ private slots:
 
     // Step 8: S12 — MarkerResult::Error skips orphan reconciliation
     void test_S12_marker_error_skips_reconciliation();
+
+    // QF1: signal contract — started/paused/modeChanged emit counts
+    void test_QF1_explicit_pause_emits_paused_not_modeChanged();
+    void test_QF1_explicit_resume_emits_started_not_modeChanged();
+    void test_QF1_lock_autopause_emits_modeChanged_not_paused();
+    void test_QF1_lock_resume_emits_started_and_modeChanged_once_each();
 };
 
 #endif // TEST_TIMER_H

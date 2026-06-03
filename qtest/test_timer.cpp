@@ -1616,3 +1616,89 @@ void TimerTest::test_S12_marker_error_skips_reconciliation()
     QCOMPARE(tracker.getStartupRecoveredSeconds(), (qint64)0);
     QVERIFY(!fakeDb.callLog.contains("reconcileUnfinalizedCheckpoints"));
 }
+
+void TimerTest::test_QF1_explicit_pause_emits_paused_not_modeChanged()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    QSignalSpy pausedSpy(&tracker, &Timer::paused);
+    QSignalSpy modeSpy(&tracker, &Timer::modeChanged);
+
+    tracker.useTimerViaButton(Button::Start);
+    tracker.useTimerViaButton(Button::Pause);
+
+    QCOMPARE(pausedSpy.count(), 1);
+    QCOMPARE(modeSpy.count(), 0);
+}
+
+void TimerTest::test_QF1_explicit_resume_emits_started_not_modeChanged()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    tracker.useTimerViaButton(Button::Start);
+    tracker.useTimerViaButton(Button::Pause);
+
+    QSignalSpy startedSpy(&tracker, &Timer::started);
+    QSignalSpy modeSpy(&tracker, &Timer::modeChanged);
+
+    tracker.useTimerViaButton(Button::Start);
+
+    QCOMPARE(startedSpy.count(), 1);
+    QVERIFY(startedSpy.first().first().toBool()); // fromPause == true
+    QCOMPARE(modeSpy.count(), 0);
+}
+
+void TimerTest::test_QF1_lock_autopause_emits_modeChanged_not_paused()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    tracker.useTimerViaButton(Button::Start);
+
+    QSignalSpy pausedSpy(&tracker, &Timer::paused);
+    QSignalSpy modeSpy(&tracker, &Timer::modeChanged);
+
+    tracker.useTimerViaLockEvent(LockEvent::LongOngoingLock);
+
+    QCOMPARE(pausedSpy.count(), 0);
+    QCOMPARE(modeSpy.count(), 1);
+    QCOMPARE(modeSpy.first().first().value<Timer::PauseCause>(),
+             Timer::PauseCause::LockAutopause);
+}
+
+void TimerTest::test_QF1_lock_resume_emits_started_and_modeChanged_once_each()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    tracker.useTimerViaButton(Button::Start);
+    tracker.useTimerViaLockEvent(LockEvent::LongOngoingLock);
+    QCOMPARE(tracker.mode_, Timer::Mode::Pause);
+
+    QSignalSpy startedSpy(&tracker, &Timer::started);
+    QSignalSpy pausedSpy(&tracker, &Timer::paused);
+    QSignalSpy modeSpy(&tracker, &Timer::modeChanged);
+
+    tracker.useTimerViaLockEvent(LockEvent::Unlock);
+
+    QCOMPARE(startedSpy.count(), 1);
+    QVERIFY(startedSpy.first().first().toBool()); // fromPause == true
+    QCOMPARE(pausedSpy.count(), 0);
+    QCOMPARE(modeSpy.count(), 1);
+    QCOMPARE(modeSpy.first().first().value<Timer::PauseCause>(),
+             Timer::PauseCause::LockResume);
+}

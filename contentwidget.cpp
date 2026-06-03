@@ -52,8 +52,6 @@ ContentWidget::ContentWidget(Settings & settings, Timer &timetracker, QWidget *p
 	        this, [this](Timer::PauseCause cause) {
 		if (cause == Timer::PauseCause::LockAutopause)
 			setGUItoPause();
-		else if (cause == Timer::PauseCause::LockResume)
-			setGUItoActivity(true);
 	});
 }
 
