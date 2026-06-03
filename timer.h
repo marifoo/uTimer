@@ -81,27 +81,27 @@ struct SessionState {
 
     /// Starts a new segment: assigns a fresh segment_id and records the
     /// wall-clock start time.
-    void beginNewSegment(const QDateTime& startTime, const Settings& settings);
+    void beginNewSegment(const QDateTime& startTime);
 
     /// Clears the segment_id and start time (used when the timer stops).
-    void clearSegment(const Settings& settings);
+    void clearSegment();
 
     /// Updates segment_start_time (e.g. after a pause transition).
-    void updateSegmentStartTime(const QDateTime& newStart, const Settings& settings);
+    void updateSegmentStartTime(const QDateTime& newStart);
 
     /// Marks unsaved data state after a failed DB write.
-    void markUnsaved(const Settings& settings);
+    void markUnsaved();
 
     /// Clears the unsaved flag and the retry cache after a successful save
     /// or a fresh start.
-    void clearUnsaved(const Settings& settings);
+    void clearUnsaved();
 
     /// Clears durations and unsaved state (fresh start).
-    void resetForNewSession(const Settings& settings);
+    void resetForNewSession();
 
     /// Adopts the segment identity from an externally-provided ongoing
     /// duration (used when HistoryDialog replaces durations).
-    void adoptOngoingSegment(const TimeDuration& ongoing, const Settings& settings);
+    void adoptOngoingSegment(const TimeDuration& ongoing);
 };
 
 
@@ -198,6 +198,10 @@ private:
     EntriesForDateResult hasEntriesForDate(const QDate& date);
     void saveCheckpointInternal(const QDateTime& now);  // Internal checkpoint save (called when mutex already held)
     SessionStoreResult appendDurationsChunkToDB(const std::deque<TimeDuration>& durations);
+    /// Applies the standard log/warn policy for a SessionStoreResult in the
+    /// named context.  Does NOT affect control flow — callers decide what to do
+    /// after calling this.
+    void handleDbResult(const SessionStoreResult& result, const QString& context);
     qint64 reconcileOrphanCheckpoints(
         const std::deque<OrphanCheckpoint>& orphans,
         const std::optional<MarkerResult>& markerResult);

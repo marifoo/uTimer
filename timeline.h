@@ -7,7 +7,10 @@
 #include <QDate>
 #include <QMap>
 #include <QDateTime>
+#include <QString>
 #include "types.h"
+
+struct NormalizedResult;
 
 class Timeline {
 public:
@@ -39,6 +42,10 @@ public:
     // Normalization: equivalent to cleanDurations from helpers.cpp
     Timeline normalized() const;
 
+    /// Normalizes and returns both the merged timeline and the segment_id strings
+    /// of completed segments that were merged away during normalization.
+    NormalizedResult normalizedWithRemovedIds() const;
+
 #ifndef QT_NO_DEBUG
     void assertSameDayInvariant() const;
 #endif
@@ -46,6 +53,11 @@ public:
 private:
     std::deque<TimeDuration> completed_;
     std::optional<TimeDuration> ongoing_;
+};
+
+struct NormalizedResult {
+    Timeline timeline;
+    std::vector<QString> removedIds;
 };
 
 #endif // TIMELINE_H

@@ -110,10 +110,9 @@ int main(int argc, char *argv[])
 	// Check database schema before starting the UI
 	if (!database_manager.checkSchemaOnStartup()) {
 		QMessageBox::critical(nullptr, "Database Error",
-			"The database schema is outdated and incompatible with this version.\n\n"
-			"Please delete or rename the following file and restart:\n"
-			+ QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.sqlite") +
-			"\n\nNote: This will delete your history data.");
+			"Could not open or initialize the database.\n\n"
+			"Please check the following file and restart:\n"
+			+ QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.sqlite"));
 		return 1;
 	}
 

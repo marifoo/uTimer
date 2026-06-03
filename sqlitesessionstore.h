@@ -26,12 +26,12 @@ enum class TransactionMode { Append, Replace };
 enum class BackupResult { Success, BackupFailed, ReopenFailed };
 
 // Connection lifecycle: the database is opened in the constructor
-// (ensureSchema runs schema migrations, indexes, and PRAGMA once) and
+// (ensureSchema creates tables, indexes, and sets PRAGMA once) and
 // closed in the destructor.  Retention cleanup and backup pruning run once per
 // startup via checkSchemaOnStartup() — safe to call more than once (idempotent),
 // but intended to be called once.  All public methods call ensureOpen() as a
 // lightweight health check; if the connection is unexpectedly lost, ensureOpen()
-// reopens it without re-running migrations.
+// reopens it transparently.
 
 class SqliteSessionStore : public QObject, public SessionStore
 {
@@ -59,8 +59,8 @@ public:
     // interface to call these should use commitSession instead.
     bool saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
                        const std::vector<QString>& removedSegmentIds = {});
-    bool updateDurationsById(const std::deque<TimeDuration>& durations,
-                             const std::vector<QString>& removedSegmentIds = {});
+    SessionStoreResult updateDurationsById(const std::deque<TimeDuration>& durations,
+                                           const std::vector<QString>& removedSegmentIds = {});
 
 private:
     QSqlDatabase db;
@@ -77,11 +77,6 @@ private:
     bool ensureOpen();
     bool ensureSchema();
     void lazyClose();
-    bool validateSchema();
-    bool ensureIsFinalizedColumn();
-    bool ensureSegmentIdColumn();
-    bool ensureUtcColumns();
-    bool dropLegacyColumns();
     bool ensureSettingsTable();
     BackupResult createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
     void performRetentionCleanup();

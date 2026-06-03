@@ -66,7 +66,6 @@ void ContentWidget::setupTimeRows()
 	QFont label_font = QApplication::font();
 	label_font.setPixelSize(12);
 
-	// Start Time: --:--
 	starttime_row_ = new QHBoxLayout();
 	starttime_text_ = new QLabel("Start Time:");
 	starttime_text_->setFont(label_font);
@@ -76,7 +75,6 @@ void ContentWidget::setupTimeRows()
 	starttime_row_->addWidget(starttime_text_);
 	starttime_row_->addWidget(starttime_value_);
 
-	// Activity Time:  00:00:00
 	activity_row_ = new QHBoxLayout();
 	activity_text_ = new QLabel("Activity Time:");
 	activity_text_->setFont(label_font);
@@ -86,7 +84,6 @@ void ContentWidget::setupTimeRows()
 	activity_row_->addWidget(activity_text_);
 	activity_row_->addWidget(activity_time_);
 
-	// Pause Time:  00:00:00
 	pause_row_ = new QHBoxLayout();
 	pause_text_ = new QLabel("Pause Time:");
 	pause_text_->setFont(label_font);
@@ -151,14 +148,10 @@ void ContentWidget::applyStartupSettingsToGui()
 
 void ContentWidget::pressedStartPauseButton()
 {
-	const bool from_activity = (startpause_button_->text() == "PAUSE");
-	const bool from_pause_or_stopped = ((startpause_button_->text() == "START") || (startpause_button_->text() == "CONTINUE"));
-
-	if (from_activity) {
+	if (gui_mode_ == GuiMode::Activity) {
 		setGUItoPause();
 		emit pressedButton(Button::Pause);
-	}
-	else if (from_pause_or_stopped) {
+	} else {
 		setGUItoActivity();
 		emit pressedButton(Button::Start);
 	}
@@ -218,37 +211,29 @@ void ContentWidget::resetPauseTimeTooltip()
 
 void ContentWidget::manageTooltipsForActivity()
 {
-	const bool from_stopped = (startpause_button_->text() == "START");
-	const bool from_pause = (startpause_button_->text() == "CONTINUE");
-
-	if (from_stopped) {
+	if (gui_mode_ == GuiMode::Stopped) {
 		activity_time_tooltip_base_ = "h overall since " + QTime::currentTime().toString("HH:mm") + " o'clock";
 		setActivityTimeTooltip();
 		resetPauseTimeTooltip();
-		// Update start time when starting from stopped state
 		starttime_value_->setText(QTime::currentTime().toString("HH:mm"));
-	}
-	else if (from_pause) {
+	} else if (gui_mode_ == GuiMode::Pause) {
 		setPauseTimeTooltip();
 	}
 }
 
 void ContentWidget::setGUItoActivity()
 {
+	gui_mode_ = GuiMode::Activity;
 	manageTooltipsForActivity();
 
 	startpause_button_->setText("PAUSE");
 	activity_time_->setStyleSheet("QLabel {color : green; }");
 	pause_time_->setStyleSheet("QLabel { color : black; }");
-	
-	// Update start time when starting from stopped state
-	if (startpause_button_->text() == "START") {
-		starttime_value_->setText(QTime::currentTime().toString("HH:mm"));
-	}
 }
 
 void ContentWidget::setGUItoStop()
 {
+	gui_mode_ = GuiMode::Stopped;
 	startpause_button_->setText("START");
 	activity_time_->setStyleSheet("QLabel {color : black; }");
 	pause_time_->setStyleSheet("QLabel { color : black; }");
@@ -257,6 +242,7 @@ void ContentWidget::setGUItoStop()
 
 void ContentWidget::setGUItoPause()
 {
+	gui_mode_ = GuiMode::Pause;
 	startpause_button_->setText("CONTINUE");
 	activity_time_->setStyleSheet("QLabel {color : black; }");
 	pause_time_->setStyleSheet("QLabel { color : green; }");
@@ -273,9 +259,9 @@ void ContentWidget::updateTimes()
 
 QString ContentWidget::getTooltip()
 {
-	if (startpause_button_->text() == "CONTINUE")
+	if (gui_mode_ == GuiMode::Pause)
 		return QString("µTimer:  In Pause (Overall " + pause_time_->text() + ")");
-	else if (startpause_button_->text() == "PAUSE")
+	else if (gui_mode_ == GuiMode::Activity)
 		return QString("µTimer:  In Activity (Overall " + convTimeStrToDurationStr(activity_time_->text()) + "h / " + activity_time_->text() + ")");
 	else
 		return QString("µTimer:  Timing inactive");
@@ -283,10 +269,10 @@ QString ContentWidget::getTooltip()
 
 bool ContentWidget::isGUIinActivity()
 {
-	return (startpause_button_->text() == "PAUSE");
+	return gui_mode_ == GuiMode::Activity;
 }
 
-bool ContentWidget::isGUIinPause() 
-{ 
-	return startpause_button_->text() == "CONTINUE"; 
+bool ContentWidget::isGUIinPause()
+{
+	return gui_mode_ == GuiMode::Pause;
 }

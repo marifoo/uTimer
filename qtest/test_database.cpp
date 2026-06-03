@@ -155,38 +155,6 @@ void DatabaseTest::test_negativeDurationHandled()
     QCOMPARE(d.duration, (qint64)-2000);
 }
 
-void DatabaseTest::test_schemaValidation_missingStartColumns()
-{
-    // Description: Schema check fails when start_utc/end_utc/segment_id are missing
-
-    resetDatabaseFile();
-
-    const QString connName = "schema_legacy";
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
-        db.setDatabaseName(db_path_);
-        QVERIFY(db.open());
-        QSqlQuery query(db);
-        QVERIFY(query.exec(
-            "CREATE TABLE durations ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "type INTEGER NOT NULL,"
-            "duration INTEGER NOT NULL,"
-            "end_date DATE NOT NULL,"
-            "end_time TEXT NOT NULL)"
-        ));
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(connName);
-
-    QTemporaryDir tempDir;
-    QVERIFY(tempDir.isValid());
-    Settings settings(createSettingsFile(tempDir.path(), 7));
-    SqliteSessionStore manager(settings);
-
-    QVERIFY(!manager.checkSchemaOnStartup());
-}
-
 void DatabaseTest::test_exactMatching_upsertReplacesById()
 {
     // Description: Upsert replaces by exact start_time/type, leaving one row
@@ -204,12 +172,12 @@ void DatabaseTest::test_exactMatching_upsertReplacesById()
 
     std::deque<TimeDuration> durations;
     durations.emplace_back(DurationType::Activity, start, end1);
-    QVERIFY(manager.updateDurationsById(durations));
+    QVERIFY(manager.updateDurationsById(durations).ok());
     const SegmentId stableSegmentId = durations.front().segment_id;
 
     durations.clear();
     durations.emplace_back(DurationType::Activity, start, end2, stableSegmentId);
-    QVERIFY(manager.updateDurationsById(durations));
+    QVERIFY(manager.updateDurationsById(durations).ok());
 
     const QString connName = "exact_match_query";
     {
@@ -328,7 +296,7 @@ void DatabaseTest::test_loadDurations_skipsNegativeDurationRows()
     QDateTime end = start.addSecs(10);
     std::deque<TimeDuration> durations;
     durations.emplace_back(DurationType::Activity, start, end);
-    QVERIFY(manager.updateDurationsById(durations));
+    QVERIFY(manager.updateDurationsById(durations).ok());
 
     // Insert a row with start > end (reversed) — should be skipped at load.
     QVERIFY(manager.ensureOpen());
@@ -569,7 +537,7 @@ void DatabaseTest::test_database_update_by_id_insert_mode()
     durations.emplace_back(DurationType::Pause, now.addSecs(-80), now.addSecs(-70));
     
     // First upsert - should INSERT both
-    QVERIFY(manager.updateDurationsById(durations));
+    QVERIFY(manager.updateDurationsById(durations).ok());
     
     auto loaded = manager.loadDurations();
     QCOMPARE(loaded.size(), (size_t)2);
@@ -590,7 +558,7 @@ void DatabaseTest::test_database_update_by_id_updates_existing_row_on_start_drif
     // Insert initial duration
     std::deque<TimeDuration> initial;
     initial.emplace_back(DurationType::Activity, start1, end1);
-    QVERIFY(manager.updateDurationsById(initial));
+    QVERIFY(manager.updateDurationsById(initial).ok());
     
     auto loaded = manager.loadDurations();
     QCOMPARE(loaded.size(), (size_t)1);
@@ -601,7 +569,7 @@ void DatabaseTest::test_database_update_by_id_updates_existing_row_on_start_drif
     QDateTime driftedStart = start1.addSecs(5);
     QDateTime end2 = now.addSecs(-80); // Extended duration
     updated.emplace_back(DurationType::Activity, driftedStart, end2, initial.front().segment_id);
-    QVERIFY(manager.updateDurationsById(updated));
+    QVERIFY(manager.updateDurationsById(updated).ok());
     
     // Should update existing row by segment_id (no duplicate).
     loaded = manager.loadDurations();
@@ -624,12 +592,12 @@ void DatabaseTest::test_database_update_by_id_different_segments_same_start_both
     // Insert Activity at same start time
     std::deque<TimeDuration> activity;
     activity.emplace_back(DurationType::Activity, start, start.addSecs(10));
-    QVERIFY(manager.updateDurationsById(activity));
+    QVERIFY(manager.updateDurationsById(activity).ok());
     
     // Insert Pause at SAME start time (different type)
     std::deque<TimeDuration> pause;
     pause.emplace_back(DurationType::Pause, start, start.addSecs(5));
-    QVERIFY(manager.updateDurationsById(pause));
+    QVERIFY(manager.updateDurationsById(pause).ok());
     
     // Both should exist because segment_id differs.
     auto loaded = manager.loadDurations();
@@ -645,7 +613,7 @@ void DatabaseTest::test_database_update_by_id_empty_deque()
     SqliteSessionStore manager(settings);
 
     std::deque<TimeDuration> empty;
-    QVERIFY(manager.updateDurationsById(empty)); // Should succeed as no-op
+    QVERIFY(manager.updateDurationsById(empty).ok()); // Should succeed as no-op
 }
 
 void DatabaseTest::test_database_load_negative_duration()
@@ -863,38 +831,6 @@ void DatabaseTest::test_database_millisecond_precision()
     QCOMPARE(loaded[0].duration, (qint64)4567);
 }
 
-void DatabaseTest::test_database_schema_validation_missing_start_date()
-{
-    resetDatabaseFile();
-    
-    // Create database with old schema (missing start_date/start_time)
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "schema_test");
-    db.setDatabaseName(db_path_);
-    QVERIFY(db.open());
-    
-    QSqlQuery query(db);
-    QVERIFY(query.exec(
-        "CREATE TABLE durations ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "type INTEGER NOT NULL,"
-        "duration INTEGER NOT NULL,"
-        "end_date DATE NOT NULL,"
-        "end_time TEXT NOT NULL"
-        ")"
-    ));
-    db.close();
-    QSqlDatabase::removeDatabase("schema_test");
-    
-    // Now try to use SqliteSessionStore
-    QTemporaryDir tempDir;
-    QVERIFY(tempDir.isValid());
-    Settings settings(createSettingsFile(tempDir.path(), 7));
-    SqliteSessionStore manager(settings);
-    
-    // checkSchemaOnStartup should detect outdated schema
-    QVERIFY(!manager.checkSchemaOnStartup());
-}
-
 void DatabaseTest::test_database_schema_validation_fresh_database()
 {
     resetDatabaseFile();
@@ -926,159 +862,6 @@ void DatabaseTest::test_database_schema_creates_idx_finalized_start()
     ));
     QVERIFY(query.next());
     QCOMPARE(query.value(0).toString(), QString("idx_start_utc"));
-}
-
-void DatabaseTest::test_database_schema_migration_adds_is_finalized_and_segment_id_marks_existing_rows()
-{
-    resetDatabaseFile();
-
-    const QString connName = "schema_migration_is_finalized";
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
-        db.setDatabaseName(db_path_);
-        QVERIFY(db.open());
-        QSqlQuery query(db);
-        QVERIFY(query.exec(
-            "CREATE TABLE durations ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "type INTEGER NOT NULL,"
-            "duration INTEGER NOT NULL,"
-            "start_date DATE NOT NULL,"
-            "start_time TEXT NOT NULL,"
-            "end_date DATE NOT NULL,"
-            "end_time TEXT NOT NULL,"
-            "UNIQUE(start_date, start_time, type) ON CONFLICT REPLACE"
-            ")"
-        ));
-
-        const QDateTime start = QDateTime::currentDateTimeUtc().addSecs(-30);
-        const QDateTime end = start.addSecs(20);
-        query.prepare(
-            "INSERT INTO durations (type, duration, start_date, start_time, end_date, end_time) "
-            "VALUES (0, :duration, :start_date, :start_time, :end_date, :end_time)"
-        );
-        query.bindValue(":duration", static_cast<qint64>(20000));
-        query.bindValue(":start_date", start.date().toString(Qt::ISODate));
-        query.bindValue(":start_time", start.time().toString("HH:mm:ss.zzz"));
-        query.bindValue(":end_date", end.date().toString(Qt::ISODate));
-        query.bindValue(":end_time", end.time().toString("HH:mm:ss.zzz"));
-        QVERIFY(query.exec());
-    }
-    QSqlDatabase::removeDatabase(connName);
-
-    QTemporaryDir tempDir;
-    QVERIFY(tempDir.isValid());
-    Settings settings(createSettingsFile(tempDir.path(), 7));
-    SqliteSessionStore manager(settings);
-
-    QVERIFY(manager.loadDurations().size() == static_cast<size_t>(1));
-
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
-    QVERIFY(query.exec("PRAGMA table_info(durations)"));
-    bool hasIsFinalized = false;
-    bool hasSegmentId = false;
-    while (query.next()) {
-        if (query.value(1).toString() == "is_finalized") {
-            hasIsFinalized = true;
-        }
-        if (query.value(1).toString() == "segment_id") {
-            hasSegmentId = true;
-        }
-    }
-    QVERIFY(hasIsFinalized);
-    QVERIFY(hasSegmentId);
-
-    QVERIFY(query.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 1"));
-    QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 1);
-
-    QVERIFY(query.exec("SELECT COUNT(*) FROM durations WHERE segment_id IS NOT NULL AND segment_id != ''"));
-    QVERIFY(query.next());
-    QCOMPARE(query.value(0).toInt(), 1);
-    manager.lazyClose();
-}
-
-void DatabaseTest::test_database_schema_migration_dropLegacyColumns_migrates_step9_schema()
-{
-    // Seed a database that matches the Step-9 dual-write schema: all old columns
-    // present AND start_utc/end_utc populated. Opening SqliteSessionStore should
-    // run dropLegacyColumns(), producing a clean schema with only start_utc/end_utc,
-    // and the row must still be loadable with correct timestamps.
-    resetDatabaseFile();
-
-    const QDateTime start = QDateTime(QDate(2025, 3, 10), QTime(9, 0, 0), Qt::UTC);
-    const QDateTime end   = QDateTime(QDate(2025, 3, 10), QTime(9, 30, 0), Qt::UTC);
-    const SegmentId sid = SegmentId::mint();
-
-    const QString connName = "step9_seed";
-    {
-        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
-        db.setDatabaseName(db_path_);
-        QVERIFY(db.open());
-        QSqlQuery q(db);
-        QVERIFY(q.exec(
-            "CREATE TABLE durations ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "segment_id TEXT NOT NULL,"
-            "type INTEGER NOT NULL,"
-            "duration INTEGER NOT NULL,"
-            "start_date DATE NOT NULL,"
-            "start_time TEXT NOT NULL,"
-            "end_date DATE NOT NULL,"
-            "end_time TEXT NOT NULL,"
-            "is_finalized INTEGER NOT NULL DEFAULT 0,"
-            "start_utc TEXT,"
-            "end_utc TEXT,"
-            "UNIQUE(segment_id)"
-            ")"
-        ));
-        q.prepare(
-            "INSERT INTO durations "
-            "(segment_id, type, duration, start_date, start_time, end_date, end_time, "
-            " is_finalized, start_utc, end_utc) "
-            "VALUES (:sid, 0, :dur, :sd, :st, :ed, :et, 1, :su, :eu)"
-        );
-        q.bindValue(":sid", sid.toString());
-        q.bindValue(":dur", start.msecsTo(end));
-        q.bindValue(":sd", start.date().toString(Qt::ISODate));
-        q.bindValue(":st", start.time().toString("HH:mm:ss.zzz"));
-        q.bindValue(":ed", end.date().toString(Qt::ISODate));
-        q.bindValue(":et", end.time().toString("HH:mm:ss.zzz"));
-        q.bindValue(":su", start.toString(Qt::ISODateWithMs));
-        q.bindValue(":eu", end.toString(Qt::ISODateWithMs));
-        QVERIFY(q.exec());
-        db.close();
-    }
-    QSqlDatabase::removeDatabase(connName);
-
-    // Opening SqliteSessionStore triggers the migration chain including dropLegacyColumns.
-    QTemporaryDir tempDir;
-    QVERIFY(tempDir.isValid());
-    Settings settings(createSettingsFile(tempDir.path(), 7));
-    SqliteSessionStore manager(settings);
-
-    // The row loads correctly.
-    auto loaded = manager.loadDurations();
-    QCOMPARE(loaded.size(), static_cast<size_t>(1));
-    QCOMPARE(loaded[0].startTime.toUTC(), start);
-    QCOMPARE(loaded[0].endTime.toUTC(), end);
-    QCOMPARE(loaded[0].segment_id.toString(), sid.toString());
-
-    // start_date column is absent — legacy columns were dropped.
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery pragma(manager.db);
-    QVERIFY(pragma.exec("PRAGMA table_info(durations)"));
-    bool hasStartDate = false;
-    bool hasStartUtc  = false;
-    while (pragma.next()) {
-        const QString col = pragma.value(1).toString();
-        if (col == "start_date") hasStartDate = true;
-        if (col == "start_utc")  hasStartUtc  = true;
-    }
-    QVERIFY(!hasStartDate);
-    QVERIFY(hasStartUtc);
-    manager.lazyClose();
 }
 
 void DatabaseTest::test_database_backup_file_creation()
@@ -1894,7 +1677,7 @@ void DatabaseTest::test_finalizeIfNoOverlap_succeeds_when_no_overlap()
     std::deque<TimeDuration> seeded;
     seeded.emplace_back(DurationType::Activity, existingStartUtc.toLocalTime(), existingEndUtc.toLocalTime());
     manager.lazyClose();
-    QVERIFY(manager.updateDurationsById(seeded));
+    QVERIFY(manager.updateDurationsById(seeded).ok());
 
     // Orphan from 12:00 to 12:30 — no overlap with the finalised row above.
     const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC);
@@ -1931,7 +1714,7 @@ void DatabaseTest::test_finalizeIfNoOverlap_rejects_when_overlapping_finalized_r
     const QDateTime existingEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 0, 0), Qt::UTC);
     std::deque<TimeDuration> seeded;
     seeded.emplace_back(DurationType::Activity, existingStartUtc.toLocalTime(), existingEndUtc.toLocalTime());
-    QVERIFY(manager.updateDurationsById(seeded));
+    QVERIFY(manager.updateDurationsById(seeded).ok());
 
     // Orphan from 10:30 to 11:30 — overlaps the finalised row.
     const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC);
@@ -1959,7 +1742,7 @@ void DatabaseTest::test_finalizeIfNoOverlap_leaves_row_unchanged_on_overlap()
     const QDateTime existingEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 0, 0), Qt::UTC);
     std::deque<TimeDuration> seeded;
     seeded.emplace_back(DurationType::Activity, existingStartUtc.toLocalTime(), existingEndUtc.toLocalTime());
-    QVERIFY(manager.updateDurationsById(seeded));
+    QVERIFY(manager.updateDurationsById(seeded).ok());
 
     // Orphan whose interval straddles the existing row.
     const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(9, 30, 0), Qt::UTC);
@@ -1996,7 +1779,7 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dr
     const QDateTime existingEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 0, 0), Qt::UTC);
     std::deque<TimeDuration> seeded;
     seeded.emplace_back(DurationType::Activity, existingStartUtc.toLocalTime(), existingEndUtc.toLocalTime());
-    QVERIFY(manager.updateDurationsById(seeded));
+    QVERIFY(manager.updateDurationsById(seeded).ok());
 
     // Orphan A: 12:00 - 12:30 — no overlap → should be finalised.
     // Orphan B: 10:30 - 11:30 — overlaps existing → should be reported as dropped.

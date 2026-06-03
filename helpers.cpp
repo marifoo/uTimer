@@ -1,7 +1,5 @@
 #include "helpers.h"
 #include "timeline.h"
-#include <algorithm>
-#include <cmath>
 #include <vector>
 
 
@@ -38,31 +36,19 @@ QString convTimeStrToDurationStr(const QString &time_str)
 }
 
 /**
- * Optimization: Cleans up the duration list before database insertion.
- *
- * Thin wrapper around Timeline::normalized(). The canonical algorithm lives
- * in timeline.cpp; this function collects orphaned segment_ids (those that
- * were merged away) and returns them so callers can remove them from the DB.
+ * Normalizes the duration list in-place (merging adjacent same-type segments)
+ * and returns the segment_id strings of any segments merged away.
+ * Delegates to Timeline::normalizedWithRemovedIds().
  */
 std::vector<QString> cleanDurations(std::deque<TimeDuration>* pDurations)
 {
-	// Collect before-IDs
-	std::vector<QString> before;
-	for (const auto& d : *pDurations)
-		before.push_back(d.segment_id.toString());
-
 	Timeline t(*pDurations, std::nullopt);
-	Timeline normed = t.normalized();
+	auto [normed, removed] = t.normalizedWithRemovedIds();
 	*pDurations = normed.completed();
-
-	// Return IDs that disappeared
-	std::vector<QString> removed;
-	for (const auto& id : before) {
-		bool found = false;
-		for (const auto& d : *pDurations)
-			if (d.segment_id.toString() == id) { found = true; break; }
-		if (!found)
-			removed.push_back(id);
-	}
 	return removed;
+}
+
+QString toUtcIso(const QDateTime& dt)
+{
+	return dt.toUTC().toString(Qt::ISODateWithMs);
 }

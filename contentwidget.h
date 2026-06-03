@@ -44,6 +44,9 @@ private:
 	QString autopause_tooltip2_;
 	QString activity_time_tooltip_base_;
 
+	enum class GuiMode { Stopped, Activity, Pause };
+	GuiMode gui_mode_ = GuiMode::Stopped;
+
 	void setupGUI();
 	void setupTimeRows();
 	void setupButtonRows();

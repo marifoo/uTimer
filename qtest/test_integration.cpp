@@ -332,10 +332,10 @@ void IntegrationTest::test_integration_duplicate_prevention()
     std::deque<TimeDuration> durations;
     durations.emplace_back(DurationType::Activity, start, end);
     
-    QVERIFY(manager.updateDurationsById(durations));
+    QVERIFY(manager.updateDurationsById(durations).ok());
     durations.front().endTime = end.addSecs(10);
     durations.front().duration = durations.front().startTime.msecsTo(durations.front().endTime);
-    QVERIFY(manager.updateDurationsById(durations));
+    QVERIFY(manager.updateDurationsById(durations).ok());
     
     auto loaded = manager.loadDurations();
     QCOMPARE(loaded.size(), (size_t)1);
@@ -357,7 +357,7 @@ void IntegrationTest::test_integration_empty_database_operations()
     QCOMPARE(manager.hasEntriesForDate(QDate::currentDate()), EntriesForDateResult::No);
     
     std::deque<TimeDuration> empty;
-    QVERIFY(manager.updateDurationsById(empty));
+    QVERIFY(manager.updateDurationsById(empty).ok());
 }
 
 // ============================================================================

@@ -111,9 +111,8 @@ void Timer::DayBoundaryWatcher::onMidnightTimerFired()
 // SessionState transition methods
 // ============================================================================
 
-void SessionState::beginNewSegment(const QDateTime& startTime, const Settings& settings)
+void SessionState::beginNewSegment(const QDateTime& startTime)
 {
-    (void)settings;
     SegmentId oldId = id_tracker.current;
     QDateTime oldStart = segment_start_time;
     id_tracker.beginActivity();
@@ -123,9 +122,8 @@ void SessionState::beginNewSegment(const QDateTime& startTime, const Settings& s
              oldStart.toString(Qt::ISODate), startTime.toString(Qt::ISODate)));
 }
 
-void SessionState::clearSegment(const Settings& settings)
+void SessionState::clearSegment()
 {
-    (void)settings;
     SegmentId oldId = id_tracker.current;
     QDateTime oldStart = segment_start_time;
     id_tracker.clear();
@@ -134,27 +132,24 @@ void SessionState::clearSegment(const Settings& settings)
         .arg(oldId.toString(), oldStart.toString(Qt::ISODate)));
 }
 
-void SessionState::updateSegmentStartTime(const QDateTime& newStart, const Settings& settings)
+void SessionState::updateSegmentStartTime(const QDateTime& newStart)
 {
-    (void)settings;
     QDateTime oldStart = segment_start_time;
     segment_start_time = newStart;
     Logger::Log(QString("[STATE] updateSegmentStartTime: %1 -> %2")
         .arg(oldStart.toString(Qt::ISODate), newStart.toString(Qt::ISODate)));
 }
 
-void SessionState::markUnsaved(const Settings& settings)
+void SessionState::markUnsaved()
 {
-    (void)settings;
     if (!has_unsaved_data) {
         has_unsaved_data = true;
         Logger::Log("[STATE] markUnsaved: false -> true");
     }
 }
 
-void SessionState::clearUnsaved(const Settings& settings)
+void SessionState::clearUnsaved()
 {
-    (void)settings;
     bool old = has_unsaved_data;
     has_unsaved_data = false;
     unsaved_durations.clear();
@@ -163,9 +158,8 @@ void SessionState::clearUnsaved(const Settings& settings)
     }
 }
 
-void SessionState::resetForNewSession(const Settings& settings)
+void SessionState::resetForNewSession()
 {
-    (void)settings;
     size_t oldSize = durations.size();
     bool oldUnsaved = has_unsaved_data;
     durations.clear();
@@ -175,9 +169,8 @@ void SessionState::resetForNewSession(const Settings& settings)
         .arg(oldSize).arg(oldUnsaved ? "true" : "false"));
 }
 
-void SessionState::adoptOngoingSegment(const TimeDuration& ongoing, const Settings& settings)
+void SessionState::adoptOngoingSegment(const TimeDuration& ongoing)
 {
-    (void)settings;
     SegmentId oldId = id_tracker.current;
     QDateTime oldStart = segment_start_time;
     id_tracker.adoptFrom(ongoing);
@@ -423,7 +416,7 @@ void Timer::startTimer(const QDateTime& now)
         addDuration(DurationType::Pause, session_.segment_start_time, now, session_.id_tracker.current);
 
         mode_ = Mode::Activity;
-        session_.beginNewSegment(now, settings_);
+        session_.beginNewSegment(now);
 
         // Persist the completed Pause row immediately so it survives a crash.
         // Without this, a crash before the next pauseTimer/stopTimer would lose
@@ -451,23 +444,18 @@ void Timer::startTimer(const QDateTime& now)
             Logger::Log("[DB] Retrying save of previously unsaved durations");
             const SessionStoreResult retryResult = appendDurationsChunkToDB(retry_source);
             if (retryResult.ok()) {
-                session_.clearUnsaved(settings_);
+                session_.clearUnsaved();
                 session_.consecutive_retry_failures = 0;
                 Logger::Log("[DB] Previously unsaved durations saved successfully");
-            } else if (retryResult.category == SessionStoreResult::FatalError) {
-                // FatalError already emitted userWarning in appendDurationsChunkToDB.
-                // Refuse new sessions by capping the retry counter.
+            } else if (retryResult.category == SessionStoreResult::FatalError
+                       || retryResult.category == SessionStoreResult::CallerBug) {
+                // Already handled by handleDbResult inside appendDurationsChunkToDB
                 retry_succeeded = false;
-                session_.consecutive_retry_failures = 3;
-                Logger::Log("[DB] CRITICAL: Fatal DB error on retry - refusing new session");
-                return;
-            } else if (retryResult.category == SessionStoreResult::CallerBug) {
-                // CallerBug: retrying won't help; log and abort without incrementing counter.
-                retry_succeeded = false;
-                Logger::Log("[DB] CRITICAL: Retry save caller bug - unsaved data retained");
+                if (retryResult.category == SessionStoreResult::FatalError)
+                    session_.consecutive_retry_failures = 3;
                 return;
             } else {
-                // TransientError: increment counter and possibly warn.
+                // TransientError
                 retry_succeeded = false;
                 session_.consecutive_retry_failures++;
                 Logger::Log(QString("[DB] CRITICAL: Retry save failed (consecutive=%1) - unsaved data retained")
@@ -503,7 +491,7 @@ void Timer::startTimer(const QDateTime& now)
                         : "[TIMER] Boot time not added - entries already exist for today");
         }
         if (retry_succeeded) {
-            session_.resetForNewSession(settings_);
+            session_.resetForNewSession();
         }
         if (shouldAddBootTime) {
             QDateTime bootStart = now.addMSecs(-static_cast<qint64>(boot_time_sec) * 1000);
@@ -511,7 +499,7 @@ void Timer::startTimer(const QDateTime& now)
         }
         timer_.start();
         mode_ = Mode::Activity;
-        session_.beginNewSegment(now, settings_);
+        session_.beginNewSegment(now);
         if (checkpoint_interval_msec_ > 0) {
             checkpointTimer_.start(); // Start periodic checkpoint saving
         }
@@ -623,7 +611,7 @@ void Timer::backpauseTimer(const QDateTime& now)
 void Timer::finalizeActivityToPause(const QDateTime& pauseSegmentStart)
 {
     mode_ = Mode::Pause;
-    session_.updateSegmentStartTime(pauseSegmentStart, settings_);
+    session_.updateSegmentStartTime(pauseSegmentStart);
 
     // Sync to DB: finalizes the Activity segment and cleans up orphaned
     // segment_ids from any cleanDurations merges (T14).
@@ -631,7 +619,7 @@ void Timer::finalizeActivityToPause(const QDateTime& pauseSegmentStart)
 
     // Fresh segment_id for the ongoing Pause. This ensures the next
     // checkpoint or save targets a new DB row for the Pause period.
-    session_.beginNewSegment(pauseSegmentStart, settings_);
+    session_.beginNewSegment(pauseSegmentStart);
 
     checkpointTimer_.stop();
 }
@@ -660,7 +648,7 @@ void Timer::stopTimer(const QDateTime& now, StopReason reason)
         addDuration(DurationType::Activity, session_.segment_start_time, now, session_.id_tracker.current);
     }
     mode_ = Mode::None;
-    session_.clearSegment(settings_);
+    session_.clearSegment();
     checkpointTimer_.stop();
     day_boundary_watcher_.cancel();
     was_active_before_autopause_ = false;
@@ -669,13 +657,13 @@ void Timer::stopTimer(const QDateTime& now, StopReason reason)
     // Persist current session durations only (not entire history). History dialog does replace explicitly.
     // Use update interface to check for existing entries by start time and update them instead of creating duplicates
     if (updateDurationsInDB()) {
-        session_.resetForNewSession(settings_);
+        session_.resetForNewSession();
         // Use the same `now` for the shutdown marker to maintain a single
         // consistent timestamp across the entire stop operation.
         db_.setLastCleanShutdownMarker(now);
         Logger::Log("[DB] Session durations updated");
     } else {
-        session_.markUnsaved(settings_);
+        session_.markUnsaved();
         session_.unsaved_durations = session_.durations;
         Logger::Log("[DB] Error updating session durations - data retained for next save attempt");
     }
@@ -881,7 +869,7 @@ void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations
     guard.markTransitioned(); // Intentionally replaces durations
 #endif
     session_.durations = newDurations;
-    session_.clearUnsaved(settings_);
+    session_.clearUnsaved();
 
     if (!ongoing.has_value()) {
 #ifndef QT_NO_DEBUG
@@ -891,7 +879,7 @@ void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations
     }
 
     const TimeDuration& seg = ongoing.value();
-    session_.adoptOngoingSegment(seg, settings_);
+    session_.adoptOngoingSegment(seg);
 
     if (checkpoint_interval_msec_ == 0 || mode_ != Mode::Activity || seg.type != DurationType::Activity) {
 #ifndef QT_NO_DEBUG
@@ -994,31 +982,36 @@ bool Timer::appendDurationsToDB()
     return appendDurationsChunkToDB(session_.durations).ok();
 }
 
+void Timer::handleDbResult(const SessionStoreResult& result, const QString& context)
+{
+    if (result.category == SessionStoreResult::CallerBug) {
+        Logger::Log("[DB] CRITICAL: " + context + " caller bug: " + result.message);
+    } else if (result.category == SessionStoreResult::FatalError) {
+        Logger::Log("[DB] CRITICAL: " + context + " fatal error: " + result.message);
+        emit userWarning("Database error: " + result.message);
+    } else if (result.category == SessionStoreResult::TransientError) {
+        Logger::Log("[DB] " + context + " transient error: " + result.message);
+    }
+    // Success: nothing to log/emit
+}
+
 SessionStoreResult Timer::appendDurationsChunkToDB(const std::deque<TimeDuration>& durations)
 {
     if (durations.empty())
         return SessionStoreResult::success();
     const SessionStoreResult result = db_.commitSession(Timeline(durations, std::nullopt));
-    if (result.category == SessionStoreResult::CallerBug) {
-        Logger::Log("[DB] CRITICAL: commitSession caller bug: " + result.message);
-    } else if (result.category == SessionStoreResult::FatalError) {
-        emit userWarning("Database error: " + result.message);
-    }
+    handleDbResult(result, "commitSession");
     return result;
 }
 
 bool Timer::updateDurationsInDB()
 {
     if (session_.durations.empty()) {
-        session_.clearUnsaved(settings_);
+        session_.clearUnsaved();
         return true;
     }
     const SessionStoreResult result = db_.commitSession(Timeline(session_.durations, std::nullopt));
-    if (result.category == SessionStoreResult::CallerBug) {
-        Logger::Log("[DB] CRITICAL: commitSession caller bug: " + result.message);
-    } else if (result.category == SessionStoreResult::FatalError) {
-        emit userWarning("Database error: " + result.message);
-    }
+    handleDbResult(result, "commitSession");
     const bool ok = result.ok();
 #ifndef QT_NO_DEBUG
     if (ok) {
@@ -1034,7 +1027,7 @@ bool Timer::replaceAll(const Timeline& history, const Timeline& session)
     const bool ok = db_.replaceAll(history, session);
     if (ok) {
         // DB is now authoritative; stale retry cache must not survive past here.
-        session_.clearUnsaved(settings_);
+        session_.clearUnsaved();
     }
     return ok;
 }
@@ -1105,16 +1098,16 @@ bool Timer::discardCrossMidnightOngoingAndStop(const QDateTime& now)
     // accumulated before midnight. Only the ONGOING segment is discarded.
     if (!session_.durations.empty()) {
         if (!updateDurationsInDB()) {
-            session_.markUnsaved(settings_);
+            session_.markUnsaved();
             session_.unsaved_durations = session_.durations;
             Logger::Log("[MIDNIGHT] Could not flush completed segments to DB - retained in unsaved buffer");
         } else {
-            session_.resetForNewSession(settings_);
+            session_.resetForNewSession();
         }
     }
 
     mode_ = Mode::None;
-    session_.clearSegment(settings_);
+    session_.clearSegment();
     checkpointTimer_.stop();
     day_boundary_watcher_.cancel();
     was_active_before_autopause_ = false;
@@ -1161,7 +1154,7 @@ void Timer::saveCheckpointInternal(const QDateTime& now)
     DurationType type = DurationType::Activity;
 
     if (session_.id_tracker.current.isEmpty()) {
-        session_.beginNewSegment(session_.segment_start_time, settings_);
+        session_.beginNewSegment(session_.segment_start_time);
     }
     const SessionStoreResult result = db_.saveCheckpoint(type, wallClockMs, session_.segment_start_time, now, session_.id_tracker.current);
 
@@ -1170,13 +1163,8 @@ void Timer::saveCheckpointInternal(const QDateTime& now)
             .arg(type == DurationType::Activity ? "Activity" : "Pause")
             .arg(wallClockMs)
             .arg(session_.id_tracker.current.toString()));
-    } else if (result.category == SessionStoreResult::CallerBug) {
-        Logger::Log("[CHECKPOINT] CRITICAL: saveCheckpoint caller bug: " + result.message);
-    } else if (result.category == SessionStoreResult::FatalError) {
-        Logger::Log("[CHECKPOINT] Fatal DB error saving checkpoint: " + result.message);
-        emit userWarning("Database error while saving checkpoint: " + result.message);
     } else {
-        Logger::Log("[CHECKPOINT] Failed to save checkpoint to database: " + result.message);
+        handleDbResult(result, "saveCheckpoint");
     }
 }
 

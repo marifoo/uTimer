@@ -23,4 +23,9 @@ QString convTimeStrToDurationStr(const QString &time_str);
 
 std::vector<QString> cleanDurations(std::deque<TimeDuration>* pDurations);
 
+/// Returns dt.toUTC().toString(Qt::ISODateWithMs).
+/// All UTC timestamps stored in the database use this canonical format,
+/// which sorts lexicographically in chronological order.
+QString toUtcIso(const QDateTime& dt);
+
 #endif // HELPERS

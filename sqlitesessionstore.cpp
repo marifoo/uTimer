@@ -42,6 +42,7 @@
 #include <QStorageInfo>
 #include <QTextStream>
 #include <atomic>
+#include "helpers.h"
 #include "logger.h"
 
 namespace {
@@ -138,28 +139,21 @@ bool SqliteSessionStore::ensureOpen()
 }
 
 /**
- * Idempotent schema setup: called from the constructor and checkSchemaOnStartup().
- *
- * Creates the durations table (if needed), runs forward-compatibility migrations
- * (creating a pre-migration backup before any table rebuild), creates indexes,
- * and sets PRAGMA synchronous=NORMAL.  All DDL uses IF NOT EXISTS so repeated
- * calls are safe.
+ * Idempotent schema setup: creates the durations and app_settings tables (if
+ * needed), creates indexes, and sets PRAGMA synchronous=NORMAL.  All DDL uses
+ * IF NOT EXISTS so repeated calls are safe.
  *
  * Journal mode note: this app uses SQLite's default rollback journal mode, NOT
  * WAL.  WAL's concurrent-readers advantage is irrelevant for a single-process
  * app.  Rollback journal keeps the database as a single file (no -wal/-shm
  * sidecars), which simplifies close-copy-reopen backups and portability.
  *
- * Returns false on schema/migration failures (caller closes the connection).
+ * Returns false on DDL failures (caller closes the connection).
  * Non-fatal failures (index creation, PRAGMA) are logged and allowed through —
  * the DB is still usable for reads and writes.
  */
 bool SqliteSessionStore::ensureSchema()
 {
-    // Create the durations table if it doesn't exist.
-    // New installs get the clean schema directly; existing DBs go through
-    // the migration chain (ensureIsFinalizedColumn → ensureSegmentIdColumn
-    // → ensureUtcColumns → dropLegacyColumns).
     QSqlQuery query_new(db);
     bool tableCreated = query_new.exec(
         "CREATE TABLE IF NOT EXISTS durations ("
@@ -178,28 +172,7 @@ bool SqliteSessionStore::ensureSchema()
         return false;
     }
 
-    if (!ensureIsFinalizedColumn()) {
-        return false;
-    }
-
-    if (!ensureSegmentIdColumn()) {
-        return false;
-    }
-
-    if (!ensureUtcColumns()) {
-        return false;
-    }
-
-    if (!dropLegacyColumns()) {
-        return false;
-    }
-
     if (!ensureSettingsTable()) {
-        return false;
-    }
-
-    if (!validateSchema()) {
-        Logger::Log("[DB] CRITICAL: Schema validation failed - database is outdated");
         return false;
     }
 
@@ -295,11 +268,9 @@ bool SqliteSessionStore::checkSchemaOnStartup()
         return true;
     }
 
-    // The constructor already ran ensureSchema(); this call is idempotent and
-    // will skip migrations that have already been applied.  Calling ensureSchema()
-    // here (rather than validateSchema() alone) ensures that if a migration is
-    // somehow still needed at startup time, a pre-migration backup is created
-    // before the table rebuild runs (S15).
+    // The constructor already ran ensureSchema(); this call is idempotent
+    // (all DDL uses IF NOT EXISTS) and re-creates tables/indexes if somehow
+    // missing without any data loss.
     if (!ensureOpen()) {
         return false;
     }
@@ -330,7 +301,7 @@ void SqliteSessionStore::performRetentionCleanup()
     const QDateTime threshold = QDateTime::currentDateTimeUtc().addDays(-static_cast<int>(history_days_to_keep_));
     QSqlQuery query(db);
     query.prepare("DELETE FROM durations WHERE end_utc < :threshold");
-    query.bindValue(":threshold", threshold.toString(Qt::ISODateWithMs));
+    query.bindValue(":threshold", toUtcIso(threshold));
     if (!query.exec()) {
         db.rollback();
         Logger::Log("[DB] Error clearing old durations: " + query.lastError().text());
@@ -347,11 +318,6 @@ void SqliteSessionStore::performRetentionCleanup()
  * `keepCount` most recent of each file type (.backup and .durations.txt).
  * Files are named with ISO timestamps so alphabetical sort = chronological.
  * Called once per startup from checkSchemaOnStartup(). Non-fatal.
- *
- * Note: the glob "*.backup" also matches "*.pre-migration.backup" files created
- * by ensureSegmentIdColumn().  Both count toward the same keepCount limit, which
- * is intentional — pre-migration backups are created at most once per schema
- * upgrade and are unlikely to crowd out regular backups in practice.
  */
 void SqliteSessionStore::pruneOldBackups(int keepCount)
 {
@@ -368,342 +334,6 @@ void SqliteSessionStore::pruneOldBackups(int keepCount)
             }
         }
     }
-}
-
-/**
- * Validates that the database schema contains the required UTC timestamp columns.
- *
- * Checks for start_utc, end_utc, and segment_id. Returns false if any are absent
- * (e.g. a manually-created table or a DB predating the UTC migration).
- */
-bool SqliteSessionStore::validateSchema()
-{
-    QSqlQuery query(db);
-    if (!query.exec("PRAGMA table_info(durations)")) {
-        Logger::Log("[DB] Error checking table schema: " + query.lastError().text());
-        return false;
-    }
-
-    bool hasStartUtc = false;
-    bool hasEndUtc = false;
-    bool hasSegmentId = false;
-
-    while (query.next()) {
-        const QString col = query.value(1).toString();
-        if (col == "start_utc") hasStartUtc = true;
-        else if (col == "end_utc") hasEndUtc = true;
-        else if (col == "segment_id") hasSegmentId = true;
-    }
-
-    if (!hasStartUtc || !hasEndUtc || !hasSegmentId) {
-        Logger::Log(QString("[DB] Schema validation failed: start_utc=%1, end_utc=%2, segment_id=%3")
-            .arg(hasStartUtc ? "present" : "MISSING")
-            .arg(hasEndUtc ? "present" : "MISSING")
-            .arg(hasSegmentId ? "present" : "MISSING"));
-        return false;
-    }
-
-    return true;
-}
-
-bool SqliteSessionStore::ensureIsFinalizedColumn()
-{
-    QSqlQuery tableInfo(db);
-    if (!tableInfo.exec("PRAGMA table_info(durations)")) {
-        Logger::Log("[DB] Error checking table_info for is_finalized migration: " + tableInfo.lastError().text());
-        return false;
-    }
-
-    bool hasIsFinalized = false;
-    while (tableInfo.next()) {
-        if (tableInfo.value(1).toString() == "is_finalized") {
-            hasIsFinalized = true;
-            break;
-        }
-    }
-
-    if (hasIsFinalized) {
-        return true;
-    }
-
-    Logger::Log("[DB] Migrating schema: adding durations.is_finalized and marking existing rows as finalized");
-
-    QSqlQuery alterQuery(db);
-    if (!alterQuery.exec("ALTER TABLE durations ADD COLUMN is_finalized INTEGER NOT NULL DEFAULT 0")) {
-        Logger::Log("[DB] Error adding is_finalized column: " + alterQuery.lastError().text());
-        return false;
-    }
-
-    QSqlQuery migrateQuery(db);
-    if (!migrateQuery.exec("UPDATE durations SET is_finalized = 1")) {
-        Logger::Log("[DB] Error finalizing migrated rows: " + migrateQuery.lastError().text());
-        return false;
-    }
-
-    return true;
-}
-
-bool SqliteSessionStore::ensureSegmentIdColumn()
-{
-    QSqlQuery tableInfo(db);
-    if (!tableInfo.exec("PRAGMA table_info(durations)")) {
-        Logger::Log("[DB] Error checking table_info for segment_id migration: " + tableInfo.lastError().text());
-        return false;
-    }
-
-    bool hasSegmentId = false;
-    while (tableInfo.next()) {
-        if (tableInfo.value(1).toString() == "segment_id") {
-            hasSegmentId = true;
-            break;
-        }
-    }
-
-    if (hasSegmentId) {
-        return true;
-    }
-
-    Logger::Log("[DB] Migrating schema: rebuilding durations table with segment_id identity");
-
-    // S13: Create a pre-migration backup before the destructive table rebuild.
-    // Close the DB, copy the file, reopen — same pattern as createBackup().
-    // The PRAGMA synchronous=NORMAL will be re-applied at the end of ensureSchema().
-    if (QFile::exists(db.databaseName())) {
-        const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH-mm-ss");
-        const QString backupPath = db.databaseName() + "." + timestamp + ".pre-migration.backup";
-        db.close();
-        if (!QFile::copy(db.databaseName(), backupPath)) {
-            Logger::Log("[DB] Warning: Failed to create pre-migration backup");
-        } else {
-            Logger::Log("[DB] Created pre-migration backup: " + backupPath);
-        }
-        if (!db.open()) {
-            Logger::Log("[DB] CRITICAL: Failed to reopen database after pre-migration backup");
-            return false;
-        }
-    }
-
-    if (!db.transaction()) {
-        return false;
-    }
-
-    QSqlQuery createNew(db);
-    if (!createNew.exec(
-            "CREATE TABLE IF NOT EXISTS durations_new ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "segment_id TEXT NOT NULL,"
-            "type INTEGER NOT NULL,"
-            "duration INTEGER NOT NULL,"
-            "start_date DATE NOT NULL,"
-            "start_time TEXT NOT NULL,"
-            "end_date DATE NOT NULL,"
-            "end_time TEXT NOT NULL,"
-            "is_finalized INTEGER NOT NULL DEFAULT 0,"
-            "UNIQUE(segment_id)"
-            ")")) {
-        db.rollback();
-        return false;
-    }
-
-    QSqlQuery selectRows(db);
-    if (!selectRows.exec("SELECT type, duration, start_date, start_time, end_date, end_time, COALESCE(is_finalized, 1) FROM durations ORDER BY id ASC")) {
-        db.rollback();
-        return false;
-    }
-
-    QSqlQuery insertNew(db);
-    insertNew.prepare(
-        "INSERT INTO durations_new (segment_id, type, duration, start_date, start_time, end_date, end_time, is_finalized) "
-        "VALUES (:segment_id, :type, :duration, :start_date, :start_time, :end_date, :end_time, :is_finalized)"
-    );
-
-    int migratedRows = 0;
-    while (selectRows.next()) {
-        insertNew.bindValue(":segment_id", TimeDuration::createSegmentId().toString());
-        insertNew.bindValue(":type", selectRows.value(0));
-        insertNew.bindValue(":duration", selectRows.value(1));
-        insertNew.bindValue(":start_date", selectRows.value(2));
-        insertNew.bindValue(":start_time", selectRows.value(3));
-        insertNew.bindValue(":end_date", selectRows.value(4));
-        insertNew.bindValue(":end_time", selectRows.value(5));
-        insertNew.bindValue(":is_finalized", selectRows.value(6));
-        if (!insertNew.exec()) {
-            db.rollback();
-            return false;
-        }
-        migratedRows++;
-    }
-
-    QSqlQuery dropOld(db);
-    if (!dropOld.exec("DROP TABLE durations")) {
-        db.rollback();
-        return false;
-    }
-
-    QSqlQuery renameNew(db);
-    if (!renameNew.exec("ALTER TABLE durations_new RENAME TO durations")) {
-        db.rollback();
-        return false;
-    }
-
-    if (!db.commit()) {
-        db.rollback();
-        return false;
-    }
-
-    Logger::Log(QString("[DB] segment_id migration completed for %1 rows").arg(migratedRows));
-
-    return true;
-}
-
-bool SqliteSessionStore::ensureUtcColumns()
-{
-    QSqlQuery tableInfo(db);
-    if (!tableInfo.exec("PRAGMA table_info(durations)")) {
-        Logger::Log("[DB] Error checking table_info for utc column migration: " + tableInfo.lastError().text());
-        return false;
-    }
-
-    bool hasStartUtc = false;
-    bool hasEndUtc = false;
-    while (tableInfo.next()) {
-        const QString col = tableInfo.value(1).toString();
-        if (col == "start_utc") hasStartUtc = true;
-        else if (col == "end_utc")   hasEndUtc   = true;
-    }
-
-    if (hasStartUtc && hasEndUtc) {
-        return true;
-    }
-
-    Logger::Log("[DB] Migrating schema: adding start_utc / end_utc columns");
-
-    // Adding nullable columns is non-destructive — use ALTER TABLE (no table rebuild needed).
-    if (!hasStartUtc) {
-        QSqlQuery alter(db);
-        if (!alter.exec("ALTER TABLE durations ADD COLUMN start_utc TEXT")) {
-            Logger::Log("[DB] Error adding start_utc column: " + alter.lastError().text());
-            return false;
-        }
-    }
-    if (!hasEndUtc) {
-        QSqlQuery alter(db);
-        if (!alter.exec("ALTER TABLE durations ADD COLUMN end_utc TEXT")) {
-            Logger::Log("[DB] Error adding end_utc column: " + alter.lastError().text());
-            return false;
-        }
-    }
-
-    // Backfill existing rows by concatenating the stored UTC date/time parts.
-    // The WHERE clause makes this idempotent: rows already written by the dual-write
-    // path (Phase 1) already have start_utc set and are skipped.
-    if (!db.transaction()) {
-        Logger::Log("[DB] Error starting utc backfill transaction: " + db.lastError().text());
-        return false;
-    }
-    QSqlQuery backfill(db);
-    if (!backfill.exec(
-            "UPDATE durations "
-            "SET start_utc = start_date || 'T' || start_time || 'Z',"
-            "    end_utc   = end_date   || 'T' || end_time   || 'Z' "
-            "WHERE start_utc IS NULL")) {
-        db.rollback();
-        Logger::Log("[DB] Error backfilling utc columns: " + backfill.lastError().text());
-        return false;
-    }
-    if (!db.commit()) {
-        db.rollback();
-        Logger::Log("[DB] Error committing utc backfill: " + db.lastError().text());
-        return false;
-    }
-
-    Logger::Log("[DB] UTC column migration completed");
-    return true;
-}
-
-bool SqliteSessionStore::dropLegacyColumns()
-{
-    QSqlQuery tableInfo(db);
-    if (!tableInfo.exec("PRAGMA table_info(durations)")) {
-        Logger::Log("[DB] Error checking table_info for legacy column drop: " + tableInfo.lastError().text());
-        return false;
-    }
-    bool hasLegacy = false;
-    while (tableInfo.next()) {
-        if (tableInfo.value(1).toString() == "start_date") { hasLegacy = true; break; }
-    }
-    if (!hasLegacy) return true;
-
-    const QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH-mm-ss");
-    const QString backupPath = db.databaseName() + "." + timestamp + ".pre-migration.backup";
-    db.close();
-    if (!QFile::copy(db.databaseName(), backupPath)) {
-        Logger::Log("[DB] Warning: Failed to create pre-migration backup for legacy column drop");
-    } else {
-        Logger::Log("[DB] Created pre-migration backup: " + backupPath);
-    }
-    if (!db.open()) {
-        Logger::Log("[DB] CRITICAL: Failed to reopen database after pre-migration backup for legacy column drop");
-        return false;
-    }
-
-    if (!db.transaction()) {
-        Logger::Log("[DB] Error starting transaction for legacy column drop: " + db.lastError().text());
-        return false;
-    }
-
-    QSqlQuery q(db);
-    if (!q.exec(
-            "CREATE TABLE durations_new ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "segment_id TEXT NOT NULL CHECK(length(segment_id) > 0),"
-            "type INTEGER NOT NULL,"
-            "start_utc TEXT NOT NULL,"
-            "end_utc TEXT NOT NULL,"
-            "is_finalized INTEGER NOT NULL DEFAULT 0,"
-            "UNIQUE(segment_id)"
-            ")")) {
-        db.rollback();
-        Logger::Log("[DB] Error creating durations_new for legacy drop: " + q.lastError().text());
-        return false;
-    }
-
-    // Copy data. Use COALESCE so rows with NULL start_utc/end_utc (which should
-    // not occur in production) are still recovered from the legacy columns if present.
-    // Rows where neither source is available are excluded — they are unrecoverable.
-    if (!q.exec(
-            "INSERT INTO durations_new (id, segment_id, type, start_utc, end_utc, is_finalized) "
-            "SELECT id, segment_id, type, "
-            "    COALESCE(start_utc, start_date || 'T' || start_time || 'Z'), "
-            "    COALESCE(end_utc,   end_date   || 'T' || end_time   || 'Z'), "
-            "    is_finalized "
-            "FROM durations "
-            "WHERE COALESCE(start_utc, start_date) IS NOT NULL "
-            "  AND COALESCE(end_utc,   end_date)   IS NOT NULL")) {
-        db.rollback();
-        Logger::Log("[DB] Error copying data to durations_new: " + q.lastError().text());
-        return false;
-    }
-
-    if (!q.exec("DROP TABLE durations")) {
-        db.rollback();
-        Logger::Log("[DB] Error dropping old durations table: " + q.lastError().text());
-        return false;
-    }
-    if (!q.exec("ALTER TABLE durations_new RENAME TO durations")) {
-        db.rollback();
-        Logger::Log("[DB] Error renaming durations_new to durations: " + q.lastError().text());
-        return false;
-    }
-
-    if (!db.commit()) {
-        db.rollback();
-        Logger::Log("[DB] Error committing legacy column drop: " + db.lastError().text());
-        return false;
-    }
-
-    Logger::Log("[DB] Legacy timestamp columns dropped successfully");
-    return true;
 }
 
 bool SqliteSessionStore::ensureSettingsTable()
@@ -831,27 +461,11 @@ BackupResult SqliteSessionStore::createBackup(const std::deque<TimeDuration>& du
  */
 SessionStoreResult SqliteSessionStore::commitSession(const Timeline& session)
 {
-    // Collect before-normalization segment IDs
-    std::vector<SegmentId> beforeIds;
-    for (const auto& d : session.completed())
-        beforeIds.push_back(d.segment_id);
-
-    // Normalize to merge adjacent same-type segments
-    Timeline normed = session.normalized();
-
-    // Compute orphan IDs: segment IDs that disappeared during normalization
-    std::vector<QString> orphanIds;
-    for (const auto& id : beforeIds) {
-        bool found = false;
-        for (const auto& d : normed.completed())
-            if (d.segment_id == id) { found = true; break; }
-        if (!found)
-            orphanIds.push_back(id.toString());
-    }
-
-    return updateDurationsById(normed.completed(), orphanIds)
-        ? SessionStoreResult::success()
-        : SessionStoreResult::transient("updateDurationsById failed");
+    const auto [normed, orphanIds] = session.normalizedWithRemovedIds();
+    const SessionStoreResult result = updateDurationsById(normed.completed(), orphanIds);
+    if (!result.ok())
+        Logger::Log("[DB] commitSession: updateDurationsById failed: " + result.message);
+    return result;
 }
 
 /**
@@ -940,8 +554,8 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
     for (const auto& d : durations) {
         query.bindValue(":segment_id", d.segment_id.toString());
         query.bindValue(":type", static_cast<int>(d.type));
-        query.bindValue(":start_utc", d.startTime.toUTC().toString(Qt::ISODateWithMs));
-        query.bindValue(":end_utc", d.endTime.toUTC().toString(Qt::ISODateWithMs));
+        query.bindValue(":start_utc", toUtcIso(d.startTime));
+        query.bindValue(":end_utc", toUtcIso(d.endTime));
 
         if (!query.exec()) {
             db.rollback();
@@ -1014,8 +628,8 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
     for (const auto& d : historyDurations) {
         finalizedInsert.bindValue(":segment_id", d.segment_id.toString());
         finalizedInsert.bindValue(":type", static_cast<int>(d.type));
-        finalizedInsert.bindValue(":start_utc", d.startTime.toUTC().toString(Qt::ISODateWithMs));
-        finalizedInsert.bindValue(":end_utc", d.endTime.toUTC().toString(Qt::ISODateWithMs));
+        finalizedInsert.bindValue(":start_utc", toUtcIso(d.startTime));
+        finalizedInsert.bindValue(":end_utc", toUtcIso(d.endTime));
 
         if (!finalizedInsert.exec()) {
             db.rollback();
@@ -1033,8 +647,8 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
     for (const auto& d : currentSessionDurations) {
         unfinalizedInsert.bindValue(":segment_id", d.segment_id.toString());
         unfinalizedInsert.bindValue(":type", static_cast<int>(d.type));
-        unfinalizedInsert.bindValue(":start_utc", d.startTime.toUTC().toString(Qt::ISODateWithMs));
-        unfinalizedInsert.bindValue(":end_utc", d.endTime.toUTC().toString(Qt::ISODateWithMs));
+        unfinalizedInsert.bindValue(":start_utc", toUtcIso(d.startTime));
+        unfinalizedInsert.bindValue(":end_utc", toUtcIso(d.endTime));
 
         if (!unfinalizedInsert.exec()) {
             db.rollback();
@@ -1207,7 +821,7 @@ EntriesForDateResult SqliteSessionStore::hasEntriesForDate(const QDate& date)
  * - Uses segment_id to update existing row instead of inserting new one
  * - Stores the actual segment_start_time_ (preserves original start, only updates end/duration)
  *
- * The caller (Timer) rotates current_checkpoint_segment_id_ on mode changes,
+ * The caller (Timer) rotates session_.id_tracker.current on mode changes,
  * causing the next checkpoint to create a new row for the new segment.
  */
 SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const SegmentId& segmentId)
@@ -1230,8 +844,8 @@ SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, qint64 
         return SessionStoreResult::fatal("DB connection could not be opened");
     }
 
-    const QString startUtcStr = startTime.toUTC().toString(Qt::ISODateWithMs);
-    const QString endUtcStr   = endTime.toUTC().toString(Qt::ISODateWithMs);
+    const QString startUtcStr = toUtcIso(startTime);
+    const QString endUtcStr   = toUtcIso(endTime);
 
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting transaction for checkpoint: " + db.lastError().text());
@@ -1299,28 +913,28 @@ SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, qint64 
  * - When the timer stops or pauses, we update existing segment rows by segment_id.
  * - If a segment row is missing, it is inserted with the same segment_id.
  */
-bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& durations,
-                                           const std::vector<QString>& removedSegmentIds)
+SessionStoreResult SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& durations,
+                                                           const std::vector<QString>& removedSegmentIds)
 {
     QMutexLocker locker(&db_mutex_);
 
     if (durations.empty()) {
-        return true;
+        return SessionStoreResult::success();
     }
 
     // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
-        return true;
+        return SessionStoreResult::success();
     }
 
     if (!ensureOpen()) {
         Logger::Log("[DB] Could not open DB to update durations");
-        return false;
+        return SessionStoreResult::transient("DB connection could not be opened");
     }
 
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting transaction for updating durations: " + db.lastError().text());
-        return false;
+        return SessionStoreResult::transient("Failed to start transaction: " + db.lastError().text());
     }
 
     // Delete orphaned segment_ids that were merged away by cleanDurations.
@@ -1332,8 +946,9 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
             deleteOrphanQuery.bindValue(":segment_id", orphanId);
             if (!deleteOrphanQuery.exec()) {
                 db.rollback();
-                Logger::Log("[DB] Error deleting orphaned segment_id: " + deleteOrphanQuery.lastError().text());
-                return false;
+                const QString errMsg = deleteOrphanQuery.lastError().text();
+                Logger::Log("[DB] Error deleting orphaned segment_id: " + errMsg);
+                return SessionStoreResult::transient("Failed to delete orphan: " + errMsg);
             }
         }
     }
@@ -1353,8 +968,8 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
     int count = 0;
 
     for (const auto& d : durations) {
-        const QString startUtcStr = d.startTime.toUTC().toString(Qt::ISODateWithMs);
-        const QString endUtcStr   = d.endTime.toUTC().toString(Qt::ISODateWithMs);
+        const QString startUtcStr = toUtcIso(d.startTime);
+        const QString endUtcStr   = toUtcIso(d.endTime);
 
         updateQuery.bindValue(":segment_id", d.segment_id.toString());
         updateQuery.bindValue(":type", static_cast<int>(d.type));
@@ -1363,8 +978,9 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
 
         if (!updateQuery.exec()) {
             db.rollback();
-            Logger::Log("[DB] Error updating duration by segment_id: " + updateQuery.lastError().text());
-            return false;
+            const QString errMsg = updateQuery.lastError().text();
+            Logger::Log("[DB] Error updating duration by segment_id: " + errMsg);
+            return SessionStoreResult::transient("Failed to update duration: " + errMsg);
         }
 
         if (updateQuery.numRowsAffected() == 0) {
@@ -1375,27 +991,28 @@ bool SqliteSessionStore::updateDurationsById(const std::deque<TimeDuration>& dur
 
             if (!insertQuery.exec()) {
                 db.rollback();
-                Logger::Log("[DB] Error inserting duration by segment_id: " + insertQuery.lastError().text());
-                return false;
+                const QString errMsg = insertQuery.lastError().text();
+                Logger::Log("[DB] Error inserting duration by segment_id: " + errMsg);
+                return SessionStoreResult::transient("Failed to insert duration: " + errMsg);
             }
         }
         count++;
     }
 
-    bool success = db.commit();
-    if (success) {
-        Logger::Log(QString("[DB] Upserted %1 durations").arg(count));
-    } else {
-        Logger::Log("[DB] Error committing update transaction: " + db.lastError().text());
+    if (!db.commit()) {
+        const QString errMsg = db.lastError().text();
+        Logger::Log("[DB] Error committing update transaction: " + errMsg);
+        db.rollback();
+        return SessionStoreResult::transient("Failed to commit update transaction: " + errMsg);
     }
+
+    Logger::Log(QString("[DB] Upserted %1 durations").arg(count));
 
 #ifndef QT_NO_DEBUG
-    if (success) {
-        checkSegmentIdUniqueness();
-    }
+    checkSegmentIdUniqueness();
 #endif
 
-    return success;
+    return SessionStoreResult::success();
 }
 
 /**
@@ -1668,7 +1285,7 @@ bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
         return false;
     }
 
-    const QString markerValue = timestamp.toUTC().toString(Qt::ISODateWithMs);
+    const QString markerValue = toUtcIso(timestamp);
     QSqlQuery query(db);
     query.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (:key, :value)");
     query.bindValue(":key", QString::fromLatin1(kLastCleanShutdownKey));

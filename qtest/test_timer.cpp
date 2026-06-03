@@ -318,7 +318,7 @@ void TimerTest::test_session_state_begin_new_segment()
     QVERIFY(!tracker.session_.segment_start_time.isValid());
 
     // Act
-    tracker.session_.beginNewSegment(startTime, settings);
+    tracker.session_.beginNewSegment(startTime);
 
     // Assert
     QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
@@ -333,11 +333,11 @@ void TimerTest::test_session_state_clear_segment()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
     Timer tracker(settings, fakeDb);
-    tracker.session_.beginNewSegment(QDateTime::currentDateTime(), settings);
+    tracker.session_.beginNewSegment(QDateTime::currentDateTime());
     QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
 
     // Act
-    tracker.session_.clearSegment(settings);
+    tracker.session_.clearSegment();
 
     // Assert
     QVERIFY(tracker.session_.id_tracker.current.isEmpty());
@@ -355,13 +355,13 @@ void TimerTest::test_session_state_mark_and_clear_unsaved()
     QVERIFY(!tracker.session_.has_unsaved_data);
 
     // Act: mark unsaved
-    tracker.session_.markUnsaved(settings);
+    tracker.session_.markUnsaved();
 
     // Assert
     QVERIFY(tracker.session_.has_unsaved_data);
 
     // Act: clear unsaved
-    tracker.session_.clearUnsaved(settings);
+    tracker.session_.clearUnsaved();
 
     // Assert
     QVERIFY(!tracker.session_.has_unsaved_data);
@@ -382,7 +382,7 @@ void TimerTest::test_session_state_reset_for_new_session()
     tracker.session_.unsaved_durations = tracker.session_.durations;
 
     // Act
-    tracker.session_.resetForNewSession(settings);
+    tracker.session_.resetForNewSession();
 
     // Assert
     QVERIFY(tracker.session_.durations.empty());
@@ -446,7 +446,7 @@ void TimerTest::test_session_state_adopt_ongoing_segment()
     TimeDuration ongoing(DurationType::Activity, start, end);
 
     // Act
-    tracker.session_.adoptOngoingSegment(ongoing, settings);
+    tracker.session_.adoptOngoingSegment(ongoing);
 
     // Assert
     QCOMPARE(tracker.session_.id_tracker.current.toString(), ongoing.segment_id.toString());

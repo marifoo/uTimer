@@ -116,8 +116,6 @@ void Timeline::assertSameDayInvariant() const
 
 Timeline Timeline::normalized() const
 {
-    // Duplicate of cleanDurations algorithm from helpers.cpp so Timeline is
-    // self-contained. cleanDurations is the thin wrapper (see T3.2).
     std::deque<TimeDuration> durations = completed_;
 
     if (durations.size() < 2) {
@@ -212,4 +210,25 @@ Timeline Timeline::normalized() const
     result.assertSameDayInvariant();
 #endif
     return result;
+}
+
+NormalizedResult Timeline::normalizedWithRemovedIds() const
+{
+    std::vector<QString> before;
+    before.reserve(completed_.size());
+    for (const auto& d : completed_)
+        before.push_back(d.segment_id.toString());
+
+    Timeline normed = normalized();
+
+    std::vector<QString> removed;
+    for (const auto& id : before) {
+        bool found = false;
+        for (const auto& d : normed.completed_)
+            if (d.segment_id.toString() == id) { found = true; break; }
+        if (!found)
+            removed.push_back(id);
+    }
+
+    return {normed, removed};
 }
