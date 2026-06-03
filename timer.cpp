@@ -485,7 +485,7 @@ void Timer::startTimer(const QDateTime& now)
         Logger::Log("[DEBUG] Starting Timer from Stopped - D=" + QString::number(session_.durations.size()));
 
         if (!retryUnsavedDurations()) return;
-        const bool retry_succeeded = !session_.has_unsaved_data;
+        const bool retry_succeeded = !session_.has_unsaved_data; // has_unsaved_data cleared by clearUnsaved on success; true means retry was needed but failed
 
         unsigned int boot_time_sec = settings_.getBootTimeSec();
         bool shouldAddBootTime = false;
