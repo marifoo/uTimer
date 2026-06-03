@@ -841,7 +841,7 @@ void TimerTest::test_useTimerViaButton_force_stops_on_cross_midnight_ongoing()
     // Assert: engine is in None, no cross-midnight row in DB
     QCOMPARE(tracker.mode_, Timer::Mode::None);
     QVERIFY(!tracker.session_.segment_start_time.isValid());
-    QVERIFY(!tracker.was_active_before_autopause_);
+    QVERIFY(!tracker.autopause_pending_resume_);
     // FakeSessionStore captures writes; no duration should have been written
     // with a cross-midnight segment (the in-flight segment is discarded)
     for (const auto& d : fakeDb.storedDurations) {
@@ -873,7 +873,7 @@ void TimerTest::test_useTimerViaButton_pause_event_is_dropped_when_cross_midnigh
 
 void TimerTest::test_useTimerViaLockEvent_unlock_does_not_restart_after_cross_midnight_discard()
 {
-    // Arrange: simulate cross-midnight with was_active_before_autopause_ set
+    // Arrange: simulate cross-midnight with autopause_pending_resume_ set
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     QString settingsPath = createSettingsFile(tempDir.path(), 7);
@@ -888,7 +888,7 @@ void TimerTest::test_useTimerViaLockEvent_unlock_does_not_restart_after_cross_mi
     tracker.mode_ = Timer::Mode::Pause;
     tracker.session_.segment_start_time =
         QDateTime(QDate::currentDate().addDays(-1), QTime(23, 59, 58, 0));
-    tracker.was_active_before_autopause_ = true;
+    tracker.autopause_pending_resume_ = true;
     tracker.timer_.start();
 
     // Act: Unlock event arrives — guard should discard and not restart
@@ -896,7 +896,7 @@ void TimerTest::test_useTimerViaLockEvent_unlock_does_not_restart_after_cross_mi
 
     // Assert: stayed in None, did not auto-restart
     QCOMPARE(tracker.mode_, Timer::Mode::None);
-    QVERIFY(!tracker.was_active_before_autopause_);
+    QVERIFY(!tracker.autopause_pending_resume_);
 }
 
 void TimerTest::test_saveCheckpointInternal_does_not_write_cross_midnight_row()
@@ -938,13 +938,13 @@ void TimerTest::test_stop_clears_was_active_before_autopause()
 
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(10);
-    tracker.was_active_before_autopause_ = true;
+    tracker.autopause_pending_resume_ = true;
 
     // Act
     tracker.useTimerViaButton(Button::Stop);
 
     // Assert
-    QVERIFY(!tracker.was_active_before_autopause_);
+    QVERIFY(!tracker.autopause_pending_resume_);
     QCOMPARE(tracker.mode_, Timer::Mode::None);
 }
 
@@ -1421,7 +1421,7 @@ void TimerTest::test_T9_new_activity_segment_after_unpause_has_activity_type()
 
 void TimerTest::test_T10_was_active_cleared_on_start_from_none()
 {
-    // Verify that startTimer from None always clears was_active_before_autopause_,
+    // Verify that startTimer from None always clears autopause_pending_resume_,
     // even when that flag was set before the call (e.g. by a previous lock event).
 
     // Arrange
@@ -1432,21 +1432,21 @@ void TimerTest::test_T10_was_active_cleared_on_start_from_none()
     Timer tracker(settings, fakeDb);
 
     // Pre-set the flag to simulate a stale autopause state
-    tracker.was_active_before_autopause_ = true;
+    tracker.autopause_pending_resume_ = true;
 
     // Act: start from None
     tracker.useTimerViaButton(Button::Start);
 
     // Assert: flag is cleared regardless of prior value
-    QVERIFY2(!tracker.was_active_before_autopause_,
-             "was_active_before_autopause_ must be false after startTimer from None");
+    QVERIFY2(!tracker.autopause_pending_resume_,
+             "autopause_pending_resume_ must be false after startTimer from None");
 
     tracker.useTimerViaButton(Button::Stop);
 }
 
 void TimerTest::test_T10_was_active_cleared_on_start_from_pause()
 {
-    // Verify that startTimer from Pause always clears was_active_before_autopause_.
+    // Verify that startTimer from Pause always clears autopause_pending_resume_.
 
     // Arrange
     QTemporaryDir tempDir;
@@ -1460,14 +1460,14 @@ void TimerTest::test_T10_was_active_cleared_on_start_from_pause()
     tracker.useTimerViaButton(Button::Pause);
 
     // Simulate stale autopause flag (as if a LongOngoingLock set it before the pause)
-    tracker.was_active_before_autopause_ = true;
+    tracker.autopause_pending_resume_ = true;
 
     // Act: resume from Pause
     tracker.useTimerViaButton(Button::Start);
 
     // Assert: flag is cleared
-    QVERIFY2(!tracker.was_active_before_autopause_,
-             "was_active_before_autopause_ must be false after startTimer from Pause");
+    QVERIFY2(!tracker.autopause_pending_resume_,
+             "autopause_pending_resume_ must be false after startTimer from Pause");
 
     tracker.useTimerViaButton(Button::Stop);
 }

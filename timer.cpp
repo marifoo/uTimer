@@ -344,7 +344,7 @@ void Timer::checkCrossLayerInvariants() const
 
 Timer::Timer(const Settings &settings, SessionStore& db, QObject *parent)
     : QObject(parent), settings_(settings), timer_(), session_(), mode_(Mode::None),
-      was_active_before_autopause_(false), is_locked_(false),
+      autopause_pending_resume_(false), is_locked_(false),
       dialog_open_(false), db_(db),
       checkpoint_interval_msec_(settings.getCheckpointIntervalMsec()),
       last_history_load_skipped_(0), last_history_load_repaired_(0),
@@ -402,7 +402,7 @@ void Timer::startTimer(const QDateTime& now)
 {
     // T10: Clear autopause flag at the top of startTimer so both Pause→Activity
     // and None→Activity paths start with a clean state.
-    was_active_before_autopause_ = false;
+    autopause_pending_resume_ = false;
 
     if (mode_ == Mode::Pause) {
         Logger::Log("[DEBUG] Starting Timer from Pause - D=" + QString::number(session_.durations.size()));
@@ -624,7 +624,7 @@ void Timer::stopTimer(const QDateTime& now, StopReason reason)
     session_.clearSegment();
     checkpointTimer_.stop();
     day_boundary_watcher_.cancel();
-    was_active_before_autopause_ = false;
+    autopause_pending_resume_ = false;
     Logger::Log("[TIMER] Timer stopped <<");
 
     // Persist current session durations only (not entire history). History dialog does replace explicitly.
@@ -693,7 +693,7 @@ void Timer::useTimerViaLockEvent(LockEvent event)
     const QDateTime now = QDateTime::currentDateTime();
     if (discardCrossMidnightOngoingAndStop(now)) {
         // Already-forced stopped — ignore the lock event for engine
-        // purposes. was_active_before_autopause_ is already cleared inside
+        // purposes. autopause_pending_resume_ is already cleared inside
         // the helper so a subsequent Unlock does not restart.
 #ifndef QT_NO_DEBUG
         checkDurationInvariants();
@@ -735,17 +735,17 @@ void Timer::useTimerViaLockEvent(LockEvent event)
             Logger::Log("[LOCK] suspended during history edit (LongOngoingLock)");
             return;
         }
-        was_active_before_autopause_ = (mode_ == Mode::Activity);
-        if (was_active_before_autopause_) {
+        autopause_pending_resume_ = (mode_ == Mode::Activity);
+        if (autopause_pending_resume_) {
             backpauseTimer(now);
             emit modeChanged(PauseCause::LockAutopause);
         }
     } else if (event == LockEvent::Unlock) {
-        if (was_active_before_autopause_) {
+        if (autopause_pending_resume_) {
             startTimer(now);
             emit modeChanged(PauseCause::LockResume);
         }
-        was_active_before_autopause_ = false;
+        autopause_pending_resume_ = false;
     }
 #ifndef QT_NO_DEBUG
     checkDurationInvariants();

@@ -162,7 +162,7 @@ private:
     QElapsedTimer timer_;
     SessionState session_;
     Mode mode_;
-    bool was_active_before_autopause_;
+    bool autopause_pending_resume_;
     bool is_locked_;     // Track if desktop is currently locked (to prevent checkpoints while locked)
     bool dialog_open_;   // True while HistoryDialog is open (suspends mutation)
     bool pending_midnight_stop_ = false;
@@ -294,7 +294,7 @@ signals:
     /// lock-driven autopause is covered by modeChanged(LockAutopause)).
     void paused();
     /// Emitted when a lock-driven autopause or autoresume occurs so the GUI
-    /// can follow without maintaining its own was_active_before_autopause_ flag.
+    /// can follow without maintaining its own autopause_pending_resume_ flag.
     void modeChanged(Timer::PauseCause cause);
 
 private slots:
