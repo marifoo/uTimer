@@ -5,6 +5,7 @@
 #include <QElapsedTimer>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <QString>
 #include "settings.h"
 #include "types.h"
@@ -33,13 +34,12 @@ private:
 
 #ifdef Q_OS_LINUX
 	enum class LinuxLockMethod {
-		None,
 		SystemdLogind,
 		FreedesktopScreenSaver,
 		GnomeScreenSaver,
 		KdeScreenSaver
 	};
-	LinuxLockMethod linux_lock_method_;
+	std::optional<LinuxLockMethod> linux_lock_method_;
 	bool initializeLinuxLockDetection();
 	bool querySystemdLogind();
 	bool queryFreedesktopScreenSaver();

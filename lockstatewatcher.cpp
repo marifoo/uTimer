@@ -49,9 +49,6 @@ LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent)
 	settings_(settings),
 	buffer_for_lock{ false, false, true, true, true }, // fixed pattern for lock detection
 	buffer_for_unlock{ true, true, false, false, false } // fixed pattern for unlock detection
-#ifdef Q_OS_LINUX
-	, linux_lock_method_(LinuxLockMethod::None)
-#endif
 {
 	lock_state_buffer_ = { false, false, false, false, false};
 	lock_timer_.invalidate();
@@ -119,7 +116,9 @@ bool LockStateWatcher::isSessionLocked()
 
 	return isLocked;
 #elif defined(Q_OS_LINUX)
-	switch (linux_lock_method_) {
+	if (!linux_lock_method_.has_value())
+		return false;
+	switch (linux_lock_method_.value()) {
 		case LinuxLockMethod::SystemdLogind:
 			return querySystemdLogind();
 		case LinuxLockMethod::FreedesktopScreenSaver:
@@ -128,10 +127,8 @@ bool LockStateWatcher::isSessionLocked()
 			return queryGnomeScreenSaver();
 		case LinuxLockMethod::KdeScreenSaver:
 			return queryKdeScreenSaver();
-		case LinuxLockMethod::None:
-		default:
-			return false;
 	}
+	Q_UNREACHABLE();
 #else
 	// Unsupported platform
 	return false;
@@ -260,7 +257,6 @@ bool LockStateWatcher::initializeLinuxLockDetection()
 		return true;
 	}
 
-	linux_lock_method_ = LinuxLockMethod::None;
 	Logger::Log("[LOCK] WARNING: No lock detection method available on this Linux system");
 	return false;
 }
