@@ -1098,8 +1098,9 @@ bool Timer::discardCrossMidnightOngoingAndStop(const QDateTime& now)
 
     // Reuse stopTimer for teardown. The cross-midnight ongoing segment is
     // silently discarded by addDuration (TimeDuration::create rejects it).
-    // durations is already empty (or marked unsaved above), so the
-    // updateDurationsInDB call inside stopTimer is a no-op.
+    // durations is already empty (success path) or retained in unsaved buffer
+    // (flush-failure path), so the updateDurationsInDB call inside stopTimer is a
+    // no-op on success and a harmless retry on flush failure.
     stopTimer(now, StopReason::MidnightWatchdog);
     return true;
 }
