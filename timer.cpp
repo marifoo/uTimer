@@ -215,11 +215,12 @@ Timer::StateGuard::~StateGuard()
                 || (exit.mode != entry_.mode);
     if (changed) {
         qWarning("[STATE-GUARD] Unacknowledged state mutation in %s: "
-                 "durations %zu->%zu, segId '%s'->'%s', unsaved %d->%d",
+                 "durations %zu->%zu, segId '%s'->'%s', unsaved %d->%d, mode %d->%d",
                  method_,
                  entry_.durations_size, exit.durations_size,
                  qPrintable(entry_.segment_id.toString()), qPrintable(exit.segment_id.toString()),
-                 entry_.has_unsaved_data, exit.has_unsaved_data);
+                 entry_.has_unsaved_data, exit.has_unsaved_data,
+                 static_cast<int>(entry_.mode), static_cast<int>(exit.mode));
         Q_ASSERT_X(false, method_,
                     "SessionState changed without explicit transition call");
     }
@@ -484,7 +485,7 @@ void Timer::startTimer(const QDateTime& now)
         Logger::Log("[DEBUG] Starting Timer from Stopped - D=" + QString::number(session_.durations.size()));
 
         if (!retryUnsavedDurations()) return;
-        const bool retry_succeeded = !session_.has_unsaved_data;
+        const bool retry_succeeded = !session_.has_unsaved_data; // has_unsaved_data cleared by clearUnsaved on success; true means retry was needed but failed
 
         unsigned int boot_time_sec = settings_.getBootTimeSec();
         bool shouldAddBootTime = false;
@@ -1097,8 +1098,9 @@ bool Timer::discardCrossMidnightOngoingAndStop(const QDateTime& now)
 
     // Reuse stopTimer for teardown. The cross-midnight ongoing segment is
     // silently discarded by addDuration (TimeDuration::create rejects it).
-    // durations is already empty (or marked unsaved above), so the
-    // updateDurationsInDB call inside stopTimer is a no-op.
+    // durations is already empty (success path) or retained in unsaved buffer
+    // (flush-failure path), so the updateDurationsInDB call inside stopTimer is a
+    // no-op on success and a harmless retry on flush failure.
     stopTimer(now, StopReason::MidnightWatchdog);
     return true;
 }
