@@ -215,11 +215,12 @@ Timer::StateGuard::~StateGuard()
                 || (exit.mode != entry_.mode);
     if (changed) {
         qWarning("[STATE-GUARD] Unacknowledged state mutation in %s: "
-                 "durations %zu->%zu, segId '%s'->'%s', unsaved %d->%d",
+                 "durations %zu->%zu, segId '%s'->'%s', unsaved %d->%d, mode %d->%d",
                  method_,
                  entry_.durations_size, exit.durations_size,
                  qPrintable(entry_.segment_id.toString()), qPrintable(exit.segment_id.toString()),
-                 entry_.has_unsaved_data, exit.has_unsaved_data);
+                 entry_.has_unsaved_data, exit.has_unsaved_data,
+                 static_cast<int>(entry_.mode), static_cast<int>(exit.mode));
         Q_ASSERT_X(false, method_,
                     "SessionState changed without explicit transition call");
     }
