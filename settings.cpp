@@ -146,15 +146,12 @@ qint64 Settings::getWarnTimeActivityMsec() const
 
 void Settings::setAutopauseState(const bool autopause_enabled)
 {
-	sfile_.sync();
-	readSettingsFile();
 	autopause_enabled_ = autopause_enabled;
 	writeSettingsFile();
 }
 
 void Settings::setPinToTopState(const bool pin2top_enabled)
 {
-	sfile_.sync();
 	start_pinned_to_top_ = pin2top_enabled;
 	writeSettingsFile();
 }
