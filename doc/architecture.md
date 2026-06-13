@@ -153,11 +153,10 @@ sequenceDiagram
     participant TT as Timer
     participant CW as ContentWidget
 
-    QT->>MW: timeout → update()
+    QT->>MW: timeout → onTick()
     QT->>TT: timeout → onTick(now)
     QT->>LW: timeout → update()
     LW->>TT: desktopLockEvent(LockEvent)<br/>→ useTimerViaLockEvent
-    LW->>MW: desktopLockEvent(LockEvent)<br/>→ reactOnLockState
     CW->>MW: pressedButton(Button)
     MW->>TT: sendButtons(Button)<br/>→ useTimerViaButton
     TT-->>MW: userWarning(QString)<br/>→ showUserWarning
