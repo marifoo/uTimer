@@ -57,8 +57,8 @@ static std::optional<LinuxLockMethod> linux_lock_method_; // single instance ass
 } // namespace
 #endif
 
-LockStateWatcher::LockStateWatcher(const Settings &settings, QWidget *parent)
-	: QWidget(parent),
+LockStateWatcher::LockStateWatcher(const Settings &settings, QObject *parent)
+	: QObject(parent),
 	settings_(settings),
 	buffer_for_lock{ false, false, true, true, true }, // fixed pattern for lock detection
 	buffer_for_unlock{ true, true, false, false, false } // fixed pattern for unlock detection

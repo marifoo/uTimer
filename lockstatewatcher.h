@@ -1,7 +1,7 @@
 #ifndef LOCKSTATEWATCHER_H
 #define LOCKSTATEWATCHER_H
 
-#include <QWidget>
+#include <QObject>
 #include <QElapsedTimer>
 #include <deque>
 #include <memory>
@@ -14,7 +14,7 @@
 #endif
 
 
-class LockStateWatcher : public QWidget
+class LockStateWatcher : public QObject
 {
 	Q_OBJECT
 
@@ -35,7 +35,7 @@ private:
 	LockEvent determineLockEvent(bool session_locked);
 
 public:
-	explicit LockStateWatcher(const Settings & settings, QWidget *parent = nullptr);
+	explicit LockStateWatcher(const Settings & settings, QObject *parent = nullptr);
 
 signals:
 	void desktopLockEvent(LockEvent event);
