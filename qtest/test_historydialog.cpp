@@ -445,7 +445,7 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
     tracker.saveCheckpoint();
-    const SegmentId oldCheckpointSegmentId = tracker.session_.id_tracker.current;
+    const SegmentId oldCheckpointSegmentId = tracker.session_.segment_id;
     QVERIFY(!oldCheckpointSegmentId.isEmpty());
 
     {
@@ -456,8 +456,8 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
         dialog.saveChanges();
     }
 
-    QVERIFY(!tracker.session_.id_tracker.current.isEmpty());
-    QCOMPARE(tracker.session_.id_tracker.current.toString(), oldCheckpointSegmentId.toString());
+    QVERIFY(!tracker.session_.segment_id.isEmpty());
+    QCOMPARE(tracker.session_.segment_id.toString(), oldCheckpointSegmentId.toString());
 
     QTest::qWait(20);
     tracker.saveCheckpoint();
@@ -630,7 +630,7 @@ void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_curren
 
         // Simulate crash: skip graceful stop/finalize.
         tracker.mode_ = Timer::Mode::None;
-        tracker.session_.id_tracker.clear();
+        tracker.session_.segment_id = SegmentId{};
     }
 
     {
@@ -723,7 +723,7 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
     tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
     const SegmentId checkpointSegmentBeforeSave = SegmentId::fromString("checkpoint-before-save");
     const QDateTime checkpointStartBeforeSave = now.addSecs(-5);
-    tracker.session_.id_tracker.current = checkpointSegmentBeforeSave;
+    tracker.session_.segment_id = checkpointSegmentBeforeSave;
     tracker.session_.segment_start_time = checkpointStartBeforeSave;
 
     std::deque<TimeDuration> dbDurations;
@@ -771,7 +771,7 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
     QCOMPARE(tracker.session_.durations[0].type, DurationType::Activity);
     QCOMPARE(tracker.session_.durations[0].startTime, memStart);
     QCOMPARE(tracker.session_.durations[0].endTime, memEnd);
-    QCOMPARE(tracker.session_.id_tracker.current.toString(), checkpointSegmentBeforeSave.toString());
+    QCOMPARE(tracker.session_.segment_id.toString(), checkpointSegmentBeforeSave.toString());
     QCOMPARE(tracker.session_.segment_start_time, checkpointStartBeforeSave);
 
     const QString verifyConnName = "historydialog_save_failure_verify";

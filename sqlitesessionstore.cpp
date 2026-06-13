@@ -802,13 +802,12 @@ EntriesForDateResult SqliteSessionStore::hasEntriesForDate(const QDate& date)
  * - Uses segment_id to update existing row instead of inserting new one
  * - Stores the actual segment_start_time_ (preserves original start, only updates end/duration)
  *
- * The caller (Timer) rotates session_.id_tracker.current on mode changes,
+ * The caller (Timer) rotates session_.segment_id on mode changes,
  * causing the next checkpoint to create a new row for the new segment.
  */
-SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime, const QDateTime& endTime, const SegmentId& segmentId)
+SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const SegmentId& segmentId)
 {
     QMutexLocker locker(&db_mutex_);
-    Q_UNUSED(duration)  // duration is computed from timestamps at load; not stored
 
     if (segmentId.isEmpty()) {
         Logger::Log("[DB] saveCheckpoint: empty segment_id — caller bug");

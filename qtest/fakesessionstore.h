@@ -36,7 +36,7 @@ public:
     bool replaceAll(const Timeline& history, const Timeline& session) override;
     LoadResult loadDurations() override;
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
-    SessionStoreResult saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
+    SessionStoreResult saveCheckpoint(DurationType type, const QDateTime& startTime,
                                       const QDateTime& endTime, const SegmentId& segmentId) override;
     bool checkSchemaOnStartup() override;
     void flushToDisc() override;
@@ -60,7 +60,6 @@ public:
     /// Last checkpoint saved (for inspection).
     struct CheckpointRecord {
         DurationType type;
-        qint64 duration;
         QDateTime startTime;
         QDateTime endTime;
         SegmentId segmentId;

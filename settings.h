@@ -36,7 +36,7 @@ public:
 	bool showNoPauseWarning() const;
 	bool showTooMuchActivityWarning() const;
 	bool logToFile() const;
-	QString getBackpauseMin() const;
+	QString getBackpauseMinString() const;
 	qint64 getBackpauseMsec() const;
 	qint64 getPauseTimeForWarnTimeNoPauseMsec() const;
 	qint64 getWarnTimeNoPauseMsec() const;

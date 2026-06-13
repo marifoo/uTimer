@@ -149,14 +149,13 @@ int main(int argc, char *argv[])
 
 	QObject::connect(&main_win, SIGNAL(sendButtons(Button)), &time_tracker, SLOT(useTimerViaButton(Button)));
 
-	QObject::connect(&timer, SIGNAL(timeout()), &main_win, SLOT(update()));
+	QObject::connect(&timer, SIGNAL(timeout()), &main_win, SLOT(onTick()));
 	QObject::connect(&timer, &QTimer::timeout, [&time_tracker]() {
 		time_tracker.onTick(QDateTime::currentDateTime());
 	});
 
 	QObject::connect(&timer, SIGNAL(timeout()), &lockstate_watcher, SLOT(update()));
 	QObject::connect(&lockstate_watcher, SIGNAL(desktopLockEvent(LockEvent)),	&time_tracker, SLOT(useTimerViaLockEvent(LockEvent)));
-	QObject::connect(&lockstate_watcher, SIGNAL(desktopLockEvent(LockEvent)), &main_win, SLOT(reactOnLockState(LockEvent)));
 	QObject::connect(&time_tracker, &Timer::userWarning, &main_win, &MainWin::showUserWarning);
 
 	QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit, &main_win, &MainWin::onAboutToQuit);

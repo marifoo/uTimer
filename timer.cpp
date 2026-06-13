@@ -21,7 +21,7 @@
  * Checkpoint behavior:
  * - Only saved during Activity mode (not Pause or Stopped)
  * - Suspended while PC is locked (is_locked_) or HistoryDialog is open (dialog_open_)
- * - Uses session_.id_tracker.current to update same DB row instead of creating new rows
+ * - Uses session_.segment_id to update same DB row instead of creating new rows
  *
  * Backpause behavior:
  * - When PC locked for longer than threshold, retroactively converts last N minutes to Pause
@@ -113,20 +113,20 @@ void Timer::DayBoundaryWatcher::onMidnightTimerFired()
 
 void SessionState::beginNewSegment(const QDateTime& startTime)
 {
-    SegmentId oldId = id_tracker.current;
+    SegmentId oldId = segment_id;
     QDateTime oldStart = segment_start_time;
-    id_tracker.beginActivity();
+    segment_id = SegmentId::mint();
     segment_start_time = startTime;
     Logger::Log(QString("[STATE] beginNewSegment: segId '%1' -> '%2', start %3 -> %4")
-        .arg(oldId.toString(), id_tracker.current.toString(),
+        .arg(oldId.toString(), segment_id.toString(),
              oldStart.toString(Qt::ISODate), startTime.toString(Qt::ISODate)));
 }
 
 void SessionState::clearSegment()
 {
-    SegmentId oldId = id_tracker.current;
+    SegmentId oldId = segment_id;
     QDateTime oldStart = segment_start_time;
-    id_tracker.clear();
+    segment_id = SegmentId{};
     segment_start_time = QDateTime();
     Logger::Log(QString("[STATE] clearSegment: segId '%1' -> (empty), start %2 -> (invalid)")
         .arg(oldId.toString(), oldStart.toString(Qt::ISODate)));
@@ -171,12 +171,12 @@ void SessionState::resetForNewSession()
 
 void SessionState::adoptOngoingSegment(const TimeDuration& ongoing)
 {
-    SegmentId oldId = id_tracker.current;
+    SegmentId oldId = segment_id;
     QDateTime oldStart = segment_start_time;
-    id_tracker.adoptFrom(ongoing);
+    segment_id = ongoing.segment_id;
     segment_start_time = ongoing.startTime;
     Logger::Log(QString("[STATE] adoptOngoingSegment: segId '%1' -> '%2', start %3 -> %4")
-        .arg(oldId.toString(), id_tracker.current.toString(),
+        .arg(oldId.toString(), segment_id.toString(),
              oldStart.toString(Qt::ISODate), ongoing.startTime.toString(Qt::ISODate)));
 }
 
@@ -190,7 +190,7 @@ Timer::StateSnapshot Timer::takeStateSnapshot() const
 {
     return {
         session_.durations.size(),
-        session_.id_tracker.current,
+        session_.segment_id,
         session_.segment_start_time,
         session_.has_unsaved_data,
         mode_
@@ -461,7 +461,7 @@ void Timer::startTimer(const QDateTime& now)
         // Do NOT reuse or mutate any prior Activity segment_id — that is the
         // root bug T1 fixed. Timeline::normalized() handles merging adjacent
         // same-type segments at DB-sync time.
-        addDuration(DurationType::Pause, session_.segment_start_time, now, session_.id_tracker.current);
+        addDuration(DurationType::Pause, session_.segment_start_time, now, session_.segment_id);
 
         mode_ = Mode::Activity;
         session_.beginNewSegment(now);
@@ -537,7 +537,7 @@ void Timer::pauseTimer(const QDateTime& now)
     }
     Logger::Log("[DEBUG] Pausing Timer from Activity - D=" + QString::number(session_.durations.size()));
     timer_.restart();
-    addDuration(DurationType::Activity, session_.segment_start_time, now, session_.id_tracker.current);
+    addDuration(DurationType::Activity, session_.segment_start_time, now, session_.segment_id);
 
     mode_ = Mode::Pause;
     session_.updateSegmentStartTime(now);
@@ -598,7 +598,7 @@ void Timer::backpauseTimer(const QDateTime& now)
 
     // Activity segment: segment_start_time to activity_end
     if (activity_end > session_.segment_start_time) {
-        addDuration(DurationType::Activity, session_.segment_start_time, activity_end, session_.id_tracker.current);
+        addDuration(DurationType::Activity, session_.segment_start_time, activity_end, session_.segment_id);
     }
 
     // Pause segment: activity_end to now
@@ -632,10 +632,10 @@ void Timer::stopTimer(const QDateTime& now, StopReason reason)
     }
     if (mode_ == Mode::Pause) {
         Logger::Log("[DEBUG] Stopping from Pause - D=" + QString::number(session_.durations.size()));
-        addDuration(DurationType::Pause, session_.segment_start_time, now, session_.id_tracker.current);
+        addDuration(DurationType::Pause, session_.segment_start_time, now, session_.segment_id);
     } else if (mode_ == Mode::Activity) {
         Logger::Log("[DEBUG] Stopping from Activity - D=" + QString::number(session_.durations.size()));
-        addDuration(DurationType::Activity, session_.segment_start_time, now, session_.id_tracker.current);
+        addDuration(DurationType::Activity, session_.segment_start_time, now, session_.segment_id);
     }
     mode_ = Mode::None;
     session_.clearSegment();
@@ -860,10 +860,9 @@ void Timer::maybeReanchorCheckpoint(const TimeDuration& seg)
         return;
 
     const SessionStoreResult cpResult = db_.saveCheckpoint(seg.type,
-                                                           seg.duration,
                                                            seg.startTime,
                                                            seg.endTime,
-                                                           session_.id_tracker.current);
+                                                           session_.segment_id);
     if (cpResult.ok()) {
         // success — nothing to do
     } else if (cpResult.category == SessionStoreResult::CallerBug) {
@@ -932,7 +931,7 @@ std::optional<TimeDuration> Timer::getOngoingDuration() const
         return std::nullopt;
     }
     DurationType type = (mode_ == Mode::Activity) ? DurationType::Activity : DurationType::Pause;
-    return TimeDuration::fromTrusted(type, session_.segment_start_time, now, session_.id_tracker.current);
+    return TimeDuration::fromTrusted(type, session_.segment_start_time, now, session_.segment_id);
 }
 
 qint64 Timer::getStartupRecoveredSeconds() const
@@ -1129,16 +1128,16 @@ void Timer::saveCheckpointInternal(const QDateTime& now)
     // Always Activity - we return early above if mode_ != Mode::Activity
     DurationType type = DurationType::Activity;
 
-    if (session_.id_tracker.current.isEmpty()) {
+    if (session_.segment_id.isEmpty()) {
         session_.beginNewSegment(session_.segment_start_time);
     }
-    const SessionStoreResult result = db_.saveCheckpoint(type, wallClockMs, session_.segment_start_time, now, session_.id_tracker.current);
+    const SessionStoreResult result = db_.saveCheckpoint(type, session_.segment_start_time, now, session_.segment_id);
 
     if (result.ok()) {
         Logger::Log(QString("[CHECKPOINT] Saved checkpoint - Type: %1, Duration: %2ms, SegmentId: %3")
             .arg(type == DurationType::Activity ? "Activity" : "Pause")
             .arg(wallClockMs)
-            .arg(session_.id_tracker.current.toString()));
+            .arg(session_.segment_id.toString()));
     } else {
         handleDbResult(result, "saveCheckpoint");
     }

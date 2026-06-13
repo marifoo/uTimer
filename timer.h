@@ -18,21 +18,6 @@
 #include "timeline.h"
 
 /**
- * SegmentIdTracker — owns the segment identity of the ongoing timing segment.
- *
- * Encapsulates all mutations of the current segment ID so they are named and
- * intentional.  Timer's SessionState holds one instance; the raw SegmentId is
- * readable via `current` but mutated only through the transition methods.
- */
-struct SegmentIdTracker {
-    SegmentId current;  // empty when no segment is active (Mode::None)
-
-    void beginActivity() { current = SegmentId::mint(); }
-    void adoptFrom(const TimeDuration& d) { current = d.segment_id; }
-    void clear() { current = SegmentId{}; }
-};
-
-/**
  * SessionState — groups the mutable per-session data that Timer manages.
  *
  * Previously these fields were scattered as raw members on Timer,
@@ -56,10 +41,10 @@ struct SessionState {
     /// failed save. Empty when there is nothing to retry.
     std::deque<TimeDuration> unsaved_durations;
 
-    /// Owns the segment identity for checkpoint saves.  Empty when the timer
+    /// Segment identity for checkpoint saves.  Empty when the timer
     /// is stopped (Mode::None).  Rotated on every mode transition so each
     /// segment gets its own DB row.
-    SegmentIdTracker id_tracker;
+    SegmentId segment_id;
 
     /// Wall-clock time when the current segment started. Invalid when the
     /// timer is stopped. Used together with "now" to compute the ongoing

@@ -44,11 +44,10 @@ signals:
 	void sendButtons(Button button);
 
 public slots:
-	void update();
+	void onTick();
 	void iconActivated(QSystemTrayIcon::ActivationReason reason);
 	void minToTray();
 	void toggleAlwaysOnTop();
-	void reactOnLockState(LockEvent event);
 	void showUserWarning(const QString& text);
 	void showHistoryLoadReconciliation(const QString& text);
 	void onAboutToQuit();

@@ -119,7 +119,7 @@ bool Settings::logToFile() const
 	return log_to_file_;
 }
 
-QString Settings::getBackpauseMin() const
+QString Settings::getBackpauseMinString() const
 {
 	return QString::number(backpause_min_);
 }

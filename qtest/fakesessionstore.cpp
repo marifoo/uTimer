@@ -91,7 +91,7 @@ EntriesForDateResult FakeSessionStore::hasEntriesForDate(const QDate& /*date*/)
     return entriesForDateResult;
 }
 
-SessionStoreResult FakeSessionStore::saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
+SessionStoreResult FakeSessionStore::saveCheckpoint(DurationType type, const QDateTime& startTime,
                                                      const QDateTime& endTime, const SegmentId& segmentId)
 {
     callLog.append("saveCheckpoint");
@@ -115,7 +115,7 @@ SessionStoreResult FakeSessionStore::saveCheckpoint(DurationType type, qint64 du
                    "FakeSessionStore::saveCheckpoint",
                    "UNIQUE(segment_id) violation: segment_id already committed via commitSession");
         (void)alreadySaved; // Multiple checkpoint saves for the same id are fine (upsert).
-        savedCheckpoints.push_back({type, duration, startTime, endTime, segmentId});
+        savedCheckpoints.push_back({type, startTime, endTime, segmentId});
     }
     return saveCheckpointResult;
 }

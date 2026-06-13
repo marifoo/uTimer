@@ -133,7 +133,7 @@ public:
     // interpreted in the system local time zone.
     virtual EntriesForDateResult hasEntriesForDate(const QDate& localDate) = 0;
     /// @pre segmentId must be non-empty
-    virtual SessionStoreResult saveCheckpoint(DurationType type, qint64 duration, const QDateTime& startTime,
+    virtual SessionStoreResult saveCheckpoint(DurationType type, const QDateTime& startTime,
                                               const QDateTime& endTime, const SegmentId& segmentId) = 0;
     virtual bool checkSchemaOnStartup() = 0;
     virtual void flushToDisc() = 0;

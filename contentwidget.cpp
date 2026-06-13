@@ -133,7 +133,7 @@ void ContentWidget::setupButtonRows()
 	autopause_button_->setFont(button_font);
 	autopause_tooltip1_ = "min after locking the PC:\nPause the Timer and count these ";
 	autopause_tooltip2_ = "min retroactively as a Pause";
-	autopause_button_->setToolTip(settings_.getBackpauseMin() + autopause_tooltip1_ + settings_.getBackpauseMin() + autopause_tooltip2_);
+	autopause_button_->setToolTip(settings_.getBackpauseMinString() + autopause_tooltip1_ + settings_.getBackpauseMinString() + autopause_tooltip2_);
 	optionbutton_row_->addWidget(pintotop_button_);
 	optionbutton_row_->addWidget(autopause_button_);
 
@@ -189,7 +189,7 @@ void ContentWidget::pressedAutoPauseButton()
 {
 	toggleButtonColor(autopause_button_, button_hold_color_);
 	settings_.setAutopauseState(!settings_.isAutopauseEnabled());
-	autopause_button_->setToolTip(settings_.getBackpauseMin() + autopause_tooltip1_ + settings_.getBackpauseMin() + autopause_tooltip2_);
+	autopause_button_->setToolTip(settings_.getBackpauseMinString() + autopause_tooltip1_ + settings_.getBackpauseMinString() + autopause_tooltip2_);
 }
 
 void ContentWidget::pressedShowHistoryButton()

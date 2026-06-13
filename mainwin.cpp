@@ -69,7 +69,7 @@ void MainWin::setupIcon()
 	QObject::connect(tray_icon_, SIGNAL(activated(QSystemTrayIcon::ActivationReason)), this, SLOT(iconActivated(QSystemTrayIcon::ActivationReason)));
 }
 
-void MainWin::update()
+void MainWin::onTick()
 {
 	content_widget_->updateTimes();
 	tray_icon_->setToolTip(content_widget_->getTooltip());
@@ -103,13 +103,6 @@ void MainWin::showUserWarning(const QString& text)
 void MainWin::showHistoryLoadReconciliation(const QString& text)
 {
 	statusBar()->showMessage(text, 10000);
-}
-
-void MainWin::reactOnLockState([[maybe_unused]] LockEvent event)
-{
-    // GUI transitions for lock/unlock are now driven by Timer::modeChanged()
-    // signal (connected in the constructor). This slot is kept for the signal/slot
-    // wiring in main.cpp but has no work to do.
 }
 
 void MainWin::iconActivated(QSystemTrayIcon::ActivationReason reason)
