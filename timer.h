@@ -257,6 +257,9 @@ public:
     std::deque<TimeDuration> getDurationsHistory();
     std::pair<int, int> getLastHistoryLoadStats() const;
     std::optional<TimeDuration> getOngoingDuration() const;
+    /// Locked variant for callers that already hold mutex_ (e.g. snapshot()).
+    /// Body is identical to getOngoingDuration() without re-acquiring the lock.
+    std::optional<TimeDuration> getOngoingDuration_locked() const;
     // Cheap thread-safe predicate used by the MainWin watchdog. Returns true
     // iff there is an ongoing segment whose start date is earlier than today.
     bool isOngoingSegmentCrossMidnight() const;

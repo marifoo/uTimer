@@ -830,7 +830,7 @@ qint64 Timer::getPauseTime() const
 Timeline Timer::snapshot() const
 {
     QMutexLocker lock(&mutex_);
-    return Timeline(session_.durations, getOngoingDuration());
+    return Timeline(session_.durations, getOngoingDuration_locked());
 }
 
 Timeline Timer::getCurrentDurations() const
@@ -948,6 +948,11 @@ std::pair<int, int> Timer::getLastHistoryLoadStats() const
 std::optional<TimeDuration> Timer::getOngoingDuration() const
 {
     QMutexLocker locker(&mutex_);
+    return getOngoingDuration_locked();
+}
+
+std::optional<TimeDuration> Timer::getOngoingDuration_locked() const
+{
     if (mode_ == Mode::None) return std::nullopt;
     const QDateTime now = QDateTime::currentDateTime();
     if (!session_.segment_start_time.isValid() || session_.segment_start_time >= now) {
