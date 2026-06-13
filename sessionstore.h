@@ -133,12 +133,6 @@ public:
     virtual bool checkSchemaOnStartup() = 0;
     virtual void flushToDisc() = 0;
     virtual std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() = 0;
-    // Atomically check overlap and finalise.  Inside a single transaction:
-    //   (a) probe for any other finalised row whose [startUtc, endUtc) interval
-    //       intersects the supplied [startUtc, endUtc);
-    //   (b) only if no overlap, UPDATE `rowId` to is_finalized = 1.
-    // Returns true iff the UPDATE took effect.
-    virtual bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc) = 0;
     // Reconcile a batch of orphan checkpoints.
     //   `orphansToFinalize` is attempted via finalizeIfNoOverlap, one per row.
     //   `outrightDropIds`   are deleted unconditionally.

@@ -48,7 +48,7 @@ public:
     bool checkSchemaOnStartup() override;
     void flushToDisc() override;
     std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
-    bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc) override;
+    bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc);
     ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
                                                    const std::vector<long long>& outrightDropIds) override;
     bool setLastCleanShutdownMarker(const QDateTime& timestamp) override;
