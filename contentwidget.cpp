@@ -269,9 +269,11 @@ void ContentWidget::updateTimes()
 QString ContentWidget::getTooltip()
 {
 	if (timetracker_.isPaused())
-		return QString("µTimer:  In Pause (Overall " + pause_time_->text() + ")");
-	else if (timetracker_.isActive())
-		return QString("µTimer:  In Activity (Overall " + convTimeStrToDurationStr(activity_time_->text()) + "h / " + activity_time_->text() + ")");
+		return QString("µTimer:  In Pause (Overall " + convMSecToTimeStr(timetracker_.getPauseTime()) + ")");
+	else if (timetracker_.isActive()) {
+		const QString timeStr = convMSecToTimeStr(timetracker_.getActiveTime());
+		return QString("µTimer:  In Activity (Overall " + convTimeStrToDurationStr(timeStr) + "h / " + timeStr + ")");
+	}
 	else
 		return QString("µTimer:  Timing inactive");
 }
