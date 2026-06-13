@@ -1,17 +1,12 @@
 /**
- * ContentWidget - The main GUI presentation layer.
+ * ContentWidget - View + light controller for the main timer UI.
  *
- * Design Pattern: Passive View / Dumb Widget
- * - This widget owns the UI elements (Buttons, Labels) but holds very little logic.
- * - State is primarily managed by Timer and reflected here via polling.
- * - updateTimes() is called by the main loop (MainWin::onTick) to refresh the display.
- *
- * Interaction:
- * - Button presses emit startPausePressed()/stopPressed() directly to Timer slots.
- * - Timer state changes are NOT automatically pushed here; the main loop polls
- *   Timer and calls updateTimes().
- * - setGUItoActivity/Pause/Stop helper methods are used to force the visual state
- *   to match the logical state (e.g., when resuming from tray or changing modes).
+ * Owns the UI elements (buttons, labels) and handles user interactions:
+ * button presses write settings, launch HistoryDialog, and build tooltips.
+ * Timer state changes propagate here via signal connections
+ * (started/stopped/paused/modeChanged) to update the visual state.
+ * updateTimes() is called by the main loop (MainWin::onTick) to refresh the
+ * time display labels by polling Timer.
  */
 
 #include "contentwidget.h"
@@ -171,7 +166,6 @@ void ContentWidget::pressedStartPauseButton()
 
 void ContentWidget::pressedStopButton()
 {
-	setGUItoStop();
 	emit stopPressed();
 }
 
