@@ -13,7 +13,7 @@
  */
 
 #include "settings.h"
-#include "helpers.h"
+#include "timeformat.h"
 #include "logger.h"
 
 namespace {
@@ -119,7 +119,7 @@ bool Settings::logToFile() const
 	return log_to_file_;
 }
 
-QString Settings::getBackpauseMinString() const
+QString Settings::getAutopauseThresholdMinString() const
 {
 	return QString::number(backpause_min_);
 }
@@ -129,17 +129,17 @@ qint64 Settings::getBackpauseMsec() const
 	return convMinToMsec(backpause_min_);
 }
 
-qint64 Settings::getPauseTimeForWarnTimeNoPauseMsec() const
+qint64 Settings::getNoPauseWarningPauseThresholdMsec() const
 {
 	return convMinToMsec(pause_for_warning_nopause_min_);
 }
 
-qint64 Settings::getWarnTimeNoPauseMsec() const
+qint64 Settings::getNoPauseWarningActivityThresholdMsec() const
 {
 	return convMinToMsec(warning_nopause_min_);
 }
 
-qint64 Settings::getWarnTimeActivityMsec() const
+qint64 Settings::getExcessiveActivityThresholdMsec() const
 {
 	return convMinToMsec(warning_activity_min_);
 }
@@ -150,9 +150,9 @@ void Settings::setAutopauseState(const bool autopause_enabled)
 	writeSettingsFile();
 }
 
-void Settings::setPinToTopState(const bool pin2top_enabled)
+void Settings::setPinToTopState(const bool pinned_to_top)
 {
-	start_pinned_to_top_ = pin2top_enabled;
+	start_pinned_to_top_ = pinned_to_top;
 	writeSettingsFile();
 }
 

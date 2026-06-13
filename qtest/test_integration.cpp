@@ -272,8 +272,8 @@ void IntegrationTest::test_integration_memory_db_consistency()
     // Total durations should match (memory + checkpoint)
     qint64 memoryTotal = sumDurations(memoryDurations.completed(), DurationType::Activity) +
                         sumDurations(memoryDurations.completed(), DurationType::Pause);
-    qint64 dbTotal = sumDurations(dbDurations, DurationType::Activity) +
-                    sumDurations(dbDurations, DurationType::Pause);
+    qint64 dbTotal = sumDurations(dbDurations.durations, DurationType::Activity) +
+                    sumDurations(dbDurations.durations, DurationType::Pause);
     
     // Allow small tolerance for timing differences
     QVERIFY(qAbs(memoryTotal - dbTotal) < 200);

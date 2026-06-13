@@ -1,4 +1,13 @@
 #include "testcommon.h"
+#include "timeline.h"
+
+std::vector<QString> cleanDurations(std::deque<TimeDuration>* pDurations)
+{
+    Timeline t(*pDurations, std::nullopt);
+    auto [normed, removed] = t.normalizedWithRemovedIds();
+    *pDurations = normed.completed();
+    return removed;
+}
 
 namespace TestCommon {
 

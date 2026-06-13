@@ -12,14 +12,11 @@
 #include "types.h"
 #include "timer.h"
 #include "timeline.h"
+#include "splitdialog.h"
 
 class QLabel;
 class QTableWidget;
 class QPushButton;
-class QSlider;
-class QRadioButton;
-
-class SplitDialog;
 
 class HistoryDialog : public QDialog
 {
@@ -77,33 +74,6 @@ public:
         }
         return result;
     }
-};
-
-class SplitDialog : public QDialog
-{
-    Q_OBJECT
-
-public:
-    SplitDialog(const QDateTime& start, const QDateTime& end, QWidget* parent = nullptr);
-
-    QDateTime getSplitTime() const;
-    DurationType getFirstSegmentType() const;
-    DurationType getSecondSegmentType() const;
-
-    void setFirstSegmentType(DurationType type);
-    void setSecondSegmentType(DurationType type);
-
-private slots:
-    void updateSplitLabel(int value);
-
-private:
-    QDateTime start_;
-    QDateTime end_;
-    QSlider* slider_;
-    QLabel* splitTimeLabel_;
-
-    QRadioButton* activityPauseOption_;
-    QRadioButton* pauseActivityOption_;
 };
 
 #endif // HISTORYDIALOG_H

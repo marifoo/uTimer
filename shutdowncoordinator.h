@@ -12,7 +12,7 @@ public:
     void run(bool forceDirectPath = false);
 
 private:
-    void stopAndPump(int budgetMs);
+    void pumpEvents(int budgetMs);
 
     Timer& timetracker_;
     SessionStore& db_;

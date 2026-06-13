@@ -1,9 +1,7 @@
 #include <QApplication>
 #include <QDebug>
-#include <QDir>
 #include <QEvent>
 #include <QMessageBox>
-#include <QSettings>
 #include <QStyleFactory>
 #include <QTimer>
 #ifdef Q_OS_LINUX
@@ -14,6 +12,7 @@
 #include <unistd.h>
 #endif
 
+#include "apppaths.h"
 #include "settings.h"
 #include "mainwin.h"
 #include "shutdowncoordinator.h"
@@ -101,23 +100,23 @@ int main(int argc, char *argv[])
 
 	QTimer timer;
 
-	Settings settings(QDir(QCoreApplication::applicationDirPath()).filePath("user-settings.ini"));
+	Settings settings(AppPaths::settingsFile());
 	Logger::registerSettings(&settings);
 	LockStateWatcher lockstate_watcher(settings);
-	SqliteSessionStore database_manager(settings);
-	Timer time_tracker(settings, database_manager);
+	SqliteSessionStore session_store(settings);
+	Timer time_tracker(settings, session_store);
 
 	// Check database schema before starting the UI
-	if (!database_manager.checkSchemaOnStartup()) {
+	if (!session_store.checkSchemaOnStartup()) {
 		QMessageBox::critical(nullptr, "Database Error",
 			"Could not open or initialize the database.\n\n"
 			"Please check the following file and restart:\n"
-			+ QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.sqlite"));
+			+ AppPaths::databaseFile());
 		return 1;
 	}
 
-	ShutdownCoordinator shutdown_coordinator(time_tracker, database_manager);
-	MainWin main_win(settings, time_tracker, database_manager, shutdown_coordinator);
+	ShutdownCoordinator shutdown_coordinator(time_tracker, session_store);
+	MainWin main_win(settings, time_tracker, session_store, shutdown_coordinator);
 
 #ifdef Q_OS_LINUX
 	// Set up socket notifier to handle Unix signals in the Qt event loop
@@ -146,8 +145,6 @@ int main(int argc, char *argv[])
 		});
 	}
 #endif
-
-	QObject::connect(&main_win, SIGNAL(sendButtons(Button)), &time_tracker, SLOT(useTimerViaButton(Button)));
 
 	QObject::connect(&timer, SIGNAL(timeout()), &main_win, SLOT(onTick()));
 	QObject::connect(&timer, &QTimer::timeout, [&time_tracker]() {

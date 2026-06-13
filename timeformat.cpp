@@ -1,0 +1,25 @@
+#include "timeformat.h"
+#include <QDateTime>
+
+qint64 convMinToMsec(const int& minutes)
+{
+    return (static_cast<qint64>(minutes) * 60000);
+}
+
+QString convMSecToTimeStr(const qint64& time)
+{
+    return QDateTime::fromTime_t(static_cast<unsigned int>(time / 1000)).toUTC().toString("hh:mm:ss");
+}
+
+QString convMinAndSecToHourPctString(const int min, const int sec)
+{
+    return QString::number((min * 60 + sec) / 36).rightJustified(2, '0');
+}
+
+QString convTimeStrToDurationStr(const QString& time_str)
+{
+    const QStringList split = time_str.split(":");
+    QString hours = QString::number(split[0].toInt());
+    QString hour_frac = convMinAndSecToHourPctString(split[1].toInt(), split[2].toInt());
+    return hours + "." + hour_frac;
+}

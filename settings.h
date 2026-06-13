@@ -36,15 +36,15 @@ public:
 	bool showNoPauseWarning() const;
 	bool showTooMuchActivityWarning() const;
 	bool logToFile() const;
-	QString getBackpauseMinString() const;
+	QString getAutopauseThresholdMinString() const;
 	qint64 getBackpauseMsec() const;
-	qint64 getPauseTimeForWarnTimeNoPauseMsec() const;
-	qint64 getWarnTimeNoPauseMsec() const;
-	qint64 getWarnTimeActivityMsec() const;
+	qint64 getNoPauseWarningPauseThresholdMsec() const;
+	qint64 getNoPauseWarningActivityThresholdMsec() const;
+	qint64 getExcessiveActivityThresholdMsec() const;
 	unsigned int getBootTimeSec() const;
 	qint64 getCheckpointIntervalMsec() const;
 	void setAutopauseState(const bool autopause_enabled);
-	void setPinToTopState(const bool pin2top_enabled);
+	void setPinToTopState(const bool pinned_to_top);
 };
 
 #endif // SETTINGS_H

@@ -1,5 +1,5 @@
 #include "healthmonitor.h"
-#include "helpers.h"
+#include "timeformat.h"
 
 HealthMonitor::HealthMonitor(const Settings& settings, QObject* parent)
     : QObject(parent), settings_(settings),
@@ -9,14 +9,14 @@ HealthMonitor::HealthMonitor(const Settings& settings, QObject* parent)
 
 void HealthMonitor::check(qint64 activeMsec, qint64 pauseMsec)
 {
-    if (!activity_warning_shown_ && activeMsec > settings_.getWarnTimeActivityMsec()) {
+    if (!activity_warning_shown_ && activeMsec > settings_.getExcessiveActivityThresholdMsec()) {
         activity_warning_shown_ = true;
         emit warningTriggered("Total activity time: " + convMSecToTimeStr(activeMsec));
     }
 
     if (!pause_warning_shown_
-        && activeMsec > settings_.getWarnTimeNoPauseMsec()
-        && pauseMsec < settings_.getPauseTimeForWarnTimeNoPauseMsec()) {
+        && activeMsec > settings_.getNoPauseWarningActivityThresholdMsec()
+        && pauseMsec < settings_.getNoPauseWarningPauseThresholdMsec()) {
         pause_warning_shown_ = true;
         emit warningTriggered("Pause time: " + convMSecToTimeStr(pauseMsec)
                               + "\nwith activity time: " + convMSecToTimeStr(activeMsec));

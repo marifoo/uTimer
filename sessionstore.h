@@ -49,13 +49,8 @@ struct LoadResult {
     size_t size() const { return durations.size(); }
     bool empty() const { return durations.empty(); }
     const TimeDuration& operator[](size_t idx) const { return durations[idx]; }
-    TimeDuration& operator[](size_t idx) { return durations[idx]; }
     std::deque<TimeDuration>::const_iterator begin() const { return durations.begin(); }
     std::deque<TimeDuration>::const_iterator end() const { return durations.end(); }
-    std::deque<TimeDuration>::iterator begin() { return durations.begin(); }
-    std::deque<TimeDuration>::iterator end() { return durations.end(); }
-    operator const std::deque<TimeDuration>&() const { return durations; }
-    operator std::deque<TimeDuration>&() { return durations; }
 };
 
 /**

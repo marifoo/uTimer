@@ -20,7 +20,6 @@
 #include <QCoreApplication>
 #include <QStatusBar>
 #include "logger.h"
-#include "helpers.h"
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -48,7 +47,10 @@ void MainWin::setupCentralWidget(Settings& settings, Timer& timetracker)
 	content_widget_ = new ContentWidget(settings, timetracker, this);
 
 	setCentralWidget(content_widget_);
-	QObject::connect(content_widget_, SIGNAL(pressedButton(Button)), this, SIGNAL(sendButtons(Button)));
+	QObject::connect(content_widget_, &ContentWidget::startPausePressed,
+		&timetracker, &Timer::onStartPausePressed);
+	QObject::connect(content_widget_, &ContentWidget::stopPressed,
+		&timetracker, &Timer::onStopPressed);
 	QObject::connect(content_widget_, &ContentWidget::historyLoadReconciliationAvailable,
 		this, &MainWin::showHistoryLoadReconciliation);
 	QObject::connect(content_widget_, SIGNAL(minToTray()), this, SLOT(minToTray()));
@@ -199,14 +201,14 @@ void MainWin::shutdown(bool force_direct)
 void MainWin::onAboutToQuit()
 {
 	Logger::Log("[TIMER] AboutToQuit received");
-	shutdown(false);  // Normal shutdown, use event loop
+	shutdown(false);
 }
 
 void MainWin::closeEvent(QCloseEvent *event)
 {
 	Logger::Log("[TIMER] CloseEvent received");
 	// Handle manual window closing (Alt+F4, X button, etc.)
-	shutdown(false);  // Normal shutdown, use event loop
+	shutdown(false);
 	event->accept();
 }
 

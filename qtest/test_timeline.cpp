@@ -1,6 +1,5 @@
 #include "test_timeline.h"
 #include "timeline.h"
-#include "helpers.h"
 #include <QtTest>
 
 using TestCommon::mk;

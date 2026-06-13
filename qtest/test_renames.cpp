@@ -26,7 +26,6 @@ void RenamesTest::test_no_old_names_in_production_headers()
         "shutdowncoordinator.h",
         "healthmonitor.h",
         "timeline.h",
-        "helpers.h",
         "settings.h",
         "logger.h",
         "types.h",

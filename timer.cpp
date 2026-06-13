@@ -35,7 +35,6 @@
 #include <algorithm>
 #include <new>  // for std::bad_alloc
 #include "logger.h"
-#include "helpers.h"
 
 namespace {
 constexpr qint64 kMinRecoverableOrphanDurationMs = 1000;
@@ -415,7 +414,7 @@ bool Timer::retryUnsavedDurations()
     }
     if (retryResult.category == SessionStoreResult::FatalError
         || retryResult.category == SessionStoreResult::CallerBug) {
-        // Already handled by handleDbResult inside appendDurationsChunkToDB
+        // Already handled by logDbResultOrWarn inside appendDurationsChunkToDB
         if (retryResult.category == SessionStoreResult::FatalError)
             session_.consecutive_retry_failures = 3;
         return false;
@@ -689,6 +688,35 @@ void Timer::useTimerViaButton(Button button)
 #endif
 }
 
+void Timer::onStartPausePressed()
+{
+    QMutexLocker locker(&mutex_);
+#ifndef QT_NO_DEBUG
+    StateGuard guard(*this, "onStartPausePressed");
+    guard.markTransitioned();
+#endif
+    const QDateTime now = QDateTime::currentDateTime();
+    if (discardCrossMidnightOngoingAndStop(now)) {
+#ifndef QT_NO_DEBUG
+        checkDurationInvariants();
+#endif
+        return;
+    }
+    switch (mode_) {
+        case Mode::Activity: pauseTimer(now); break;
+        case Mode::Pause:    startTimer(now); break;
+        case Mode::None:     startTimer(now); break;
+    }
+#ifndef QT_NO_DEBUG
+    checkDurationInvariants();
+#endif
+}
+
+void Timer::onStopPressed()
+{
+    useTimerViaButton(Button::Stop);
+}
+
 /**
  * Handles desktop lock/unlock events from LockStateWatcher.
  *
@@ -952,12 +980,23 @@ bool Timer::canMarkCleanShutdown() const
     return mode_ == Mode::None && !session_.has_unsaved_data;
 }
 
+Timer::ShutdownResult Timer::shutdown()
+{
+    QMutexLocker locker(&mutex_);
+    if (mode_ != Mode::None) {
+        stopTimer(QDateTime::currentDateTime(), StopReason::Shutdown);
+    }
+    const bool stopped = (mode_ == Mode::None);
+    const bool canCleanMark = stopped && !session_.has_unsaved_data;
+    return {stopped, canCleanMark};
+}
+
 bool Timer::appendDurationsToDB()
 {
     return appendDurationsChunkToDB(session_.durations).ok();
 }
 
-void Timer::handleDbResult(const SessionStoreResult& result, const QString& context)
+void Timer::logDbResultOrWarn(const SessionStoreResult& result, const QString& context)
 {
     if (result.category == SessionStoreResult::CallerBug) {
         Logger::Log("[DB] CRITICAL: " + context + " caller bug: " + result.message);
@@ -975,7 +1014,7 @@ SessionStoreResult Timer::appendDurationsChunkToDB(const std::deque<TimeDuration
     if (durations.empty())
         return SessionStoreResult::success();
     const SessionStoreResult result = db_.commitSession(Timeline(durations, std::nullopt));
-    handleDbResult(result, "commitSession");
+    logDbResultOrWarn(result, "commitSession");
     return result;
 }
 
@@ -986,7 +1025,7 @@ bool Timer::updateDurationsInDB()
         return true;
     }
     const SessionStoreResult result = db_.commitSession(Timeline(session_.durations, std::nullopt));
-    handleDbResult(result, "commitSession");
+    logDbResultOrWarn(result, "commitSession");
     const bool ok = result.ok();
 #ifndef QT_NO_DEBUG
     if (ok) {
@@ -1139,7 +1178,7 @@ void Timer::saveCheckpointInternal(const QDateTime& now)
             .arg(wallClockMs)
             .arg(session_.segment_id.toString()));
     } else {
-        handleDbResult(result, "saveCheckpoint");
+        logDbResultOrWarn(result, "saveCheckpoint");
     }
 }
 

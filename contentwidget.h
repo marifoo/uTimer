@@ -55,13 +55,18 @@ private:
 
 public:
 	explicit ContentWidget(Settings &settings, Timer& timetracker, QWidget *parent = nullptr);
+	/// Polls Timer for active/pause time and refreshes labels. Called every 100ms.
 	void updateTimes();
+	/// Returns tray icon tooltip reflecting current timer state. Polled by MainWin::onTick().
 	QString getTooltip();
 
 signals:
 	void minToTray();
 	void toggleAlwaysOnTop();
-	void pressedButton(Button button);
+	/// Emitted when the start/pause button is pressed; Timer decides start vs. pause.
+	void startPausePressed();
+	/// Emitted when the stop button is pressed.
+	void stopPressed();
 	void historyLoadReconciliationAvailable(const QString& text);
 
 public slots:

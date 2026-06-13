@@ -185,7 +185,7 @@ private:
     /// Applies the standard log/warn policy for a SessionStoreResult in the
     /// named context.  Does NOT affect control flow — callers decide what to do
     /// after calling this.
-    void handleDbResult(const SessionStoreResult& result, const QString& context);
+    void logDbResultOrWarn(const SessionStoreResult& result, const QString& context);
     // Retries saving previously unsaved durations at the start of a new session.
     // Returns true if startTimer should continue, false if it should abort.
     bool retryUnsavedDurations();
@@ -245,7 +245,9 @@ public:
 
     qint64 getActiveTime() const;
     qint64 getPauseTime() const;
+    /// Returns completed + ongoing segments. Use for history display.
     Timeline snapshot() const;
+    /// Returns completed segments only (excludes ongoing). Use for checkpoint saves.
     Timeline getCurrentDurations() const;
     void replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
                                  const std::optional<TimeDuration>& ongoing = std::nullopt);
@@ -264,14 +266,28 @@ public:
     bool appendDurationsToDB();
     bool updateDurationsInDB();
     bool replaceAll(const Timeline& history, const Timeline& session);
+    /// Freezes checkpoints and defers midnight/lock events. Call before opening HistoryDialog.
     void beginExclusiveEdit();
+    /// Resumes checkpoints and replays deferred events. Call after closing HistoryDialog.
     void endExclusiveEdit();
     bool canMarkCleanShutdown() const;
+
+    struct ShutdownResult {
+        bool stopped;     ///< true iff timer is now in Mode::None
+        bool canCleanMark; ///< true iff state is clean enough for a shutdown marker
+    };
+    /// Stops the timer if running and returns the resulting state.
+    /// Thread-safe; may be called multiple times (idempotent on an already-stopped timer).
+    ShutdownResult shutdown();
 
 public slots:
     void useTimerViaButton(Button button);
     void useTimerViaLockEvent(LockEvent event);
     void onTick(const QDateTime& now);  // 100 ms heartbeat for the watchdog
+    /// Start if stopped/paused, pause if active. Called by the start/pause button.
+    void onStartPausePressed();
+    /// Stop the timer. Called by the stop button.
+    void onStopPressed();
 
 signals:
     void userWarning(const QString& text);

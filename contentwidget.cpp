@@ -4,10 +4,10 @@
  * Design Pattern: Passive View / Dumb Widget
  * - This widget owns the UI elements (Buttons, Labels) but holds very little logic.
  * - State is primarily managed by Timer and reflected here via polling.
- * - updateTimes() is called by the main loop (MainWin::update) to refresh the display.
+ * - updateTimes() is called by the main loop (MainWin::onTick) to refresh the display.
  *
  * Interaction:
- * - Button presses emit signals (pressedButton) to MainWin, which forwards them to Timer.
+ * - Button presses emit startPausePressed()/stopPressed() directly to Timer slots.
  * - Timer state changes are NOT automatically pushed here; the main loop polls
  *   Timer and calls updateTimes().
  * - setGUItoActivity/Pause/Stop helper methods are used to force the visual state
@@ -27,8 +27,17 @@
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QCheckBox>
-#include "helpers.h"
+#include "timeformat.h"
 #include "historydialog.h"
+
+static void toggleButtonColor(QPushButton* const button, const QColor& color)
+{
+    const QString stylesheet_string = QString("QPushButton {background-color: %1;}").arg(color.name());
+    if (button->styleSheet() != stylesheet_string)
+        button->setStyleSheet(stylesheet_string);
+    else
+        button->setStyleSheet("");
+}
 
 ContentWidget::ContentWidget(Settings & settings, Timer &timetracker, QWidget *parent)
 	: QWidget(parent), settings_(settings), timetracker_(timetracker), button_hold_color_(QColor(180,216,228,255))
@@ -111,7 +120,6 @@ void ContentWidget::setupButtonRows()
 	QFont button_font = QApplication::font();
 	button_font.setPixelSize(11);
 
-	// [START] [STOP]
 	timerbutton_row_ = new QHBoxLayout();
 	startpause_button_ = new QPushButton("START");
 	startpause_button_->setFont(button_font);
@@ -124,7 +132,6 @@ void ContentWidget::setupButtonRows()
 	timerbutton_row_->addWidget(startpause_button_);
 	timerbutton_row_->addWidget(stop_button_);
 
-	// [Stay on Top] [Auto-Pause]
 	optionbutton_row_ = new QHBoxLayout();
 	pintotop_button_ = new QPushButton("Stay on Top");
 	pintotop_button_->setFont(button_font);
@@ -133,11 +140,10 @@ void ContentWidget::setupButtonRows()
 	autopause_button_->setFont(button_font);
 	autopause_tooltip1_ = "min after locking the PC:\nPause the Timer and count these ";
 	autopause_tooltip2_ = "min retroactively as a Pause";
-	autopause_button_->setToolTip(settings_.getBackpauseMinString() + autopause_tooltip1_ + settings_.getBackpauseMinString() + autopause_tooltip2_);
+	autopause_button_->setToolTip(settings_.getAutopauseThresholdMinString() + autopause_tooltip1_ + settings_.getAutopauseThresholdMinString() + autopause_tooltip2_);
 	optionbutton_row_->addWidget(pintotop_button_);
 	optionbutton_row_->addWidget(autopause_button_);
 
-	// [Min to Tray] [History..]
 	bottombutton_row_ = new QHBoxLayout();
 	mintotray_button_ = new QPushButton("Min to Tray");
 	mintotray_button_->setFont(button_font);
@@ -160,17 +166,13 @@ void ContentWidget::applyStartupSettingsToGui()
 
 void ContentWidget::pressedStartPauseButton()
 {
-	if (timetracker_.isActive()) {
-		emit pressedButton(Button::Pause);
-	} else {
-		emit pressedButton(Button::Start);
-	}
+	emit startPausePressed();
 }
 
 void ContentWidget::pressedStopButton()
 {
 	setGUItoStop();
-	emit pressedButton(Button::Stop);
+	emit stopPressed();
 }
 
 void ContentWidget::pressedMinToTrayButton()
@@ -189,7 +191,7 @@ void ContentWidget::pressedAutoPauseButton()
 {
 	toggleButtonColor(autopause_button_, button_hold_color_);
 	settings_.setAutopauseState(!settings_.isAutopauseEnabled());
-	autopause_button_->setToolTip(settings_.getBackpauseMinString() + autopause_tooltip1_ + settings_.getBackpauseMinString() + autopause_tooltip2_);
+	autopause_button_->setToolTip(settings_.getAutopauseThresholdMinString() + autopause_tooltip1_ + settings_.getAutopauseThresholdMinString() + autopause_tooltip2_);
 }
 
 void ContentWidget::pressedShowHistoryButton()

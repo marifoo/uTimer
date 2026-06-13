@@ -1,4 +1,5 @@
 #include "test_settings.h"
+#include "timeformat.h"
 #include <QtTest>
 
 void SettingsTest::test_settings_defaults_and_bounds()

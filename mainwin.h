@@ -38,12 +38,11 @@ protected:
 public:
 	explicit MainWin(Settings &settings, Timer &timetracker, SessionStore &db,
 	                 ShutdownCoordinator &shutdown_coordinator, QWidget *parent = nullptr);
+	/// Applies startup preferences (pin, minimize, auto-start) and shows crash-recovery notification.
 	void start();
 
-signals:
-	void sendButtons(Button button);
-
 public slots:
+	/// 100ms heartbeat: refreshes display and runs health checks.
 	void onTick();
 	void iconActivated(QSystemTrayIcon::ActivationReason reason);
 	void minToTray();

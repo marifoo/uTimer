@@ -31,8 +31,7 @@
  */
 
 #include "sqlitesessionstore.h"
-#include <QCoreApplication>
-#include <QDir>
+#include "apppaths.h"
 #include <QMutexLocker>
 #include <QSqlQuery>
 #include <QSqlError>
@@ -42,11 +41,15 @@
 #include <QStorageInfo>
 #include <QTextStream>
 #include <atomic>
-#include "helpers.h"
 #include "logger.h"
 
 namespace {
 const char* kLastCleanShutdownKey = "last_clean_shutdown";
+
+static QString toUtcIso(const QDateTime& dt)
+{
+    return dt.toUTC().toString(Qt::ISODateWithMs);
+}
 
 // Monotonically increasing counter used to mint unique SQLite connection names.
 // Using a counter instead of the object address (reinterpret_cast<quintptr>(this))
@@ -64,8 +67,7 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
     QString connectionName = QString("uTimer_connection_%1").arg(s_connection_seq.fetch_add(1, std::memory_order_relaxed));
     db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
 
-    // Use executable directory for portability
-    db.setDatabaseName(QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.sqlite"));
+    db.setDatabaseName(AppPaths::databaseFile());
 
     if (history_days_to_keep_ == 0) {
         Logger::Log("[DB] History days to keep is set to 0, database will not be used.");
@@ -155,7 +157,7 @@ bool SqliteSessionStore::ensureOpen()
 bool SqliteSessionStore::ensureSchema()
 {
     QSqlQuery query_new(db);
-    bool tableCreated = query_new.exec(
+    bool schemaOk = query_new.exec(
         "CREATE TABLE IF NOT EXISTS durations ("
         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
         "segment_id TEXT NOT NULL CHECK(length(segment_id) > 0),"
@@ -167,7 +169,7 @@ bool SqliteSessionStore::ensureSchema()
         ")"
     );
 
-    if (!tableCreated) {
+    if (!schemaOk) {
         Logger::Log("[DB] Error creating table: " + query_new.lastError().text());
         return false;
     }

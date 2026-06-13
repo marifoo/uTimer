@@ -31,12 +31,13 @@ SOURCES += \
     test_timeline.cpp \
     test_renames.cpp \
     $$PWD/../healthmonitor.cpp \
+    $$PWD/../splitdialog.cpp \
     $$PWD/../historydialog.cpp \
     $$PWD/../shutdowncoordinator.cpp \
     $$PWD/../timer.cpp \
     $$PWD/../lockstatewatcher.cpp \
     $$PWD/../sqlitesessionstore.cpp \
-    $$PWD/../helpers.cpp \
+    $$PWD/../timeformat.cpp \
     $$PWD/../settings.cpp \
     $$PWD/../logger.cpp \
     $$PWD/../timeline.cpp
@@ -58,13 +59,15 @@ HEADERS += \
     test_healthmonitor.h \
     test_timeline.h \
     test_renames.h \
+    $$PWD/../apppaths.h \
+    $$PWD/../splitdialog.h \
     $$PWD/../healthmonitor.h \
     $$PWD/../shutdowncoordinator.h \
     $$PWD/../timer.h \
     $$PWD/../lockstatewatcher.h \
     $$PWD/../sqlitesessionstore.h \
     $$PWD/../sessionstore.h \
-    $$PWD/../helpers.h \
+    $$PWD/../timeformat.h \
     $$PWD/../settings.h \
     $$PWD/../logger.h \
     $$PWD/../types.h \

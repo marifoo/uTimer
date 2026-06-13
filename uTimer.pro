@@ -1,6 +1,7 @@
 TARGET = uTimer
 
 HEADERS = \
+   $$PWD/apppaths.h \
    $$PWD/contentwidget.h \
    $$PWD/sqlitesessionstore.h \
    $$PWD/healthmonitor.h \
@@ -11,7 +12,8 @@ HEADERS = \
    $$PWD/lockstatewatcher.h \
    $$PWD/settings.h \
    $$PWD/types.h \
-   $$PWD/helpers.h \
+   $$PWD/timeformat.h \
+   $$PWD/splitdialog.h \
    $$PWD/logger.h \
    $$PWD/historydialog.h \
    $$PWD/timeline.h
@@ -25,9 +27,10 @@ SOURCES = \
    $$PWD/shutdowncoordinator.cpp \
    $$PWD/timer.cpp \
    $$PWD/lockstatewatcher.cpp \
+   $$PWD/splitdialog.cpp \
    $$PWD/historydialog.cpp \
    $$PWD/settings.cpp \
-   $$PWD/helpers.cpp \
+   $$PWD/timeformat.cpp \
    $$PWD/logger.cpp \
    $$PWD/timeline.cpp
 

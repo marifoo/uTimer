@@ -24,8 +24,8 @@
 #undef private
 #undef protected
 
-#include "helpers.h"
 #include "settings.h"
+#include "timeline.h"
 
 namespace TestCommon {
 
@@ -39,5 +39,11 @@ QString createSettingsFile(const QString& dirPath, int historyDays);
 qint64 sumDurations(const std::deque<TimeDuration>& d, DurationType type);
 
 } // namespace TestCommon
+
+/// Normalizes the duration list in-place (merging adjacent same-type segments)
+/// and returns the segment_id strings of any segments merged away.
+/// Delegates to Timeline::normalizedWithRemovedIds().
+/// Test-only helper; production code uses Timeline::normalizedWithRemovedIds() directly.
+std::vector<QString> cleanDurations(std::deque<TimeDuration>* pDurations);
 
 #endif // TESTCOMMON_H

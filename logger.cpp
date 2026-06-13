@@ -1,8 +1,7 @@
 #include "logger.h"
+#include "apppaths.h"
 #include "settings.h"
-#include <QCoreApplication>
 #include <QDateTime>
-#include <QDir>
 #include <QFile>
 #include <QTextStream>
 
@@ -16,7 +15,7 @@ void Logger::registerSettings(const Settings* s)
 Logger::Logger()
 {
     logfile_ = new QFile();
-    logfile_->setFileName(QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.log"));
+    logfile_->setFileName(AppPaths::logFile());
     logfile_->open(QIODevice::ReadWrite | QIODevice::Append | QIODevice::Text);
     log("uTimer Startup >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
 }
@@ -24,13 +23,13 @@ Logger::Logger()
 void Logger::Log(const QString &text)
 {
     if (!s_settings_ || !s_settings_->logToFile()) return;
-    static Logger L;
-    L.log(text);
+    static Logger instance;
+    instance.log(text);
 }
 
 QString Logger::logFilePath()
 {
-    return QDir(QCoreApplication::applicationDirPath()).filePath("uTimer.log");
+    return AppPaths::logFile();
 }
 
 void Logger::log(const QString &text)

@@ -1,4 +1,5 @@
 #include "test_helpers.h"
+#include "timeformat.h"
 #include <QtTest>
 
 void HelpersTest::test_helpers_conversions()
