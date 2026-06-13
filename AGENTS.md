@@ -23,7 +23,10 @@ The project uses Qt5 qmake. Build output goes to `build/` directory. Executable 
 
 ## Testing
 
-Tests are in `qtest/` using Qt Test Framework. The main test suite is in `qtest/utimertest.h` (implementation in `qtest/utimertest.cpp`).
+Tests are in `qtest/` using Qt Test Framework. `qtest/main.cpp` is the runner
+that aggregates per-component suites; each component has its own
+`test_<component>.cpp` (e.g. `test_timer.cpp`, `test_database.cpp`,
+`test_historydialog.cpp`).
 
 **Running tests:**
 ```bash
