@@ -16,6 +16,20 @@
 #include "helpers.h"
 #include "logger.h"
 
+namespace {
+static const QString kKeyPressStart        = "uTimer/press_start_button_on_app_start";
+static const QString kKeyAutopause         = "uTimer/autopause_enabled";
+static const QString kKeyAutopauseThresh   = "uTimer/autopause_threshold_minutes";
+static const QString kKeyStartMinimized    = "uTimer/start_minimized_to_tray";
+static const QString kKeyStartPinned       = "uTimer/start_pinned_to_top";
+static const QString kKeyWarnNoPause       = "uTimer/show_warning_when_not_30min_pause_after_6h_activity";
+static const QString kKeyWarnActivity      = "uTimer/show_warning_after_9h45min_activity";
+static const QString kKeyLogToFile         = "uTimer/debug_log_to_file";
+static const QString kKeyHistoryDays       = "uTimer/history_days_to_keep";
+static const QString kKeyBootTimeSec       = "uTimer/boot_time_seconds";
+static const QString kKeyCheckpointMin     = "uTimer/checkpoint_interval_minutes";
+} // namespace
+
 Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniFormat)
 {
 	sfile_.setIniCodec("UTF-8");
@@ -27,35 +41,35 @@ Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniForm
 
 void Settings::readSettingsFile()
 {
-	autostart_timing_ = sfile_.value("uTimer/press_start_button_on_app_start", true).toBool();
-	autopause_enabled_ = sfile_.value("uTimer/autopause_enabled", true).toBool();
-	backpause_min_ = qBound(0, sfile_.value("uTimer/autopause_threshold_minutes", 15).toInt(), 99);
-	start_minimized_ = sfile_.value("uTimer/start_minimized_to_tray", false).toBool();
-	start_pinned_to_top_ = sfile_.value("uTimer/start_pinned_to_top", false).toBool();
-	warning_nopause_ = sfile_.value("uTimer/show_warning_when_not_30min_pause_after_6h_activity", false).toBool();
+	autostart_timing_ = sfile_.value(kKeyPressStart, true).toBool();
+	autopause_enabled_ = sfile_.value(kKeyAutopause, true).toBool();
+	backpause_min_ = qBound(0, sfile_.value(kKeyAutopauseThresh, 15).toInt(), 99);
+	start_minimized_ = sfile_.value(kKeyStartMinimized, false).toBool();
+	start_pinned_to_top_ = sfile_.value(kKeyStartPinned, false).toBool();
+	warning_nopause_ = sfile_.value(kKeyWarnNoPause, false).toBool();
 	warning_nopause_min_ = 6*60;
 	pause_for_warning_nopause_min_ = 30;
-	warning_activity_ = sfile_.value("uTimer/show_warning_after_9h45min_activity", false).toBool();
+	warning_activity_ = sfile_.value(kKeyWarnActivity, false).toBool();
 	warning_activity_min_ = 9*60+45;
-	history_days_to_keep_ = qMax(0, sfile_.value("uTimer/history_days_to_keep", 99).toInt());
-	log_to_file_ = sfile_.value("uTimer/debug_log_to_file", false).toBool();
-	boot_time_sec_ = sfile_.value("uTimer/boot_time_seconds", 0).toUInt();
-	checkpoint_interval_min_ = qBound(0, sfile_.value("uTimer/checkpoint_interval_minutes", 5).toInt(), 60);
+	history_days_to_keep_ = qMax(0, sfile_.value(kKeyHistoryDays, 99).toInt());
+	log_to_file_ = sfile_.value(kKeyLogToFile, false).toBool();
+	boot_time_sec_ = sfile_.value(kKeyBootTimeSec, 0).toUInt();
+	checkpoint_interval_min_ = qBound(0, sfile_.value(kKeyCheckpointMin, 5).toInt(), 60);
 }
 
 void Settings::writeSettingsFile()
 {
-	sfile_.setValue("uTimer/press_start_button_on_app_start", autostart_timing_);
-	sfile_.setValue("uTimer/autopause_enabled", autopause_enabled_);
-	sfile_.setValue("uTimer/autopause_threshold_minutes", backpause_min_);
-	sfile_.setValue("uTimer/start_minimized_to_tray", start_minimized_);
-	sfile_.setValue("uTimer/start_pinned_to_top", start_pinned_to_top_);
-	sfile_.setValue("uTimer/show_warning_when_not_30min_pause_after_6h_activity", warning_nopause_);
-	sfile_.setValue("uTimer/show_warning_after_9h45min_activity", warning_activity_);
-	sfile_.setValue("uTimer/debug_log_to_file", log_to_file_);
-	sfile_.setValue("uTimer/history_days_to_keep", history_days_to_keep_);
-	sfile_.setValue("uTimer/boot_time_seconds", boot_time_sec_);
-	sfile_.setValue("uTimer/checkpoint_interval_minutes", checkpoint_interval_min_);
+	sfile_.setValue(kKeyPressStart, autostart_timing_);
+	sfile_.setValue(kKeyAutopause, autopause_enabled_);
+	sfile_.setValue(kKeyAutopauseThresh, backpause_min_);
+	sfile_.setValue(kKeyStartMinimized, start_minimized_);
+	sfile_.setValue(kKeyStartPinned, start_pinned_to_top_);
+	sfile_.setValue(kKeyWarnNoPause, warning_nopause_);
+	sfile_.setValue(kKeyWarnActivity, warning_activity_);
+	sfile_.setValue(kKeyLogToFile, log_to_file_);
+	sfile_.setValue(kKeyHistoryDays, history_days_to_keep_);
+	sfile_.setValue(kKeyBootTimeSec, boot_time_sec_);
+	sfile_.setValue(kKeyCheckpointMin, checkpoint_interval_min_);
 
 	if (log_to_file_) {
 		if (autopause_enabled_)

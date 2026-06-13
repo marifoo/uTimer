@@ -12,7 +12,7 @@ This document is the storage model. For the seam it sits behind, see the
 
 ## Tables
 
-The schema is created on first open by `lazyOpen` in
+The schema is created on first open by `ensureSchema` in
 `sqlitesessionstore.cpp`. Two tables:
 
 - **`durations`** — the timeline of completed and in-progress segments. One
@@ -39,7 +39,7 @@ and `hasEntriesForDate`) and `idx_segment_id` on `durations.segment_id`
 Journal mode is the SQLite default (rollback journal, **not** WAL).
 Single-process, single-threaded apps gain nothing from WAL, and rollback
 journal keeps the database as a single file — no `-wal`/`-shm` sidecars to
-forget when backing up or copying the database elsewhere. `lazyOpen` sets
+forget when backing up or copying the database elsewhere. `ensureSchema` sets
 `PRAGMA synchronous=NORMAL`; `flushToDisc` temporarily promotes to `FULL`
 during shutdown so the final write is durably on disk before the process
 exits.

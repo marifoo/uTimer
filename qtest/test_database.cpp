@@ -33,7 +33,7 @@ void DatabaseTest::test_database_backups_and_retention_and_disable()
     Settings settings(createSettingsFile(tempDir.path(), 2));
     SqliteSessionStore manager(settings);
 
-    // history_days_to_keep>0 => lazyOpen creates DB
+    // history_days_to_keep>0 => ensureOpen/ensureSchema create DB
     QVERIFY(manager.saveDurations({}, TransactionMode::Append)); // no-op but should succeed
 
     // Insert entries across 3 days to trigger pruning on next open
@@ -45,7 +45,7 @@ void DatabaseTest::test_database_backups_and_retention_and_disable()
     QVERIFY(manager.saveDurations(durations, TransactionMode::Replace));
 
     auto loaded = manager.loadDurations();
-    QVERIFY(static_cast<int>(loaded.size()) >= 2); // old entries pruned on lazyOpen
+    QVERIFY(static_cast<int>(loaded.size()) >= 2); // old entries pruned on ensureOpen
 
     // history_days_to_keep=0 disables db
     Settings disabled(createSettingsFile(tempDir.path(), 0));

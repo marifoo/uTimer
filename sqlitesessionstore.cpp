@@ -673,10 +673,10 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
  *
  * - Returns entries sorted by Start Date/Time (chronological).
  * - Validates each row:
- *   - Type must be valid enum (Activity/Pause).
- *   - Start must be <= End.
- *   - Duration must be non-negative.
- *   - Computed duration must match stored duration within reconciliation tolerance.
+ *   - Type must be a valid enum value (Activity or Pause).
+ *   - Both start_utc and end_utc must parse as valid UTC timestamps.
+ *   - start must be <= end.
+ *   - Computed duration (start.msecsTo(end)) must be positive.
  *   - Corrupted/Invalid rows are skipped and logged.
  * - Timestamps are stored in UTC and converted to local time on load.
  */

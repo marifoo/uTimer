@@ -12,6 +12,14 @@ ShutdownCoordinator::ShutdownCoordinator(Timer& timetracker, SessionStore& db)
 {
 }
 
+void ShutdownCoordinator::stopAndPump(int budgetMs)
+{
+    timetracker_.useTimerViaButton(Button::Stop);
+    auto dieTime = QTime::currentTime().addMSecs(budgetMs);
+    while (QTime::currentTime() < dieTime)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
+}
+
 void ShutdownCoordinator::run(bool forceDirectPath)
 {
     if (shutdown_completed_) {
@@ -28,21 +36,14 @@ void ShutdownCoordinator::run(bool forceDirectPath)
             // During Windows shutdown, use direct call - event loop may not work
             timetracker_.useTimerViaButton(Button::Stop);
         } else {
-            // Normal shutdown - stop via Timer directly then pump the event loop
-            // so any connected signals (GUI sync, checkpoint flush) can fire
-            timetracker_.useTimerViaButton(Button::Stop);
+            // Normal shutdown: stop then pump the event loop so connected signals
+            // (GUI sync, checkpoint flush) can fire before we proceed.
+            stopAndPump(150);
 
-            auto dieTime = QTime::currentTime().addMSecs(150);
-            while (QTime::currentTime() < dieTime)
-                QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
-
-            // Fallback pump if the timer is somehow still running
+            // Second attempt: a queued signal may not have delivered in the first
+            // pump if Stop itself emitted a signal handled asynchronously.
             if (timetracker_.getOngoingDuration().has_value()) {
-                timetracker_.useTimerViaButton(Button::Stop);
-
-                dieTime = QTime::currentTime().addMSecs(70);
-                while (QTime::currentTime() < dieTime)
-                    QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
+                stopAndPump(70);
             }
         }
     }

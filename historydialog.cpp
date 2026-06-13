@@ -256,7 +256,6 @@ void HistoryDialog::setupUI()
     navLayout->addWidget(nextButton_);
     layout->addLayout(navLayout);
 
-    // Dialog control buttons
     QHBoxLayout* buttonLayout = new QHBoxLayout();
     QPushButton* okButton = new QPushButton("OK", this);
     QPushButton* cancelButton = new QPushButton("Cancel", this);
@@ -265,7 +264,6 @@ void HistoryDialog::setupUI()
     buttonLayout->addWidget(cancelButton);
     layout->addLayout(buttonLayout);
 
-    // Connect signals
     connect(prevButton_, &QPushButton::clicked, this, &HistoryDialog::onOlder);
     connect(nextButton_, &QPushButton::clicked, this, &HistoryDialog::onNewer);
     connect(okButton, &QPushButton::clicked, this, &QDialog::accept);

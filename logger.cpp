@@ -38,13 +38,8 @@ void Logger::log(const QString &text)
     const QString msg = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz: ") + text + "\n";
     QTextStream out(logfile_);
     out.setCodec("UTF-8");
-    if (logfile_ != nullptr)
-        out << msg;
+    out << msg;
     out.flush();
-    
-    // Also flush to disk for maximum safety during shutdown
-    // Note: This makes every log call slower (~10-100x) due to disk I/O,
-    // but ensures logs are never lost even during hard shutdowns
     logfile_->flush();
 }
 

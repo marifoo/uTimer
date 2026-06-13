@@ -10,9 +10,9 @@
  *   - Easier reasoning about which DB operations Timer actually needs.
  *
  * Every public method that Timer calls on SqliteSessionStore is
- * represented here as a pure virtual.  Internal helpers (lazyOpen,
- * createBackup, etc.) remain private implementation details of the
- * concrete class.
+ * represented here as a pure virtual.  Internal helpers (ensureOpen,
+ * ensureSchema, createBackup, etc.) remain private implementation details
+ * of the concrete class.
  */
 
 #ifndef SESSIONSTORE_H

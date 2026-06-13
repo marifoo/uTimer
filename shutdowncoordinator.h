@@ -12,6 +12,8 @@ public:
     void run(bool forceDirectPath = false);
 
 private:
+    void stopAndPump(int budgetMs);
+
     Timer& timetracker_;
     SessionStore& db_;
     bool shutdown_completed_;

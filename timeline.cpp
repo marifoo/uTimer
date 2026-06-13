@@ -114,8 +114,21 @@ void Timeline::assertSameDayInvariant() const
 }
 #endif
 
+// Thresholds used by the normalized() merge loop (branches 1, 6, 7).
+// Two segments whose endpoints differ by less than this are treated as the
+// same segment (clock jitter / duplicate saves).
+static constexpr qint64 kNearDuplicateMs = 50;
+// A gap this small between same-type segments is noise — merge them.
+static constexpr qint64 kSmallGapMergeMs = 500;
+// A negative gap (overlap) this small is likely a rounding artefact — merge.
+static constexpr qint64 kSlightOverlapMs = 100;
+
 Timeline Timeline::normalized() const
 {
+    // Precondition: input entries are sorted by (start, end) — the sort below
+    // establishes this.  Branches 1–7 are mutually exclusive and order-dependent:
+    // each branch must be checked before the next because later branches assume
+    // the earlier ones did not match.
     std::deque<TimeDuration> durations = completed_;
 
     if (durations.size() < 2) {
@@ -146,7 +159,7 @@ Timeline Timeline::normalized() const
             const qint64 gap = it_start - prev_end;
 
             // Branch 1: near-duplicate — erase it
-            if (std::abs(diff_end) < 50 && std::abs(diff_dur) < 50) {
+            if (std::abs(diff_end) < kNearDuplicateMs && std::abs(diff_dur) < kNearDuplicateMs) {
                 it = durations.erase(it);
                 continue;
             }
@@ -187,7 +200,7 @@ Timeline Timeline::normalized() const
             const bool crossesDay = (prevIt->endTime.date() != it->startTime.date());
 
             // Branch 6: small gap merge
-            if (!crossesDay && gap >= 0 && gap < 500) {
+            if (!crossesDay && gap >= 0 && gap < kSmallGapMergeMs) {
                 prevIt->endTime = it->endTime;
                 prevIt->duration = prevIt->startTime.msecsTo(prevIt->endTime);
                 it = durations.erase(it);
@@ -195,7 +208,7 @@ Timeline Timeline::normalized() const
             }
 
             // Branch 7: slight overlap merge
-            if (!crossesDay && gap < 0 && std::abs(gap) < 100) {
+            if (!crossesDay && gap < 0 && std::abs(gap) < kSlightOverlapMs) {
                 prevIt->endTime = it->endTime;
                 prevIt->duration = prevIt->startTime.msecsTo(prevIt->endTime);
                 it = durations.erase(it);

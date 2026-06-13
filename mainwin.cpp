@@ -230,7 +230,6 @@ bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* mes
 		// Use force_direct=true since event loop may be restricted during shutdown
 		shutdown(true);
 
-		// Return TRUE to allow shutdown
 		*result = TRUE;
 		return true;
 	}
