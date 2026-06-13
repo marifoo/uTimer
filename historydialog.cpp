@@ -118,7 +118,7 @@ void HistoryDialog::createPages()
         if (isDuplicateOfCurrent) {
             continue;
         }
-        if (d.startTime.date() != d.endTime.date()) {
+        if (isCrossMidnight(d.startTime, d.endTime)) {
             // Segments spanning more than one calendar boundary cannot occur in normal
             // Timer operation and have no safe display bucketing — skip them entirely.
             if (d.endTime.toLocalTime().date() > d.startTime.toLocalTime().date().addDays(1)) {

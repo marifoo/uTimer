@@ -47,6 +47,8 @@ private:
     QString value_;
 };
 
+inline bool isCrossMidnight(const QDateTime& a, const QDateTime& b);
+
 struct TimeDuration {
     SegmentId segment_id;
     DurationType type;
@@ -58,13 +60,13 @@ struct TimeDuration {
 
     // Factory: returns nullopt for cross-midnight, zero/negative duration, or invalid timestamps.
     static std::optional<TimeDuration> create(DurationType type, QDateTime start, QDateTime end,
-                                              SegmentId segmentId = SegmentId{})
+                                               SegmentId segmentId = SegmentId{})
     {
         if (!start.isValid() || !end.isValid())
             return std::nullopt;
         if (start.msecsTo(end) <= 0)
             return std::nullopt;
-        if (start.date() != end.date())
+        if (isCrossMidnight(start, end))
             return std::nullopt;
         return TimeDuration(type, start, end, std::move(segmentId));
     }
@@ -84,6 +86,8 @@ private:
     }
 
 };
+
+inline bool isCrossMidnight(const QDateTime& a, const QDateTime& b) { return a.date() != b.date(); }
 
 /**
  * Tri-state result for hasEntriesForDate.

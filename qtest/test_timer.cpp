@@ -845,7 +845,7 @@ void TimerTest::test_useTimerViaButton_force_stops_on_cross_midnight_ongoing()
     // FakeSessionStore captures writes; no duration should have been written
     // with a cross-midnight segment (the in-flight segment is discarded)
     for (const auto& d : fakeDb.storedDurations) {
-        QVERIFY(d.startTime.date() == d.endTime.date());
+        QVERIFY(!isCrossMidnight(d.startTime, d.endTime));
     }
 }
 

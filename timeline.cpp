@@ -109,7 +109,7 @@ Timeline Timeline::withSplit(size_t index, QDateTime at,
 void Timeline::assertSameDayInvariant() const
 {
     for (const auto& d : completed_) {
-        Q_ASSERT(d.startTime.date() == d.endTime.date());
+        Q_ASSERT(!isCrossMidnight(d.startTime, d.endTime));
     }
 }
 #endif
@@ -197,7 +197,7 @@ Timeline Timeline::normalized() const
                 continue;
             }
 
-            const bool crossesDay = (prevIt->endTime.date() != it->startTime.date());
+            const bool crossesDay = isCrossMidnight(prevIt->endTime, it->startTime);
 
             // Branch 6: small gap merge
             if (!crossesDay && gap >= 0 && gap < kSmallGapMergeMs) {

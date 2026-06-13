@@ -276,7 +276,7 @@ void Timer::checkDurationInvariants() const
 
         // Invariant 2: No overlapping segments of the same type on the same day
         if (durations[i].type == durations[i - 1].type
-            && durations[i].startTime.date() == durations[i - 1].startTime.date()
+            && !isCrossMidnight(durations[i].startTime, durations[i - 1].startTime)
             && durations[i].startTime < durations[i - 1].endTime) {
             qWarning("[INVARIANT] Overlapping same-type segments on %s at indices %zu and %zu: "
                      "prev=[%s..%s], curr=[%s..%s], type=%s",
@@ -958,7 +958,7 @@ std::optional<TimeDuration> Timer::getOngoingDuration_locked() const
     if (!session_.segment_start_time.isValid() || session_.segment_start_time >= now) {
         return std::nullopt;
     }
-    if (session_.segment_start_time.date() != now.date()) {
+    if (isCrossMidnight(session_.segment_start_time, now)) {
         // Cross-midnight ongoing — about to be force-stopped by the
         // watchdog within ~100 ms. Don't expose this transient state.
         return std::nullopt;
@@ -1089,7 +1089,7 @@ bool Timer::isOngoingSegmentCrossMidnight() const
     QMutexLocker locker(&mutex_);
     if (mode_ == Mode::None) return false;
     if (!session_.segment_start_time.isValid()) return false;
-    return session_.segment_start_time.date() != QDate::currentDate();
+    return isCrossMidnight(session_.segment_start_time, QDateTime(QDate::currentDate(), QTime(0,0,0), Qt::LocalTime));
 }
 
 /**
@@ -1106,7 +1106,7 @@ bool Timer::discardCrossMidnightOngoingAndStop(const QDateTime& now)
 {
     if (mode_ == Mode::None) return false;
     if (!session_.segment_start_time.isValid()) return false;
-    if (session_.segment_start_time.date() == now.date()) return false;
+    if (!isCrossMidnight(session_.segment_start_time, now)) return false;
 
     Logger::Log(QString("[MIDNIGHT] Cross-midnight ongoing detected "
                         "(segment_start=%1, now=%2) — discarding segment, forcing stop")
