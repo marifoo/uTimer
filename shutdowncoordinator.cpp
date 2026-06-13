@@ -38,7 +38,7 @@ void ShutdownCoordinator::run(bool forceDirectPath)
     Logger::Log("[DB] Flushing database to disk before shutdown");
     db_.flushToDisc();
 
-    if (result.canCleanMark) {
+    if (result.canCleanMark && !result.stopCalled) {
         db_.setLastCleanShutdownMarker(QDateTime::currentDateTime());
     }
 

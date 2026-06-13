@@ -988,12 +988,14 @@ bool Timer::canMarkCleanShutdown() const
 Timer::ShutdownResult Timer::shutdown()
 {
     QMutexLocker locker(&mutex_);
+    bool stopCalled = false;
     if (mode_ != Mode::None) {
         stopTimer(QDateTime::currentDateTime(), StopReason::Shutdown);
+        stopCalled = true;
     }
     const bool stopped = (mode_ == Mode::None);
     const bool canCleanMark = stopped && !session_.has_unsaved_data;
-    return {stopped, canCleanMark};
+    return {stopped, canCleanMark, stopCalled};
 }
 
 bool Timer::appendDurationsToDB()

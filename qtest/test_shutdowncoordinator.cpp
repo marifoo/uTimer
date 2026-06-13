@@ -32,7 +32,9 @@ void ShutdownCoordinatorTest::test_G_happy_path_stop_flush_marker()
 
     int flushIdx  = fakeDb.callLog.lastIndexOf("flushToDisc");
     int markerIdx = fakeDb.callLog.lastIndexOf("setLastCleanShutdownMarker");
-    QVERIFY2(flushIdx < markerIdx, "flush must precede marker write");
+    // stopTimer (inside shutdown) writes the marker; the coordinator writes
+    // flushToDisc afterward — so marker must precede flush here.
+    QVERIFY2(markerIdx < flushIdx, "marker must precede flush (written by stopTimer)");
 }
 
 // ============================================================================
@@ -91,4 +93,6 @@ void ShutdownCoordinatorTest::test_I_force_direct_skips_retry_loop()
     QVERIFY(!tracker.getOngoingDuration().has_value());
     QVERIFY(fakeDb.callLog.contains("flushToDisc"));
     QVERIFY(fakeDb.callLog.contains("setLastCleanShutdownMarker"));
+    QVERIFY2(fakeDb.callLog.lastIndexOf("setLastCleanShutdownMarker") < fakeDb.callLog.lastIndexOf("flushToDisc"),
+             "marker must precede flush (written by stopTimer)");
 }
