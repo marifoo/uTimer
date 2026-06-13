@@ -538,13 +538,18 @@ void Timer::pauseTimer(const QDateTime& now)
     timer_.restart();
     addDuration(DurationType::Activity, session_.segment_start_time, now, session_.segment_id);
 
+    finalizePauseTransition(now);
+    Logger::Log("[TIMER] Timer paused <");
+    emit paused();
+}
+
+void Timer::finalizePauseTransition(const QDateTime& now)
+{
     mode_ = Mode::Pause;
     session_.updateSegmentStartTime(now);
     updateDurationsInDB();
     session_.beginNewSegment(now);
     checkpointTimer_.stop();
-    Logger::Log("[TIMER] Timer paused <");
-    emit paused();
 }
 
 /**
@@ -604,11 +609,7 @@ void Timer::backpauseTimer(const QDateTime& now)
     QDateTime pause_start = activity_end;
     addDuration(DurationType::Pause, pause_start, now);
 
-    mode_ = Mode::Pause;
-    session_.updateSegmentStartTime(now);
-    updateDurationsInDB();
-    session_.beginNewSegment(now);
-    checkpointTimer_.stop();
+    finalizePauseTransition(now);
     Logger::Log("[TIMER] Timer retroactively paused <");
 }
 
