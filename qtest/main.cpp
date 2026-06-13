@@ -36,6 +36,16 @@ class RenamesTest;
 // Returns non-zero exit code if any test suite fails
 int main(int argc, char *argv[])
 {
+    // Silence KDE frameworkintegration's "kf.i18n: Using an empty domain"
+    // QWARN, emitted when its platform theme localizes QMessageBox standard
+    // buttons via KLocalizedString on a KDE desktop. This is environmental
+    // noise, not an app issue. Append so any user-provided rules are preserved.
+    QByteArray loggingRules = qgetenv("QT_LOGGING_RULES");
+    if (!loggingRules.isEmpty())
+        loggingRules.append(';');
+    loggingRules.append("kf.i18n.warning=false");
+    qputenv("QT_LOGGING_RULES", loggingRules);
+
     QApplication app(argc, argv);
     int status = 0;
 

@@ -292,7 +292,7 @@ void Timer::checkDurationInvariants() const
 }
 
 /**
- * Cross-layer invariant: for each in-memory segment, the DB must contain
+ * Cross-layer invariant: for each persisted segment, the DB must contain
  * either no row (not yet committed) or exactly one finalized row with a
  * matching segment_id. Called after every successful commitSession() in
  * updateDurationsInDB() to catch divergence between memory and storage.
@@ -303,10 +303,17 @@ void Timer::checkCrossLayerInvariants() const
         return;
     }
 
+    // Compare against the normalized timeline — i.e. exactly what commitSession()
+    // persisted. Normalization merges adjacent same-type segments (extending the
+    // survivor's endTime), so iterating the raw session_.durations here would
+    // report spurious endTime mismatches for any segment that was merged.
+    const std::deque<TimeDuration> persisted =
+        Timeline(session_.durations, std::nullopt).normalized().completed();
+
     // Load the current DB state once.
     LoadResult dbResult = db_.loadDurations();
 
-    for (const auto& seg : session_.durations) {
+    for (const auto& seg : persisted) {
         if (seg.segment_id.isEmpty()) {
             continue; // Already caught by checkDurationInvariants()
         }
