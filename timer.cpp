@@ -850,47 +850,14 @@ void Timer::setDurationType(size_t idx, DurationType type)
  *                      tracking state is left unchanged (appropriate when the timer
  *                      is stopped and there is no ongoing segment).
  */
-void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
-                                          const std::optional<TimeDuration>& ongoing)
+void Timer::maybeReanchorCheckpoint(const TimeDuration& seg)
 {
-    QMutexLocker locker(&mutex_);
-#ifndef QT_NO_DEBUG
-    StateGuard guard(*this, "replaceCurrentDurations");
-    guard.markTransitioned(); // Intentionally replaces durations
-#endif
-    session_.durations = newDurations;
-    session_.clearUnsaved();
-
-    if (!ongoing.has_value()) {
-#ifndef QT_NO_DEBUG
-        checkDurationInvariants();
-#endif
+    if (checkpoint_interval_msec_ == 0 || mode_ != Mode::Activity || seg.type != DurationType::Activity)
         return;
-    }
-
-    const TimeDuration& seg = ongoing.value();
-    session_.adoptOngoingSegment(seg);
-
-    if (checkpoint_interval_msec_ == 0 || mode_ != Mode::Activity || seg.type != DurationType::Activity) {
-#ifndef QT_NO_DEBUG
-        checkDurationInvariants();
-#endif
+    if (seg.duration <= 0 || !seg.startTime.isValid() || !seg.endTime.isValid())
         return;
-    }
-
-    if (seg.duration <= 0 || !seg.startTime.isValid() || !seg.endTime.isValid()) {
-#ifndef QT_NO_DEBUG
-        checkDurationInvariants();
-#endif
+    if (dialog_open_ || is_locked_)
         return;
-    }
-
-    if (dialog_open_ || is_locked_) {
-#ifndef QT_NO_DEBUG
-        checkDurationInvariants();
-#endif
-        return;
-    }
 
     const SessionStoreResult cpResult = db_.saveCheckpoint(seg.type,
                                                            seg.duration,
@@ -907,6 +874,25 @@ void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations
     } else {
         Logger::Log("[CHECKPOINT] replaceCurrentDurations: saveCheckpoint failed: " + cpResult.message);
     }
+}
+
+void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
+                                          const std::optional<TimeDuration>& ongoing)
+{
+    QMutexLocker locker(&mutex_);
+#ifndef QT_NO_DEBUG
+    StateGuard guard(*this, "replaceCurrentDurations");
+    guard.markTransitioned(); // Intentionally replaces durations
+#endif
+    session_.durations = newDurations;
+    session_.clearUnsaved();
+
+    if (ongoing.has_value()) {
+        const TimeDuration& seg = ongoing.value();
+        session_.adoptOngoingSegment(seg);
+        maybeReanchorCheckpoint(seg);
+    }
+
 #ifndef QT_NO_DEBUG
     checkDurationInvariants();
 #endif

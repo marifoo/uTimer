@@ -207,6 +207,7 @@ private:
     qint64 reconcileOrphanCheckpoints(
         const std::deque<OrphanCheckpoint>& orphans,
         const std::optional<MarkerResult>& markerResult);
+    void maybeReanchorCheckpoint(const TimeDuration& seg);
 
 #ifndef QT_NO_DEBUG
     /// Debug-build state snapshot used by StateGuard to detect unlogged mutations.

@@ -55,6 +55,7 @@ private:
     void createPages();
     void updateTotalsLabel(uint idx);
     void updateTable(uint idx);
+    void addReadOnlyRow(QTableWidget* table, int row, const TimeDuration& d, const QString& suffix);
     void saveChanges();
     void showContextMenu(const QPoint& pos);
     QString buildLoadReconciliationMessage() const;

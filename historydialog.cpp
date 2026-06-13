@@ -333,6 +333,24 @@ void HistoryDialog::updateTotalsLabel(uint idx)
  * 4. Binds Checkboxes for Type Toggling (Activity <-> Pause).
  * 5. Applies visual highlighting if the page has unsaved changes.
  */
+void HistoryDialog::addReadOnlyRow(QTableWidget* table, int row, const TimeDuration& d, const QString& suffix)
+{
+    const QColor grayBg(200, 200, 200, 180);
+    QString typeStr = (d.type == DurationType::Activity ? "Activity  " : "Pause  ");
+    typeStr += suffix;
+    QTableWidgetItem* typeItem = new QTableWidgetItem(typeStr);
+    QTableWidgetItem* startEndItem = new QTableWidgetItem(
+        d.startTime.toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss"));
+    QTableWidgetItem* durationItem = new QTableWidgetItem(convMSecToTimeStr(d.duration) + "  ");
+    for (auto* item : {typeItem, startEndItem, durationItem}) {
+        item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
+        item->setBackground(grayBg);
+    }
+    table->setItem(row, 0, typeItem);
+    table->setItem(row, 1, startEndItem);
+    table->setItem(row, 2, durationItem);
+}
+
 void HistoryDialog::updateTable(uint idx)
 {
     if (idx >= pendingTimelines_.size() || idx >= pages_.size()) {
@@ -473,50 +491,20 @@ void HistoryDialog::updateTable(uint idx)
 
     // Populate cross-midnight canonical rows (spans midnight, display-only on start-day page)
     {
-        const QColor grayBg(200, 200, 200, 180);
         int baseRow = static_cast<int>(comp.size()) + (hasOngoing ? 1 : 0);
         for (int i = 0; i < static_cast<int>(crossMidnight.size()); ++i) {
-            const auto& d = crossMidnight[i];
-            int row = baseRow + i;
-            QString typeStr = (d.type == DurationType::Activity ? "Activity  " : "Pause  ");
-            typeStr += "(spans midnight)";
-            QTableWidgetItem* typeItem = new QTableWidgetItem(typeStr);
-            QTableWidgetItem* startEndItem = new QTableWidgetItem(
-                d.startTime.toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss"));
-            QTableWidgetItem* durationItem = new QTableWidgetItem(convMSecToTimeStr(d.duration) + "  ");
-            for (auto* item : {typeItem, startEndItem, durationItem}) {
-                item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
-                item->setBackground(grayBg);
-            }
-            table_->setItem(row, 0, typeItem);
-            table_->setItem(row, 1, startEndItem);
-            table_->setItem(row, 2, durationItem);
+            addReadOnlyRow(table_, baseRow + i, crossMidnight[i], "(spans midnight)");
         }
     }
 
     // Populate continuation rows (display-only cross-midnight spillover on end-day page)
     if (!conts.empty()) {
-        const QColor grayBg(200, 200, 200, 180);
         int baseRow = static_cast<int>(comp.size()) + (hasOngoing ? 1 : 0)
                       + static_cast<int>(crossMidnight.size());
         for (int i = 0; i < static_cast<int>(conts.size()); ++i) {
-            const auto& d = conts[i];
-            int row = baseRow + i;
-            QString typeStr = (d.type == DurationType::Activity ? "Activity  " : "Pause  ");
-            typeStr += "(cont.)";
-            QTableWidgetItem* typeItem = new QTableWidgetItem(typeStr);
-            QTableWidgetItem* startEndItem = new QTableWidgetItem(
-                d.startTime.toString("hh:mm:ss") + " - " + d.endTime.toString("hh:mm:ss"));
-            QTableWidgetItem* durationItem = new QTableWidgetItem(convMSecToTimeStr(d.duration) + "  ");
-            for (auto* item : {typeItem, startEndItem, durationItem}) {
-                item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
-                item->setBackground(grayBg);
-            }
-            table_->setItem(row, 0, typeItem);
-            table_->setItem(row, 1, startEndItem);
-            table_->setItem(row, 2, durationItem);
-            // Column 3: no checkbox for continuation rows
+            addReadOnlyRow(table_, baseRow + i, conts[i], "(cont.)");
         }
+        // Column 3: no checkbox for continuation rows
     }
 
     // Update navigation button states

@@ -81,6 +81,7 @@ private:
     BackupResult createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode);
     void performRetentionCleanup();
     void pruneOldBackups(int keepCount = 5);
+    bool insertRows(QSqlQuery& query, const std::deque<TimeDuration>& rows);
 
 #ifndef QT_NO_DEBUG
     /// Debug-build verification: checks that no segment_id appears more than

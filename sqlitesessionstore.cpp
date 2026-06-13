@@ -477,6 +477,23 @@ SessionStoreResult SqliteSessionStore::commitSession(const Timeline& session)
  * - Creates a file-level backup before starting.
  * - Rolls back the transaction on any error.
  */
+bool SqliteSessionStore::insertRows(QSqlQuery& query, const std::deque<TimeDuration>& rows)
+{
+    for (const auto& d : rows) {
+        query.bindValue(":segment_id", d.segment_id.toString());
+        query.bindValue(":type", static_cast<int>(d.type));
+        query.bindValue(":start_utc", toUtcIso(d.startTime));
+        query.bindValue(":end_utc", toUtcIso(d.endTime));
+
+        if (!query.exec()) {
+            db.rollback();
+            Logger::Log("[DB] Error inserting duration: " + query.lastError().text());
+            return false;
+        }
+    }
+    return true;
+}
+
 bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations, TransactionMode mode,
                                      const std::vector<QString>& removedSegmentIds)
 {
@@ -547,19 +564,8 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
                   "    end_utc      = excluded.end_utc, "
                   "    is_finalized = excluded.is_finalized");
 
-    // Insert each duration entry (convert to UTC for storage)
-    for (const auto& d : durations) {
-        query.bindValue(":segment_id", d.segment_id.toString());
-        query.bindValue(":type", static_cast<int>(d.type));
-        query.bindValue(":start_utc", toUtcIso(d.startTime));
-        query.bindValue(":end_utc", toUtcIso(d.endTime));
-
-        if (!query.exec()) {
-            db.rollback();
-            Logger::Log("[DB] Error inserting duration: " + query.lastError().text());
-            return false;
-        }
-    }
+    if (!insertRows(query, durations))
+        return false;
 
     bool commitSuccessful = db.commit();
     if (!commitSuccessful) {
@@ -621,38 +627,16 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
         "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
         "VALUES (:segment_id, :type, :start_utc, :end_utc, 1)"
     );
-
-    for (const auto& d : historyDurations) {
-        finalizedInsert.bindValue(":segment_id", d.segment_id.toString());
-        finalizedInsert.bindValue(":type", static_cast<int>(d.type));
-        finalizedInsert.bindValue(":start_utc", toUtcIso(d.startTime));
-        finalizedInsert.bindValue(":end_utc", toUtcIso(d.endTime));
-
-        if (!finalizedInsert.exec()) {
-            db.rollback();
-            Logger::Log("[DB] Error inserting finalized duration: " + finalizedInsert.lastError().text());
-            return false;
-        }
-    }
+    if (!insertRows(finalizedInsert, historyDurations))
+        return false;
 
     QSqlQuery unfinalizedInsert(db);
     unfinalizedInsert.prepare(
         "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
         "VALUES (:segment_id, :type, :start_utc, :end_utc, 0)"
     );
-
-    for (const auto& d : currentSessionDurations) {
-        unfinalizedInsert.bindValue(":segment_id", d.segment_id.toString());
-        unfinalizedInsert.bindValue(":type", static_cast<int>(d.type));
-        unfinalizedInsert.bindValue(":start_utc", toUtcIso(d.startTime));
-        unfinalizedInsert.bindValue(":end_utc", toUtcIso(d.endTime));
-
-        if (!unfinalizedInsert.exec()) {
-            db.rollback();
-            Logger::Log("[DB] Error inserting current-session duration: " + unfinalizedInsert.lastError().text());
-            return false;
-        }
-    }
+    if (!insertRows(unfinalizedInsert, currentSessionDurations))
+        return false;
 
     const bool success = db.commit();
     if (!success) {
