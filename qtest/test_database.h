@@ -47,7 +47,8 @@ private slots:
     void test_database_schema_creates_idx_finalized_start();
     void test_database_backup_file_creation();
     void test_database_backup_preserves_contents();
-    
+    void test_database_backup_filenames_collision_free();
+
     // Schema/validation tests
     void test_exactMatching_upsertReplacesById();
     void test_explicitStartTimes_constructorComputesDuration();

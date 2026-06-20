@@ -884,9 +884,6 @@ void DatabaseTest::test_database_backup_file_creation()
 
     QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
 
-    // Wait so the second save gets a distinct second-resolution filename
-    QTest::qWait(1100);
-
     // Save again to trigger backup
     durations.clear();
     durations.emplace_back(DurationType::Pause, now.addSecs(-50), now.addSecs(-40));
@@ -917,9 +914,6 @@ void DatabaseTest::test_database_backup_preserves_contents()
 
     QVERIFY(manager.saveDurations(original, TransactionMode::Append));
 
-    // Wait >1 s so the Replace backup gets a distinct timestamp from the Append backup.
-    QTest::qWait(1100);
-
     // Trigger backup with Replace mode — creates a backup of the 2-row DB, then writes 1 row
     std::deque<TimeDuration> replacement;
     replacement.emplace_back(DurationType::Activity, now.addSecs(-50), now.addSecs(-40));
@@ -945,6 +939,33 @@ void DatabaseTest::test_database_backup_preserves_contents()
     SqliteSessionStore restored(settings);
     auto loaded = restored.loadDurations();
     QCOMPARE(loaded.size(), (size_t)2); // Original had 2 entries
+}
+
+void DatabaseTest::test_database_backup_filenames_collision_free()
+{
+    // Regression: two back-to-back saves must produce two DISTINCT .backup files
+    // even if both calls happen within the same millisecond.  The old second-
+    // resolution names would collide and QFile::copy() would silently skip the
+    // second backup, leaving only 1 distinct file.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    QDir testDir(QCoreApplication::applicationDirPath());
+    const int backupsBefore = testDir.entryList(QStringList() << "*.backup", QDir::Files).size();
+
+    QDateTime now = QDateTime::currentDateTime();
+    std::deque<TimeDuration> durations;
+    durations.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-90));
+
+    // Two saves back-to-back — no qWait, may land in the same millisecond.
+    QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
+    QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
+
+    const int backupsAfter = testDir.entryList(QStringList() << "*.backup", QDir::Files).size();
+    QCOMPARE(backupsAfter - backupsBefore, 2); // both saves must produce distinct files
 }
 
 // ============================================================================

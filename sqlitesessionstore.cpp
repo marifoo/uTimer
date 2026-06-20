@@ -401,10 +401,17 @@ BackupResult SqliteSessionStore::createBackup(const std::deque<TimeDuration>& du
         db.close();
     }
 
-    // Generate backup filename with ISO timestamp
-    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH-mm-ss");
-    QString backupName = QString("%1.%2.backup").arg(db.databaseName()).arg(timestamp);
-    QString durationsFileName = QString("%1.%2.durations.txt").arg(db.databaseName()).arg(timestamp);
+    // Generate backup filename with millisecond-resolution timestamp.
+    // Add a numeric suffix if the target already exists (guards against two saves
+    // within the same millisecond producing the same name).
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-ddTHH-mm-ss-zzz");
+    QString base = QString("%1.%2").arg(db.databaseName()).arg(timestamp);
+    QString backupName = base + ".backup";
+    for (int n = 1; QFile::exists(backupName); ++n)
+        backupName = QString("%1-%2.backup").arg(base).arg(n);
+    QString durationsFileName = backupName;
+    durationsFileName.chop(static_cast<int>(qstrlen(".backup")));
+    durationsFileName += ".durations.txt";
 
     // Copy the database file
     bool success = QFile::copy(db.databaseName(), backupName);
