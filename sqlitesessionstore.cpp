@@ -927,7 +927,7 @@ SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, const Q
     QSqlQuery updateQuery(db);
     updateQuery.prepare(
         "UPDATE durations SET end_utc = :end_utc, is_finalized = 0 "
-        "WHERE segment_id = :segment_id"
+        "WHERE segment_id = :segment_id AND is_finalized = 0"
     );
     updateQuery.bindValue(":end_utc", endUtcStr);
     updateQuery.bindValue(":segment_id", segmentId.toString());
@@ -956,6 +956,22 @@ SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, const Q
 
         if (!insertQuery.exec()) {
             db.rollback();
+            // Primary result code 19 = SQLITE_CONSTRAINT. Assumes extended result
+            // codes stay disabled on this connection (they are never enabled here);
+            // with them on, a UNIQUE violation would report 2067 instead.
+            // UNIQUE(segment_id) is the only constraint that can fire on this INSERT
+            // path (NOT NULL columns are all bound and the empty-segment_id case is
+            // rejected at function entry), so 19 here means a finalized row already
+            // owns this segment_id. Demoting it would corrupt history — report a
+            // caller bug instead.
+            static const QString kSqliteConstraint = "19";
+            if (insertQuery.lastError().nativeErrorCode() == kSqliteConstraint) {
+                Logger::Log("[DB] saveCheckpoint: segment_id belongs to a finalized row — caller bug: "
+                            + segmentId.toString());
+                return SessionStoreResult::callerBug(
+                    "saveCheckpoint: segment_id " + segmentId.toString()
+                    + " already belongs to a finalized row");
+            }
             Logger::Log("[DB] Error inserting checkpoint by segment_id: " + insertQuery.lastError().text());
             return SessionStoreResult::transient("Failed to insert checkpoint: " + insertQuery.lastError().text());
         }

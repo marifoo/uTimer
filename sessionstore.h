@@ -139,6 +139,10 @@ public:
     // Returns Yes iff at least one finalised row's start falls on `localDate`
     // interpreted in the system local time zone.
     virtual EntriesForDateResult hasEntriesForDate(const QDate& localDate) = 0;
+    /// Writes or extends an unfinalized checkpoint row identified by segmentId.
+    /// Invariant: checkpoint writes must never demote finalized history. If segmentId
+    /// already belongs to a finalized row, the call returns CallerBug and leaves the
+    /// row unchanged. Only unfinalized rows may be created or updated by this method.
     /// @pre segmentId must be non-empty
     virtual SessionStoreResult saveCheckpoint(DurationType type, const QDateTime& startTime,
                                               const QDateTime& endTime, const SegmentId& segmentId) = 0;

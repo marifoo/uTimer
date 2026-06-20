@@ -111,6 +111,9 @@ private slots:
     // Phase 1.2: initializeFromStore isolation tests
     void test_constructor_only_does_not_consume_marker();
     void test_outdated_schema_does_not_mutate_db();
+
+    // Phase 2.1: checkpoint demotion guard
+    void test_saveCheckpoint_does_not_demote_finalized_row();
 };
 
 #endif // TEST_DATABASE_H

@@ -2183,3 +2183,52 @@ void DatabaseTest::test_outdated_schema_does_not_mutate_db()
     }
     QSqlDatabase::removeDatabase(connName2);
 }
+
+void DatabaseTest::test_saveCheckpoint_does_not_demote_finalized_row()
+{
+    // Seed a finalized row, then call saveCheckpoint with its segment_id.
+    // The row must remain finalized and saveCheckpoint must return CallerBug.
+
+    resetDatabaseFile();
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 30000));
+    SqliteSessionStore manager(settings);
+
+    // Seed a finalized row directly via SQL.
+    const SegmentId finalizedId = SegmentId::mint();
+    const QDateTime start = QDateTime::fromMSecsSinceEpoch(10'000'000, Qt::UTC);
+    const QDateTime end   = start.addSecs(60);
+    QVERIFY(manager.ensureOpen());
+    QSqlQuery insertQuery(manager.db);
+    insertQuery.prepare(
+        "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+        "VALUES (:segment_id, 0, :start_utc, :end_utc, 1)"
+    );
+    insertQuery.bindValue(":segment_id", finalizedId.toString());
+    insertQuery.bindValue(":start_utc", start.toUTC().toString(Qt::ISODateWithMs));
+    insertQuery.bindValue(":end_utc",   end.toUTC().toString(Qt::ISODateWithMs));
+    QVERIFY(insertQuery.exec());
+    manager.lazyClose();
+
+    // Attempt to save a checkpoint using the same segment_id.
+    const QDateTime newEnd = end.addSecs(30);
+    SessionStoreResult result = manager.saveCheckpoint(DurationType::Activity, start, newEnd, finalizedId);
+
+    // Must be CallerBug.
+    QCOMPARE(result.category, SessionStoreResult::CallerBug);
+
+    // The row must still be finalized and its end_utc must be unchanged.
+    QVERIFY(manager.ensureOpen());
+    QSqlQuery verifyQuery(manager.db);
+    verifyQuery.prepare(
+        "SELECT is_finalized, end_utc FROM durations WHERE segment_id = :segment_id"
+    );
+    verifyQuery.bindValue(":segment_id", finalizedId.toString());
+    QVERIFY(verifyQuery.exec());
+    QVERIFY(verifyQuery.next());
+    QCOMPARE(verifyQuery.value(0).toInt(), 1);
+    QCOMPARE(verifyQuery.value(1).toString(), end.toUTC().toString(Qt::ISODateWithMs));
+    manager.lazyClose();
+}
