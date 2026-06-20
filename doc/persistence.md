@@ -22,18 +22,18 @@ The schema is created on first open by `ensureSchema` in
       key Timer uses to update an existing segment instead of inserting a
       new one.
     - `type` (`0` = Activity, `1` = Pause; mirrors `DurationType`).
-    - `duration` (milliseconds).
-    - `start_date`, `start_time`, `end_date`, `end_time` — UTC, stored as
-      ISO-8601 text (`HH:mm:ss.zzz` for the time part). Converted back to
-      local time on load.
+    - `start_utc`, `end_utc` — segment start and end, stored as ISO-8601
+      UTC text (`Qt::ISODateWithMs`). Converted back to local time on
+      load; the segment duration is computed from these, not stored.
     - `is_finalized` (`1` = a completed segment, `0` = an in-progress
       checkpoint). Discussed below.
 - **`app_settings`** — a key/value table for lifecycle markers. Currently
   the only entry is `last_clean_shutdown`, written by
   `ShutdownCoordinator` and consumed on the next startup by `Timer`.
 
-Indices: `idx_end_date` on `durations.end_date` (used by retention cleanup
-and `hasEntriesForDate`) and `idx_segment_id` on `durations.segment_id`
+Indices: `idx_start_utc` on `durations.start_utc`, a partial index
+restricted to `WHERE is_finalized = 1` (used by `hasEntriesForDate` and
+orphan overlap probing), and `idx_segment_id` on `durations.segment_id`
 (used by every checkpoint/upsert write path).
 
 Journal mode is the SQLite default (rollback journal, **not** WAL).
@@ -53,9 +53,8 @@ default; `0` disables checkpoints entirely). On each tick of
 `SessionStore::saveCheckpoint(...)` with the current `segment_id`. The store
 treats this as an upsert keyed by `segment_id`:
 
-- If a row with that `segment_id` already exists, its `duration`, `end_date`,
-  and `end_time` are updated. `is_finalized` is forced to `0` so the row
-  remains "in-progress".
+- If a row with that `segment_id` already exists, its `end_utc` is updated
+  and `is_finalized` is forced to `0` so the row remains "in-progress".
 - Otherwise, a new row is inserted with `is_finalized = 0`.
 
 When the segment closes (the user stops, autopause kicks in, or the
@@ -86,9 +85,12 @@ two steps (see `timer.cpp` `reconcileOrphanCheckpoints`):
       - Drop if `duration < 1 second` — too short to be a real session.
       - Drop if `endTime` is more than 24 hours old — too stale to trust.
       - Otherwise finalize.
-3. **Apply** — `SessionStore::reconcileUnfinalizedCheckpoints(finalizeIds,
-   dropIds)` runs both lists in a single transaction: `UPDATE … SET
-   is_finalized = 1` for the finalize list and `DELETE` for the drop list.
+3. **Apply** — `SessionStore::reconcileUnfinalizedCheckpoints(toFinalize,
+   dropIds)` first `DELETE`s the drop list in a single transaction, then
+   finalizes each remaining orphan individually via `finalizeIfNoOverlap`,
+   each in its own transaction. An orphan is finalized (`UPDATE … SET
+   is_finalized = 1`) only if no already-finalized row overlaps its
+   `[start_utc, end_utc)` interval; overlapping orphans are left untouched.
 
 The **clean-shutdown marker** controls whether the user sees a recovery
 notification afterwards. `ShutdownCoordinator` writes
