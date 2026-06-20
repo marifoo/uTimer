@@ -1769,7 +1769,7 @@ void TimerTest::test_commit_ongoing_type_edit_changes_mode()
     TimeDuration editedOngoing = TimeDuration::fromTrusted(
         DurationType::Pause, start, end, liveOngoing->segment_id);
 
-    tracker.commit(Timeline({}, editedOngoing));
+    tracker.commitEditedTimeline(Timeline({}, editedOngoing));
 
     // 3. mode_ must be Pause after the commit.
     QCOMPARE(tracker.mode_, Timer::Mode::Pause);
@@ -1790,4 +1790,40 @@ void TimerTest::test_commit_ongoing_type_edit_changes_mode()
             foundPause = true;
     }
     QVERIFY2(foundPause, "persisted row should be Pause after type-edit commit");
+}
+
+// Phase 4: commitEditedTimeline returns an EditCommitResult and aligns mode_
+// with the type of the edited ongoing segment.
+void TimerTest::test_commitEditedTimeline_mode_aligns_with_edited_ongoing_type()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    // Start in Activity mode.
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
+
+    // Build a Pause-typed ongoing segment with the same segment id/start as the
+    // live Activity segment, simulating a type flip in HistoryDialog.
+    auto liveOngoing = tracker.getOngoingDuration();
+    QVERIFY(liveOngoing.has_value());
+    TimeDuration editedOngoing = TimeDuration::fromTrusted(
+        DurationType::Pause,
+        liveOngoing->startTime,
+        QDateTime::currentDateTime(),
+        liveOngoing->segment_id);
+
+    // commitEditedTimeline must return success and switch mode_ to Pause.
+    const auto result = tracker.commitEditedTimeline(Timeline({}, editedOngoing));
+    QVERIFY(result.ok);
+    QCOMPARE(tracker.mode_, Timer::Mode::Pause);
+
+    // getOngoingDuration() derives type from mode_, so it should now be Pause.
+    auto postCommit = tracker.getOngoingDuration();
+    QVERIFY(postCommit.has_value());
+    QCOMPARE(postCommit->type, DurationType::Pause);
 }

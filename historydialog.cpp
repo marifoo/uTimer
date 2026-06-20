@@ -686,9 +686,13 @@ void HistoryDialog::saveChanges()
     }
 
     // Atomically update Timer's in-memory durations and checkpoint tracking.
-    // replaceCurrentDurations couples both operations so callers cannot forget to
-    // reset checkpoint tracking after replacing durations — the compiler enforces it.
-    timetracker_.commit(Timeline(currentMemoryDurations, ongoingDurationForSave));
+    // commitEditedTimeline owns durations replacement, mode alignment, and
+    // checkpoint re-anchoring in one call so callers cannot forget any step.
+    const auto commitResult = timetracker_.commitEditedTimeline(
+        Timeline(currentMemoryDurations, ongoingDurationForSave));
+    if (!commitResult.ok) {
+        Logger::Log("[HISTORY] commitEditedTimeline: checkpoint write failed after edit commit");
+    }
     Logger::Log("[HISTORY] Updated Timer current session and checkpoint tracking");
 }
 

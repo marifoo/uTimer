@@ -118,6 +118,8 @@ private slots:
 
     // Issue #1: commit of an ongoing type edit aligns mode_
     void test_commit_ongoing_type_edit_changes_mode();
+    // Phase 4: commitEditedTimeline returns success and aligns mode_
+    void test_commitEditedTimeline_mode_aligns_with_edited_ongoing_type();
 
     // QF1: signal contract — started/paused/modeChanged emit counts
     void test_QF1_explicit_pause_emits_paused_not_modeChanged();

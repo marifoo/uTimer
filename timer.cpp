@@ -881,49 +881,55 @@ void Timer::setDurationType(size_t idx, DurationType type)
  *                      tracking state is left unchanged (appropriate when the timer
  *                      is stopped and there is no ongoing segment).
  */
-void Timer::maybeReanchorCheckpoint(const TimeDuration& seg)
+bool Timer::maybeReanchorCheckpoint(const TimeDuration& seg)
 {
     if (checkpoint_interval_msec_ == 0 || mode_ != Mode::Activity || seg.type != DurationType::Activity)
-        return;
+        return true;
     if (seg.duration <= 0 || !seg.startTime.isValid() || !seg.endTime.isValid())
-        return;
+        return true;
     if (dialog_open_ || is_locked_)
-        return;
+        return true;
 
     const SessionStoreResult cpResult = db_.saveCheckpoint(seg.type,
                                                            seg.startTime,
                                                            seg.endTime,
                                                            session_.segment_id);
     if (cpResult.ok()) {
-        // success — nothing to do
+        return true;
     } else if (cpResult.category == SessionStoreResult::CallerBug) {
         Logger::Log("[CHECKPOINT] replaceCurrentDurations: saveCheckpoint caller bug: " + cpResult.message);
+        return false;
     } else if (cpResult.category == SessionStoreResult::FatalError) {
         Logger::Log("[CHECKPOINT] replaceCurrentDurations: Fatal DB error saving checkpoint: " + cpResult.message);
         emit userWarning("Database error while saving checkpoint: " + cpResult.message);
+        return false;
     } else {
         Logger::Log("[CHECKPOINT] replaceCurrentDurations: saveCheckpoint failed: " + cpResult.message);
+        return false;
     }
 }
 
-void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
-                                          const std::optional<TimeDuration>& ongoing)
+Timer::EditCommitResult Timer::commitEditedTimeline(const Timeline& edited)
 {
     QMutexLocker locker(&mutex_);
 #ifndef QT_NO_DEBUG
-    StateGuard guard(*this, "replaceCurrentDurations");
+    StateGuard guard(*this, "commitEditedTimeline");
     guard.markTransitioned(); // Intentionally replaces durations
 #endif
+    const std::deque<TimeDuration>& newDurations = edited.completed();
+    const std::optional<TimeDuration>& ongoing = edited.ongoing();
+
     session_.durations = newDurations;
     session_.clearUnsaved();
 
+    bool checkpointOk = true;
     if (ongoing.has_value()) {
         const TimeDuration& seg = ongoing.value();
         session_.adoptOngoingSegment(seg);
 
-        // Honour an edited ongoing type: align mode_ with the committed segment so the
-        // live row and the next checkpoint/stop reflect the user's choice rather than
-        // the pre-edit mode. (adoptOngoingSegment intentionally ignores type.)
+        // Align mode_ with the edited ongoing segment type so the live row and
+        // the next checkpoint/stop reflect the user's choice rather than the
+        // pre-edit mode. (adoptOngoingSegment intentionally ignores type.)
         const Mode desired = (seg.type == DurationType::Activity) ? Mode::Activity : Mode::Pause;
         if (mode_ != Mode::None && mode_ != desired) {
             mode_ = desired;
@@ -936,17 +942,25 @@ void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations
             }
         }
 
-        maybeReanchorCheckpoint(seg);       // already keyed on mode_ == Activity
+        checkpointOk = maybeReanchorCheckpoint(seg);
     }
 
 #ifndef QT_NO_DEBUG
     checkDurationInvariants();
 #endif
+    return checkpointOk ? EditCommitResult::success()
+                        : EditCommitResult::failure("checkpoint write failed after edit commit");
+}
+
+void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
+                                    const std::optional<TimeDuration>& ongoing)
+{
+    commitEditedTimeline(Timeline(newDurations, ongoing));
 }
 
 void Timer::commit(const Timeline& edited)
 {
-    replaceCurrentDurations(edited.completed(), edited.ongoing());
+    commitEditedTimeline(edited);
 }
 
 std::deque<TimeDuration> Timer::getDurationsHistory()
