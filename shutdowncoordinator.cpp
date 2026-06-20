@@ -3,7 +3,7 @@
 #include "sessionstore.h"
 #include "logger.h"
 #include <QDateTime>
-#include <QTime>
+#include <QElapsedTimer>
 #include <QCoreApplication>
 
 ShutdownCoordinator::ShutdownCoordinator(Timer& timetracker, SessionStore& db)
@@ -13,8 +13,9 @@ ShutdownCoordinator::ShutdownCoordinator(Timer& timetracker, SessionStore& db)
 
 void ShutdownCoordinator::pumpEvents(int budgetMs)
 {
-    auto dieTime = QTime::currentTime().addMSecs(budgetMs);
-    while (QTime::currentTime() < dieTime)
+    QElapsedTimer t;
+    t.start();
+    while (t.elapsed() < budgetMs)
         QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
 }
 

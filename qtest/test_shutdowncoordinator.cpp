@@ -64,6 +64,29 @@ void ShutdownCoordinatorTest::test_H_idempotent_second_run_is_noop()
 }
 
 // ============================================================================
+// Test J — pump drains queued events (regression for midnight wrap)
+// ============================================================================
+
+void ShutdownCoordinatorTest::test_J_pump_drains_queued_events()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+    ShutdownCoordinator coordinator(tracker, fakeDb);
+
+    // Queue a zero-delay slot; it only fires if the event loop is pumped.
+    bool slotRan = false;
+    QTimer::singleShot(0, [&slotRan]() { slotRan = true; });
+
+    // run(false) calls pumpEvents(150) before flushToDisc.
+    coordinator.run(false);
+
+    QVERIFY2(slotRan, "pumpEvents must drain queued events");
+}
+
+// ============================================================================
 // Test I — force-direct path skips retry loop (flushToDisc still happens)
 // ============================================================================
 

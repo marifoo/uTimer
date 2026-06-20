@@ -17,6 +17,9 @@ private slots:
 
     // Test I: force-direct path skips the retry loop
     void test_I_force_direct_skips_retry_loop();
+
+    // Test J: pump actually drains queued events
+    void test_J_pump_drains_queued_events();
 };
 
 #endif // TEST_SHUTDOWNCOORDINATOR_H
