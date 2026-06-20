@@ -925,7 +925,23 @@ void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations
     if (ongoing.has_value()) {
         const TimeDuration& seg = ongoing.value();
         session_.adoptOngoingSegment(seg);
-        maybeReanchorCheckpoint(seg);
+
+        // Honour an edited ongoing type: align mode_ with the committed segment so the
+        // live row and the next checkpoint/stop reflect the user's choice rather than
+        // the pre-edit mode. (adoptOngoingSegment intentionally ignores type.)
+        const Mode desired = (seg.type == DurationType::Activity) ? Mode::Activity : Mode::Pause;
+        if (mode_ != Mode::None && mode_ != desired) {
+            mode_ = desired;
+            if (desired == Mode::Activity) {
+                checkpointTimer_.start();   // checkpoints run only in Activity
+                emit started(true);
+            } else {
+                checkpointTimer_.stop();
+                emit paused();
+            }
+        }
+
+        maybeReanchorCheckpoint(seg);       // already keyed on mode_ == Activity
     }
 
 #ifndef QT_NO_DEBUG

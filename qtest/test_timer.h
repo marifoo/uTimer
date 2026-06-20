@@ -114,6 +114,9 @@ private slots:
     // Step 8: S12 — MarkerResult::Error skips orphan reconciliation
     void test_S12_marker_error_skips_reconciliation();
 
+    // Issue #1: commit of an ongoing type edit aligns mode_
+    void test_commit_ongoing_type_edit_changes_mode();
+
     // QF1: signal contract — started/paused/modeChanged emit counts
     void test_QF1_explicit_pause_emits_paused_not_modeChanged();
     void test_QF1_explicit_resume_emits_started_not_modeChanged();

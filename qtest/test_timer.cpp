@@ -1702,3 +1702,53 @@ void TimerTest::test_QF1_lock_resume_emits_started_and_modeChanged_once_each()
     QCOMPARE(modeSpy.first().first().value<Timer::PauseCause>(),
              Timer::PauseCause::LockResume);
 }
+
+// Issue #1: committing an ongoing segment with a different type must align mode_.
+void TimerTest::test_commit_ongoing_type_edit_changes_mode()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    // 1. Start in Activity mode.
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    QCOMPARE(tracker.mode_, Timer::Mode::Activity);
+
+    // Capture the live ongoing segment's id and start time so the committed
+    // segment is a plausible replacement (same identity, different type).
+    auto liveOngoing = tracker.getOngoingDuration();
+    QVERIFY(liveOngoing.has_value());
+    QCOMPARE(liveOngoing->type, DurationType::Activity);
+
+    // 2. Build an ongoing TimeDuration with the same id/start but type = Pause,
+    //    simulating what HistoryDialog would commit after the user flips the checkbox.
+    const QDateTime start = liveOngoing->startTime;
+    const QDateTime end   = QDateTime::currentDateTime();
+    TimeDuration editedOngoing = TimeDuration::fromTrusted(
+        DurationType::Pause, start, end, liveOngoing->segment_id);
+
+    tracker.commit(Timeline({}, editedOngoing));
+
+    // 3. mode_ must be Pause after the commit.
+    QCOMPARE(tracker.mode_, Timer::Mode::Pause);
+
+    // getOngoingDuration() derives type from mode_, so it should now return Pause.
+    auto postCommit = tracker.getOngoingDuration();
+    QVERIFY(postCommit.has_value());
+    QCOMPARE(postCommit->type, DurationType::Pause);
+
+    // 4. Stop the timer and confirm the persisted row is Pause, not Activity.
+    tracker.useTimerViaButton(Button::Stop);
+    QCOMPARE(tracker.mode_, Timer::Mode::None);
+
+    // The completed segment written to fakeDb on stop should be a Pause row.
+    bool foundPause = false;
+    for (const auto& d : fakeDb.storedDurations) {
+        if (d.segment_id == liveOngoing->segment_id && d.type == DurationType::Pause)
+            foundPause = true;
+    }
+    QVERIFY2(foundPause, "persisted row should be Pause after type-edit commit");
+}
