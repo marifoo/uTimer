@@ -872,25 +872,29 @@ void DatabaseTest::test_database_backup_file_creation()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
 
+    // Snapshot existing artifacts so stale files from prior runs don't mask failures
+    QDir testDir(QCoreApplication::applicationDirPath());
+    const int backupsBefore = testDir.entryList(QStringList() << "*.backup", QDir::Files).size();
+    const int txtBefore     = testDir.entryList(QStringList() << "*.durations.txt", QDir::Files).size();
+
     // Create initial data
     QDateTime now = QDateTime::currentDateTime();
     std::deque<TimeDuration> durations;
     durations.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-90));
-    
+
     QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
-    
+
+    // Wait so the second save gets a distinct second-resolution filename
+    QTest::qWait(1100);
+
     // Save again to trigger backup
     durations.clear();
     durations.emplace_back(DurationType::Pause, now.addSecs(-50), now.addSecs(-40));
     QVERIFY(manager.saveDurations(durations, TransactionMode::Append));
-    
-    // Check that backup files exist in qtest directory
-    QDir testDir(QCoreApplication::applicationDirPath());
-    QStringList backupFiles = testDir.entryList(QStringList() << "*.backup", QDir::Files);
-    QVERIFY(backupFiles.size() > 0);
-    
-    QStringList durationTxtFiles = testDir.entryList(QStringList() << "*.durations.txt", QDir::Files);
-    QVERIFY(durationTxtFiles.size() > 0);
+
+    // Assert this run produced new backup artifacts (delta from snapshot)
+    QVERIFY(testDir.entryList(QStringList() << "*.backup", QDir::Files).size() > backupsBefore);
+    QVERIFY(testDir.entryList(QStringList() << "*.durations.txt", QDir::Files).size() > txtBefore);
 }
 
 void DatabaseTest::test_database_backup_preserves_contents()
