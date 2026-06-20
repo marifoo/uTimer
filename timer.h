@@ -244,6 +244,12 @@ public:
     explicit Timer(const Settings & settings, SessionStore& db, QObject *parent = nullptr);
     ~Timer();
 
+    /// Consumes the clean-shutdown marker and reconciles orphan checkpoints.
+    /// Must be called once after checkSchemaOnStartup() returns Ready or Created,
+    /// and before the event loop starts.  The Timer constructor performs no
+    /// persistence side effects; this method is where recovery happens.
+    void initializeFromStore();
+
     qint64 getActiveTime() const;
     qint64 getPauseTime() const;
     /// Returns completed + ongoing segments. Use for history display.

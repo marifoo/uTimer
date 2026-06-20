@@ -115,6 +115,18 @@ struct SessionStoreResult {
     static SessionStoreResult fatal(QString msg) { return {FatalError, std::move(msg)}; }
 };
 
+/**
+ * Result of checkSchemaOnStartup().
+ *
+ *   Ready        — existing DB has the expected schema; safe to use.
+ *   Created      — DB file did not exist; a fresh schema was built.
+ *   Outdated     — existing DB has wrong columns or missing/non-unique constraints;
+ *                  caller must refuse to start and ask the user to remove the file.
+ *   Inaccessible — DB file could not be opened (permissions, I/O error);
+ *                  caller must refuse to start.
+ */
+enum class SchemaStatus { Ready, Created, Outdated, Inaccessible };
+
 class SessionStore
 {
 public:
@@ -130,7 +142,7 @@ public:
     /// @pre segmentId must be non-empty
     virtual SessionStoreResult saveCheckpoint(DurationType type, const QDateTime& startTime,
                                               const QDateTime& endTime, const SegmentId& segmentId) = 0;
-    virtual bool checkSchemaOnStartup() = 0;
+    virtual SchemaStatus checkSchemaOnStartup() = 0;
     virtual void flushToDisc() = 0;
     virtual std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() = 0;
     // Reconcile a batch of orphan checkpoints.

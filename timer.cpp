@@ -372,6 +372,12 @@ Timer::Timer(const Settings &settings, SessionStore& db, QObject *parent)
         Logger::Log("[CHECKPOINT] Checkpoints disabled (interval = 0)");
     }
 
+    // No persistence side effects in the constructor.
+    // Call initializeFromStore() after checkSchemaOnStartup() returns Ready/Created.
+}
+
+void Timer::initializeFromStore()
+{
     const std::optional<MarkerResult> markerResult = db_.consumeLastCleanShutdownMarker();
     if (markerResult.has_value() && markerResult->status == MarkerResult::Status::Error) {
         // DB state is unknown after a transaction failure — do not reconcile orphans

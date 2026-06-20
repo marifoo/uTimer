@@ -1,4 +1,5 @@
 #include "test_database.h"
+#include "fakesessionstore.h"
 #include <QtTest>
 
 using TestCommon::createSettingsFile;
@@ -841,8 +842,8 @@ void DatabaseTest::test_database_schema_validation_fresh_database()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
     
-    // Should return true (will create fresh schema)
-    QVERIFY(manager.checkSchemaOnStartup());
+    // Fresh DB: should return Created (file did not exist, schema was freshly built)
+    QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Created);
 }
 
 void DatabaseTest::test_database_schema_creates_idx_finalized_start()
@@ -1234,7 +1235,7 @@ void DatabaseTest::test_retention_cleanup_runs_once_across_multiple_opens()
     QCOMPARE(static_cast<int>(manager.loadDurations().size()), 2);
 
     // checkSchemaOnStartup() runs performRetentionCleanup() — old entry removed.
-    QVERIFY(manager.checkSchemaOnStartup());
+    QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Ready);
     auto loaded = manager.loadDurations();
     QCOMPARE(static_cast<int>(loaded.size()), 1);
 }
@@ -1270,13 +1271,13 @@ void DatabaseTest::test_retention_cleanup_retries_after_failure()
     QVERIFY(!manager.db.isOpen());
 
     // checkSchemaOnStartup() fails while DB is read-only (ensureOpen() returns false).
-    QVERIFY(!manager.checkSchemaOnStartup());
+    QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Inaccessible);
 
     // Restore write permissions.
     QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser));
 
     // checkSchemaOnStartup() now succeeds and runs cleanup.
-    QVERIFY(manager.checkSchemaOnStartup());
+    QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Ready);
 
     // Old entry removed; recent entry survives.
     auto loaded = manager.loadDurations();
@@ -1909,4 +1910,276 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_outright_drops_are_delet
     QVERIFY(verifyA.next());
     QCOMPARE(verifyA.value(0).toInt(), 1);
     manager.lazyClose();
+}
+
+// ============================================================================
+// Phase 1.1: SchemaStatus enum tests
+// ============================================================================
+
+void DatabaseTest::test_schema_status_ready_on_existing_valid_db()
+{
+    // A DB that was created and used should report Ready on subsequent calls.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+
+    {
+        // Create the DB file via construction.
+        SqliteSessionStore seed(settings);
+        QVERIFY(seed.saveDurations({}, TransactionMode::Append));
+    }
+
+    SqliteSessionStore manager(settings);
+    QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Ready);
+}
+
+void DatabaseTest::test_schema_status_outdated_legacy_columns()
+{
+    // A DB with old start_date/end_date columns (pre-UTC schema) must return Outdated.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+
+    // Build a legacy DB directly with old column names.
+    const QString connName = "legacy_schema_test";
+    {
+        QSqlDatabase legacyDb = QSqlDatabase::addDatabase("QSQLITE", connName);
+        legacyDb.setDatabaseName(db_path_);
+        QVERIFY(legacyDb.open());
+        QSqlQuery q(legacyDb);
+        QVERIFY(q.exec(
+            "CREATE TABLE durations ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "segment_id TEXT NOT NULL,"
+            "type INTEGER NOT NULL,"
+            "start_date TEXT NOT NULL,"   // old column name
+            "end_date TEXT NOT NULL,"     // old column name
+            "is_finalized INTEGER NOT NULL DEFAULT 0"
+            ")"
+        ));
+        legacyDb.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    SqliteSessionStore manager(settings);
+    QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Outdated);
+}
+
+void DatabaseTest::test_schema_status_outdated_missing_column()
+{
+    // A DB missing the is_finalized column must return Outdated.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+
+    const QString connName = "missing_col_test";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(q.exec(
+            "CREATE TABLE durations ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "segment_id TEXT NOT NULL UNIQUE,"
+            "type INTEGER NOT NULL,"
+            "start_utc TEXT NOT NULL,"
+            "end_utc TEXT NOT NULL"
+            // is_finalized intentionally omitted
+            ")"
+        ));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    SqliteSessionStore manager(settings);
+    QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Outdated);
+}
+
+void DatabaseTest::test_schema_status_outdated_missing_unique_constraint()
+{
+    // A DB with correct columns but without UNIQUE(segment_id) must return Outdated.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+
+    const QString connName = "no_unique_test";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        // All columns correct, but no UNIQUE on segment_id.
+        QVERIFY(q.exec(
+            "CREATE TABLE durations ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "segment_id TEXT NOT NULL,"
+            "type INTEGER NOT NULL,"
+            "start_utc TEXT NOT NULL,"
+            "end_utc TEXT NOT NULL,"
+            "is_finalized INTEGER NOT NULL DEFAULT 0"
+            ")"
+        ));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    SqliteSessionStore manager(settings);
+    QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Outdated);
+}
+
+void DatabaseTest::test_schema_status_ready_recreates_missing_idx_start_utc()
+{
+    // If idx_start_utc is missing, checkSchemaOnStartup recreates it and returns Ready.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+
+    // Create a valid DB, then drop the partial index.
+    {
+        SqliteSessionStore seed(settings);
+        QVERIFY(seed.saveDurations({}, TransactionMode::Append));
+        QVERIFY(seed.ensureOpen());
+        QSqlQuery q(seed.db);
+        QVERIFY(q.exec("DROP INDEX IF EXISTS idx_start_utc"));
+        seed.lazyClose();
+    }
+
+    SqliteSessionStore manager(settings);
+    QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Ready);
+
+    // The index should now exist again.
+    QVERIFY(manager.ensureOpen());
+    QSqlQuery verify(manager.db);
+    QVERIFY(verify.exec(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_start_utc'"
+    ));
+    QVERIFY(verify.next());
+    QCOMPARE(verify.value(0).toString(), QString("idx_start_utc"));
+    manager.lazyClose();
+}
+
+void DatabaseTest::test_schema_status_inaccessible_readonly_file()
+{
+    // A DB file that exists but cannot be opened (read-only) returns Inaccessible.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+
+    // Create and close the DB first.
+    {
+        SqliteSessionStore seed(settings);
+        QVERIFY(seed.saveDurations({}, TransactionMode::Append));
+    }
+
+    // Make the file read-only.
+    QFile dbFile(db_path_);
+    QVERIFY(dbFile.setPermissions(QFile::ReadOwner | QFile::ReadUser));
+
+    SqliteSessionStore manager(settings);
+    QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Inaccessible);
+
+    // Restore permissions.
+    QVERIFY(dbFile.setPermissions(
+        QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser));
+}
+
+// ============================================================================
+// Phase 1.2: initializeFromStore isolation tests
+// ============================================================================
+
+void DatabaseTest::test_constructor_only_does_not_consume_marker()
+{
+    // The Timer constructor must not consume the clean-shutdown marker.
+    // Only initializeFromStore() does that.
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+
+    FakeSessionStore fakeDb;
+    fakeDb.cleanShutdownMarker = MarkerResult { QDateTime::currentDateTime(), MarkerResult::Status::Found };
+
+    // Construct Timer — must NOT call consumeLastCleanShutdownMarker.
+    Timer tracker(settings, fakeDb);
+    QVERIFY(!fakeDb.callLog.contains("consumeLastCleanShutdownMarker"));
+    QVERIFY(!fakeDb.callLog.contains("loadUnfinalizedCheckpoints"));
+    QVERIFY(!fakeDb.callLog.contains("reconcileUnfinalizedCheckpoints"));
+
+    // After initializeFromStore(), the marker should have been consumed.
+    tracker.initializeFromStore();
+    QVERIFY(fakeDb.callLog.contains("consumeLastCleanShutdownMarker"));
+    QVERIFY(fakeDb.callLog.contains("loadUnfinalizedCheckpoints"));
+}
+
+void DatabaseTest::test_outdated_schema_does_not_mutate_db()
+{
+    // When checkSchemaOnStartup() returns Outdated, the caller (main.cpp) must
+    // not call initializeFromStore(). This test verifies the contract from the
+    // store side: an Outdated DB with a pending orphan and a clean-shutdown
+    // marker — neither should be touched.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+
+    // Seed a DB with legacy columns (no start_utc/end_utc → Outdated).
+    const QString connName = "outdated_isolation_test";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(q.exec(
+            "CREATE TABLE durations ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "segment_id TEXT NOT NULL,"
+            "type INTEGER NOT NULL,"
+            "start_date TEXT NOT NULL,"
+            "end_date TEXT NOT NULL,"
+            "is_finalized INTEGER NOT NULL DEFAULT 0"
+            ")"
+        ));
+        // Insert an unfinalized row.
+        QVERIFY(q.exec(
+            "INSERT INTO durations (segment_id, type, start_date, end_date, is_finalized) "
+            "VALUES ('seg-1', 0, '2025-01-01', '2025-01-01', 0)"
+        ));
+        QVERIFY(q.exec(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        ));
+        QVERIFY(q.exec(
+            "INSERT INTO app_settings (key, value) VALUES ('last_clean_shutdown', '2025-01-01T00:00:00.000Z')"
+        ));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName);
+
+    SqliteSessionStore manager(settings);
+    SchemaStatus status = manager.checkSchemaOnStartup();
+    QCOMPARE(status, SchemaStatus::Outdated);
+
+    // Simulate correct main.cpp behavior: do NOT call initializeFromStore() on Outdated.
+    // Verify the unfinalized row and marker are still present.
+    const QString connName2 = "outdated_verify";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connName2);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(q.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 1); // unfinalized row untouched
+
+        QVERIFY(q.exec("SELECT COUNT(*) FROM app_settings WHERE key = 'last_clean_shutdown'"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 1); // marker untouched
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(connName2);
 }

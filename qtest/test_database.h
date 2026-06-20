@@ -99,6 +99,18 @@ private slots:
     void test_finalizeIfNoOverlap_leaves_row_unchanged_on_overlap();
     void test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dropped();
     void test_reconcileUnfinalizedCheckpoints_outright_drops_are_deleted();
+
+    // Phase 1.1: SchemaStatus enum tests
+    void test_schema_status_ready_on_existing_valid_db();
+    void test_schema_status_outdated_legacy_columns();
+    void test_schema_status_outdated_missing_column();
+    void test_schema_status_outdated_missing_unique_constraint();
+    void test_schema_status_ready_recreates_missing_idx_start_utc();
+    void test_schema_status_inaccessible_readonly_file();
+
+    // Phase 1.2: initializeFromStore isolation tests
+    void test_constructor_only_does_not_consume_marker();
+    void test_outdated_schema_does_not_mutate_db();
 };
 
 #endif // TEST_DATABASE_H

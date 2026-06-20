@@ -45,7 +45,7 @@ public:
     LoadResult loadDurations() override;
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
     SessionStoreResult saveCheckpoint(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const SegmentId& segmentId) override;
-    bool checkSchemaOnStartup() override;
+    SchemaStatus checkSchemaOnStartup() override;
     void flushToDisc() override;
     std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
     bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc);
@@ -65,6 +65,7 @@ public:
 private:
     QSqlDatabase db;
     uint history_days_to_keep_;
+    bool db_was_fresh_;  // true if the DB file did not exist when the connection was first opened
 
     // Guards all public entry points so that no two operations can interleave.
     // This is particularly important for createBackup(), which closes and

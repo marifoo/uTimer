@@ -1655,6 +1655,7 @@ void TimerTest::test_S12_marker_error_skips_reconciliation()
     fakeDb.cleanShutdownMarker = MarkerResult { {}, MarkerResult::Status::Error };
 
     Timer tracker(settings, fakeDb);
+    tracker.initializeFromStore();
 
     // No seconds recovered and no reconciliation attempted.
     QCOMPARE(tracker.getStartupRecoveredSeconds(), (qint64)0);

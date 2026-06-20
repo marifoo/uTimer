@@ -65,6 +65,7 @@ void IntegrationTest::test_integration_checkpoint_recovery_on_restart()
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
         Timer tracker(settings, db);
+        tracker.initializeFromStore();
         QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
 
         SqliteSessionStore db2(settings);
@@ -107,6 +108,7 @@ void IntegrationTest::test_integration_orphan_reconciliation_is_idempotent()
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
         Timer tracker(settings, db);
+        tracker.initializeFromStore();
         QCOMPARE(tracker.getStartupRecoveredSeconds() >= 1, true);
     }
 
@@ -114,6 +116,7 @@ void IntegrationTest::test_integration_orphan_reconciliation_is_idempotent()
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
         Timer tracker(settings, db);
+        tracker.initializeFromStore();
         QCOMPARE(tracker.getStartupRecoveredSeconds(), static_cast<qint64>(0));
         SqliteSessionStore db2(settings);
         auto loaded = db2.loadDurations();
@@ -168,6 +171,7 @@ void IntegrationTest::test_integration_orphan_reconciliation_drops_stale_and_too
 
     SqliteSessionStore db2(settings);
     Timer tracker(settings, db2);
+    tracker.initializeFromStore();
     QCOMPARE(tracker.getStartupRecoveredSeconds(), static_cast<qint64>(0));
 
     auto loaded = db.loadDurations();
@@ -203,6 +207,7 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_present_is_s
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
         Timer tracker(settings, db);
+        tracker.initializeFromStore();
         QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
         QVERIFY(!tracker.shouldShowStartupRecoveryNotification());
     }
@@ -231,6 +236,7 @@ void IntegrationTest::test_integration_orphan_reconciliation_marker_absent_shows
         Settings settings(settingsPath);
         SqliteSessionStore db(settings);
         Timer tracker(settings, db);
+        tracker.initializeFromStore();
         QVERIFY(tracker.getStartupRecoveredSeconds() > 0);
         QVERIFY(tracker.shouldShowStartupRecoveryNotification());
     }
@@ -301,7 +307,7 @@ void IntegrationTest::test_integration_retention_cleanup_preserves_current()
     
     // Cleanup runs in checkSchemaOnStartup(), not in the constructor.
     SqliteSessionStore manager2(settings);
-    QVERIFY(manager2.checkSchemaOnStartup());
+    QCOMPARE(manager2.checkSchemaOnStartup(), SchemaStatus::Ready);
 
     auto loaded = manager2.loadDurations();
     QVERIFY(loaded.size() >= 1); // Current day preserved
@@ -853,6 +859,7 @@ void IntegrationTest::test_timer_reconcileOrphans_excludes_overlap_dropped_from_
     fakeDb.orphanCheckpoints.push_back(b);
 
     Timer tracker(settings, fakeDb);
+    tracker.initializeFromStore();
 
     // Only A's 60 seconds are counted; B was overlap-dropped by the store.
     QCOMPARE(tracker.getStartupRecoveredSeconds(), (qint64)60);

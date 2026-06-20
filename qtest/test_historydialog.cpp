@@ -646,6 +646,7 @@ void HistoryDialogTest::test_historydialog_save_then_crash_reopen_retains_curren
 
         SqliteSessionStore db3(settings);
         Timer reopened(settings, db3);
+        reopened.initializeFromStore();
         auto loaded = db.loadDurations();
         QCOMPARE(loaded.size(), static_cast<size_t>(1));
     }

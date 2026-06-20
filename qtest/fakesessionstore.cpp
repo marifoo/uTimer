@@ -120,7 +120,7 @@ SessionStoreResult FakeSessionStore::saveCheckpoint(DurationType type, const QDa
     return saveCheckpointResult;
 }
 
-bool FakeSessionStore::checkSchemaOnStartup()
+SchemaStatus FakeSessionStore::checkSchemaOnStartup()
 {
     callLog.append("checkSchemaOnStartup");
     return checkSchemaResult;

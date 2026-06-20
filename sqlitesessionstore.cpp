@@ -33,6 +33,7 @@
 #include "sqlitesessionstore.h"
 #include "apppaths.h"
 #include <QMutexLocker>
+#include <QSet>
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QVariant>
@@ -60,7 +61,8 @@ std::atomic<uint64_t> s_connection_seq{0};
 }
 
 SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent)
-    : QObject(parent), history_days_to_keep_(std::max(settings.getHistoryDays(), 0))
+    : QObject(parent), history_days_to_keep_(std::max(settings.getHistoryDays(), 0)),
+      db_was_fresh_(false)
 {
     // Mint a unique connection name using a monotonic counter.
     // See s_connection_seq declaration for rationale (avoids address-reuse collisions).
@@ -73,6 +75,9 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
         Logger::Log("[DB] History days to keep is set to 0, database will not be used.");
         return;
     }
+
+    // Record whether this is a fresh DB before opening.
+    db_was_fresh_ = !QFile::exists(db.databaseName());
 
     // Open the connection and run one-time schema setup.
     if (!db.open()) {
@@ -249,36 +254,113 @@ void SqliteSessionStore::checkSegmentIdUniqueness()
 #endif // QT_NO_DEBUG
 
 /**
- * Schema validation + startup housekeeping.  Call once at application startup.
+ * Schema validation + startup housekeeping.  Call once at application startup,
+ * before any recovery or data access.
  *
- * Safe to call more than once (all operations are idempotent), but intended to
- * run once: each call re-runs retention cleanup and backup pruning.
+ * Returns:
+ *   Created      — DB file did not previously exist; fresh schema was built.
+ *   Ready        — existing DB has the expected schema; safe to use.
+ *   Outdated     — column set or UNIQUE(segment_id) constraint does not match;
+ *                  caller must refuse to start.
+ *   Inaccessible — DB file could not be opened.
  *
- * Returns true if the database is ready for use (or history is disabled / file
- * doesn't exist yet).  Returns false if the schema is outdated or the connection
- * cannot be opened.
+ * idx_start_utc: if the partial index is absent it is (re)created rather than
+ * returning Outdated, because the index can be rebuilt without data loss and
+ * its absence does not indicate schema incompatibility.
  */
-bool SqliteSessionStore::checkSchemaOnStartup()
+SchemaStatus SqliteSessionStore::checkSchemaOnStartup()
 {
     QMutexLocker locker(&db_mutex_);
 
     if (history_days_to_keep_ == 0) {
-        return true;
+        return SchemaStatus::Ready;
     }
 
-    if (!QFile::exists(db.databaseName())) {
-        return true;
-    }
-
-    // The constructor already ran ensureSchema(); this call is idempotent
-    // (all DDL uses IF NOT EXISTS) and re-creates tables/indexes if somehow
-    // missing without any data loss.
     if (!ensureOpen()) {
-        return false;
+        return SchemaStatus::Inaccessible;
     }
 
-    if (!ensureSchema()) {
-        return false;
+    if (db_was_fresh_) {
+        // Fresh DB: ensureSchema() already ran in the constructor.
+        performRetentionCleanup();
+        pruneOldBackups();
+        return SchemaStatus::Created;
+    }
+
+    // Validate the durations table columns using PRAGMA table_info.
+    // The expected set must match what ensureSchema() creates.
+    {
+        static const QSet<QString> kExpectedColumns = {
+            "id", "segment_id", "type", "start_utc", "end_utc", "is_finalized"
+        };
+
+        QSqlQuery colQuery(db);
+        if (!colQuery.exec("PRAGMA table_info(durations)")) {
+            Logger::Log("[DB] checkSchemaOnStartup: PRAGMA table_info failed: " + colQuery.lastError().text());
+            return SchemaStatus::Inaccessible;
+        }
+
+        QSet<QString> foundColumns;
+        while (colQuery.next()) {
+            foundColumns.insert(colQuery.value(1).toString()); // column 1 = name
+        }
+
+        if (foundColumns != kExpectedColumns) {
+            Logger::Log(QString("[DB] checkSchemaOnStartup: column mismatch. "
+                                "Expected {%1}, found {%2}")
+                .arg(QStringList(kExpectedColumns.values()).join(", "))
+                .arg(QStringList(foundColumns.values()).join(", ")));
+            return SchemaStatus::Outdated;
+        }
+    }
+
+    // Validate UNIQUE(segment_id) constraint via PRAGMA index_list + index_info.
+    {
+        QSqlQuery idxList(db);
+        if (!idxList.exec("PRAGMA index_list(durations)")) {
+            Logger::Log("[DB] checkSchemaOnStartup: PRAGMA index_list failed: " + idxList.lastError().text());
+            return SchemaStatus::Inaccessible;
+        }
+
+        // Collect all unique indexes and check their covered columns.
+        bool foundUniqueSegmentId = false;
+        while (idxList.next()) {
+            // Columns: seq, name, unique, origin, partial
+            const QString idxName   = idxList.value(1).toString();
+            const int isUnique      = idxList.value(2).toInt();
+            if (!isUnique) {
+                continue;
+            }
+            // Check if this unique index covers exactly segment_id.
+            QSqlQuery idxInfo(db);
+            idxInfo.prepare("PRAGMA index_info(" + idxName + ")");
+            if (!idxInfo.exec()) {
+                continue;
+            }
+            QStringList coveredCols;
+            while (idxInfo.next()) {
+                coveredCols.append(idxInfo.value(2).toString()); // column 2 = name
+            }
+            if (coveredCols.size() == 1 && coveredCols[0] == "segment_id") {
+                foundUniqueSegmentId = true;
+                break;
+            }
+        }
+
+        if (!foundUniqueSegmentId) {
+            Logger::Log("[DB] checkSchemaOnStartup: missing UNIQUE(segment_id) constraint");
+            return SchemaStatus::Outdated;
+        }
+    }
+
+    // Recreate idx_start_utc if absent (the partial index is safe to rebuild;
+    // its absence does not indicate schema incompatibility).
+    {
+        QSqlQuery startUtcIndexQuery(db);
+        if (!startUtcIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_start_utc ON durations(start_utc) WHERE is_finalized = 1")) {
+            Logger::Log("[DB] Warning: Failed to recreate idx_start_utc: " + startUtcIndexQuery.lastError().text());
+            // Non-fatal: log and continue.
+        }
     }
 
     // Retention cleanup and backup pruning run once per startup, after schema is
@@ -286,7 +368,7 @@ bool SqliteSessionStore::checkSchemaOnStartup()
     performRetentionCleanup();
     pruneOldBackups();
 
-    return true;
+    return SchemaStatus::Ready;
 }
 
 /**

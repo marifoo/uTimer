@@ -38,7 +38,7 @@ public:
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
     SessionStoreResult saveCheckpoint(DurationType type, const QDateTime& startTime,
                                       const QDateTime& endTime, const SegmentId& segmentId) override;
-    bool checkSchemaOnStartup() override;
+    SchemaStatus checkSchemaOnStartup() override;
     void flushToDisc() override;
     std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
     bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc);
@@ -71,7 +71,7 @@ public:
     SessionStoreResult commitSessionResult = SessionStoreResult::success();
     bool replaceDurationsResult = true;
     SessionStoreResult saveCheckpointResult = SessionStoreResult::success();
-    bool checkSchemaResult = true;
+    SchemaStatus checkSchemaResult = SchemaStatus::Ready;
     bool reconcileResult = true;
     bool setMarkerResult = true;
 
