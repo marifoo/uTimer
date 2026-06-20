@@ -32,14 +32,8 @@
 #include <QtDebug>
 #include <QDateTime>
 #include <QMutexLocker>
-#include <algorithm>
 #include <new>  // for std::bad_alloc
 #include "logger.h"
-
-namespace {
-constexpr qint64 kMinRecoverableOrphanDurationMs = 1000;
-constexpr qint64 kOrphanStaleAgeMs = 24LL * 60LL * 60LL * 1000LL;
-}
 
 // ============================================================================
 // DayBoundaryWatcher implementation
@@ -378,15 +372,10 @@ Timer::Timer(const Settings &settings, SessionStore& db, QObject *parent)
 
 void Timer::initializeFromStore()
 {
-    const std::optional<MarkerResult> markerResult = db_.consumeLastCleanShutdownMarker();
-    if (markerResult.has_value() && markerResult->status == MarkerResult::Status::Error) {
-        // DB state is unknown after a transaction failure — do not reconcile orphans
-        // to avoid finalising rows that may conflict with in-progress data.
-        Logger::Log("[TIMER] consumeLastCleanShutdownMarker failed — skipping orphan reconciliation");
-    } else {
-        // When markerResult is nullopt (history disabled), loadUnfinalizedCheckpoints()
-        // also returns empty (ensureOpen returns false), so reconciliation is harmless.
-        startup_recovered_seconds_ = reconcileOrphanCheckpoints(db_.loadUnfinalizedCheckpoints(), markerResult);
+    const StartupRecoveryResult recovery = db_.recoverStartupCheckpoints(QDateTime::currentDateTime());
+    if (recovery.ok) {
+        startup_recovered_seconds_ = recovery.recovered_seconds;
+        startup_recovery_notification_needed_ = recovery.notify_user;
     }
 }
 
@@ -1253,81 +1242,3 @@ void Timer::endExclusiveEdit()
     }
 }
 
-qint64 Timer::reconcileOrphanCheckpoints(
-    const std::deque<OrphanCheckpoint>& orphans,
-    const std::optional<MarkerResult>& markerResult)
-{
-    startup_recovery_notification_needed_ = false;
-
-    if (orphans.empty()) {
-        return 0;
-    }
-
-    const QDateTime now = QDateTime::currentDateTime();
-    std::vector<OrphanCheckpoint> toFinalize;
-    std::vector<long long> dropIds;
-
-    for (const auto& orphan : orphans) {
-        const bool tooShort = orphan.duration < kMinRecoverableOrphanDurationMs;
-        const bool stale = orphan.endTime.isValid() && (orphan.endTime.msecsTo(now) > kOrphanStaleAgeMs);
-
-        if (tooShort || stale) {
-            dropIds.push_back(orphan.id);
-            continue;
-        }
-
-        toFinalize.push_back(orphan);
-    }
-
-    ReconcileResult reconcile = db_.reconcileUnfinalizedCheckpoints(toFinalize, dropIds);
-    if (!reconcile.ok) {
-        Logger::Log("[DB] Failed to reconcile orphan checkpoints");
-        return 0;
-    }
-
-    // The store atomically rejects orphans that overlap an existing finalised row.
-    // Only count seconds for rows the store actually finalised.
-    const std::vector<long long>& finalizeIds = reconcile.finalized;
-    qint64 recoveredSeconds = 0;
-    for (const auto& orphan : toFinalize) {
-        if (std::find(finalizeIds.begin(), finalizeIds.end(), orphan.id) != finalizeIds.end()) {
-            recoveredSeconds += orphan.duration / 1000;
-        }
-    }
-
-    if (!finalizeIds.empty()) {
-        bool showNotification = true;
-
-        const bool hasValidMarker = markerResult.has_value()
-            && markerResult->status == MarkerResult::Status::Found
-            && markerResult->timestamp.isValid();
-        if (hasValidMarker) {
-            const QDateTime markerUtc = markerResult->timestamp.toUTC();
-            QDateTime oldestFinalizedOrphanEndUtc;
-            for (const auto& orphan : orphans) {
-                if (std::find(finalizeIds.begin(), finalizeIds.end(), orphan.id) == finalizeIds.end()) {
-                    continue;
-                }
-
-                const QDateTime orphanEndUtc = orphan.endTime.toUTC();
-                if (!oldestFinalizedOrphanEndUtc.isValid() || orphanEndUtc < oldestFinalizedOrphanEndUtc) {
-                    oldestFinalizedOrphanEndUtc = orphanEndUtc;
-                }
-            }
-
-            if (oldestFinalizedOrphanEndUtc.isValid() && markerUtc >= oldestFinalizedOrphanEndUtc) {
-                showNotification = false;
-            }
-        }
-
-        startup_recovery_notification_needed_ = showNotification;
-    }
-
-    Logger::Log(QString("[DB] Orphan checkpoint reconciliation finished: finalized=%1, dropped=%2, overlap_rejected=%3, recovered_seconds=%4")
-        .arg(finalizeIds.size())
-        .arg(dropIds.size())
-        .arg(reconcile.dropped.size())
-        .arg(recoveredSeconds));
-
-    return recoveredSeconds;
-}

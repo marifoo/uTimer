@@ -21,26 +21,14 @@
 #include <QDateTime>
 #include <QString>
 #include <deque>
-#include <optional>
-#include <vector>
 #include "types.h"
 #include "timeline.h"
 
 /**
- * Forward declaration of the OrphanCheckpoint and LoadResult types.
- * These are defined here (not inside the interface) so that both the
- * interface and the concrete class share the same types without
- * requiring SqliteSessionStore to be included.
+ * Forward declaration of LoadResult type.
+ * Defined here so both the interface and the concrete class share the same
+ * type without requiring SqliteSessionStore to be included.
  */
-struct OrphanCheckpoint {
-    long long id = -1;
-    SegmentId segment_id;
-    DurationType type = DurationType::Activity;
-    qint64 duration = 0;
-    QDateTime startTime;
-    QDateTime endTime;
-};
-
 struct LoadResult {
     std::deque<TimeDuration> durations;
     int skipped = 0;
@@ -54,42 +42,26 @@ struct LoadResult {
 };
 
 /**
- * Result of reconcileUnfinalizedCheckpoints.
+ * Result returned by recoverStartupCheckpoints().
  *
- *  - finalized: row ids that were successfully promoted from is_finalized=0 to 1.
- *  - dropped:   row ids that the store would not adopt.  Most commonly because
- *               another already-finalised row overlaps the orphan's
- *               [startUtc, endUtc) interval; also covers missing/already-final
- *               rows.  These rows are left in the database (still is_finalized=0
- *               if they exist) so a future reconciliation pass can re-evaluate.
- *  - ok:        false iff a transaction-level failure prevented the call from
- *               doing meaningful work.  When false the two lists are empty and
- *               the caller must assume nothing happened.
+ * The store loads unfinalized checkpoint rows, applies the too-short (<1 s) /
+ * stale (>24 h) and overlap policies, finalizes qualifying rows, and decides
+ * whether the user needs to be notified of unclean recovery.
+ *
+ *   ok == true  — recovery ran to completion (even if zero rows were finalized).
+ *   ok == false — a critical store failure (e.g. marker read error) prevented
+ *                 reconciliation; no rows were mutated.  Timer must treat
+ *                 recovered_seconds as 0 and must NOT show a notification.
+ *
+ * When history storage is disabled (history_days_to_keep_ == 0) the store
+ * returns ok=true with all counts zero and notify_user false.
  */
-struct ReconcileResult {
-    std::vector<long long> finalized;
-    std::vector<long long> dropped;
+struct StartupRecoveryResult {
+    qint64 recovered_seconds = 0;
+    int finalized_count = 0;
+    int dropped_count = 0;
+    bool notify_user = false;
     bool ok = true;
-};
-
-/**
- * Tri-state result of consumeLastCleanShutdownMarker().
- *
- * Status semantics:
- *   Found    — marker was present; `timestamp` holds its value.
- *   NotFound — DB was queried successfully; no marker existed.
- *   Error    — a transaction or query failure occurred; state is unknown.
- *              Callers should refuse to reconcile orphan checkpoints on Error
- *              because doing so on unknown state may overwrite valid data.
- *
- * The outer std::optional<MarkerResult> on consumeLastCleanShutdownMarker()
- * is std::nullopt only when history storage is entirely disabled
- * (history_days_to_keep_ == 0).  All other outcomes are expressed via Status.
- */
-struct MarkerResult {
-    enum class Status { Found, NotFound, Error };
-    QDateTime timestamp;  // valid only when status == Found
-    Status status = Status::NotFound;
 };
 
 /**
@@ -148,18 +120,13 @@ public:
                                               const QDateTime& endTime, const SegmentId& segmentId) = 0;
     virtual SchemaStatus checkSchemaOnStartup() = 0;
     virtual void flushToDisc() = 0;
-    virtual std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() = 0;
-    // Reconcile a batch of orphan checkpoints.
-    //   `orphansToFinalize` is attempted via finalizeIfNoOverlap, one per row.
-    //   `outrightDropIds`   are deleted unconditionally.
-    // See ReconcileResult for the return-value contract.
-    virtual ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
-                                                            const std::vector<long long>& outrightDropIds) = 0;
     virtual bool setLastCleanShutdownMarker(const QDateTime& timestamp) = 0;
-    // Reads and deletes the last-clean-shutdown marker in a single transaction.
-    // Returns nullopt only when history storage is disabled.  All other outcomes
-    // (found, not found, error) are expressed via MarkerResult::Status.
-    virtual std::optional<MarkerResult> consumeLastCleanShutdownMarker() = 0;
+    /// Recovers unfinalized checkpoint rows left by a previous crash or unclean exit.
+    /// Internally consumes the last-clean-shutdown marker, applies too-short/stale/
+    /// overlap policies, and finalizes qualifying rows.  Returns domain facts only —
+    /// row ids and finalize/drop mechanics are hidden inside the store.
+    /// `now` is used for the stale-age check (>24 h) and should be the current time.
+    virtual StartupRecoveryResult recoverStartupCheckpoints(const QDateTime& now) = 0;
 };
 
 #endif // SESSIONSTORE_H

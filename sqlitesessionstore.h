@@ -6,8 +6,8 @@
 #include <QDateTime>
 #include <QMutex>
 #include <deque>
-#include <vector>
 #include <optional>
+#include <vector>
 #include "types.h"
 #include "settings.h"
 #include "sessionstore.h"
@@ -47,12 +47,8 @@ public:
     SessionStoreResult saveCheckpoint(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const SegmentId& segmentId) override;
     SchemaStatus checkSchemaOnStartup() override;
     void flushToDisc() override;
-    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
-    bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc);
-    ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
-                                                   const std::vector<long long>& outrightDropIds) override;
     bool setLastCleanShutdownMarker(const QDateTime& timestamp) override;
-    std::optional<MarkerResult> consumeLastCleanShutdownMarker() override;
+    StartupRecoveryResult recoverStartupCheckpoints(const QDateTime& now) override;
 
     // Non-virtual helpers kept for test seeding and internal use.
     // No longer part of SessionStore — callers that previously used the
@@ -63,6 +59,26 @@ public:
                                            const std::vector<QString>& removedSegmentIds = {});
 
 private:
+    // Private types used by startup recovery helpers.
+    struct OrphanCheckpoint {
+        long long id = -1;
+        SegmentId segment_id;
+        DurationType type = DurationType::Activity;
+        qint64 duration = 0;
+        QDateTime startTime;
+        QDateTime endTime;
+    };
+    struct ReconcileResult {
+        std::vector<long long> finalized;
+        std::vector<long long> dropped;
+        bool ok = true;
+    };
+    struct MarkerResult {
+        enum class Status { Found, NotFound, Error };
+        QDateTime timestamp;  // valid only when status == Found
+        Status status = Status::NotFound;
+    };
+
     QSqlDatabase db;
     uint history_days_to_keep_;
     bool db_was_fresh_;  // true if the DB file did not exist when the connection was first opened
@@ -83,6 +99,13 @@ private:
     void performRetentionCleanup();
     void pruneOldBackups(int keepCount = 5);
     bool insertRows(QSqlQuery& query, const std::deque<TimeDuration>& rows);
+
+    // Startup recovery helpers (implementation details of recoverStartupCheckpoints).
+    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints();
+    bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc);
+    ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
+                                                    const std::vector<long long>& outrightDropIds);
+    std::optional<MarkerResult> consumeLastCleanShutdownMarker();
 
 #ifndef QT_NO_DEBUG
     /// Debug-build verification: checks that no segment_id appears more than

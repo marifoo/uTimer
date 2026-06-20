@@ -276,7 +276,7 @@ void DatabaseTest::test_clockDriftResilience_durationStoredFromElapsed()
     QSqlDatabase::removeDatabase(connName);
 
     // Duration is computed from timestamps at load.
-    auto orphans = manager.loadUnfinalizedCheckpoints();
+    auto orphans = manager.loadUnfinalizedCheckpoints(); // private; accessible via #define private public
     QCOMPARE(static_cast<int>(orphans.size()), 1);
     QCOMPARE(orphans[0].duration, wallClockMs);
 }
@@ -1833,13 +1833,13 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dr
     QVERIFY(aId > 0 && bId > 0);
     manager.lazyClose();
 
-    std::vector<OrphanCheckpoint> toFinalize;
-    OrphanCheckpoint a; a.id = aId; a.startTime = aStartUtc.toLocalTime(); a.endTime = aEndUtc.toLocalTime();
-    OrphanCheckpoint b; b.id = bId; b.startTime = bStartUtc.toLocalTime(); b.endTime = bEndUtc.toLocalTime();
+    std::vector<SqliteSessionStore::OrphanCheckpoint> toFinalize;
+    SqliteSessionStore::OrphanCheckpoint a; a.id = aId; a.startTime = aStartUtc.toLocalTime(); a.endTime = aEndUtc.toLocalTime();
+    SqliteSessionStore::OrphanCheckpoint b; b.id = bId; b.startTime = bStartUtc.toLocalTime(); b.endTime = bEndUtc.toLocalTime();
     toFinalize.push_back(a);
     toFinalize.push_back(b);
 
-    ReconcileResult result = manager.reconcileUnfinalizedCheckpoints(toFinalize, {});
+    SqliteSessionStore::ReconcileResult result = manager.reconcileUnfinalizedCheckpoints(toFinalize, {});
     QVERIFY(result.ok);
     QCOMPARE(result.finalized.size(), (size_t)1);
     QCOMPARE(result.finalized[0], aId);
@@ -1885,11 +1885,11 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_outright_drops_are_delet
     manager.lazyClose();
 
     // Reconcile with B in the outright-drop list and A in toFinalize.
-    std::vector<OrphanCheckpoint> toFinalize;
-    OrphanCheckpoint a; a.id = aId; a.startTime = aStartUtc.toLocalTime(); a.endTime = aEndUtc.toLocalTime();
+    std::vector<SqliteSessionStore::OrphanCheckpoint> toFinalize;
+    SqliteSessionStore::OrphanCheckpoint a; a.id = aId; a.startTime = aStartUtc.toLocalTime(); a.endTime = aEndUtc.toLocalTime();
     toFinalize.push_back(a);
 
-    ReconcileResult result = manager.reconcileUnfinalizedCheckpoints(toFinalize, {bId});
+    SqliteSessionStore::ReconcileResult result = manager.reconcileUnfinalizedCheckpoints(toFinalize, {bId});
     QVERIFY(result.ok);
     QCOMPARE(result.finalized.size(), (size_t)1);
     QCOMPARE(result.finalized[0], aId);
@@ -2096,25 +2096,21 @@ void DatabaseTest::test_schema_status_inaccessible_readonly_file()
 
 void DatabaseTest::test_constructor_only_does_not_consume_marker()
 {
-    // The Timer constructor must not consume the clean-shutdown marker.
-    // Only initializeFromStore() does that.
+    // The Timer constructor must not perform startup recovery.
+    // Only initializeFromStore() does that (which calls recoverStartupCheckpoints).
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
 
     FakeSessionStore fakeDb;
-    fakeDb.cleanShutdownMarker = MarkerResult { QDateTime::currentDateTime(), MarkerResult::Status::Found };
 
-    // Construct Timer — must NOT call consumeLastCleanShutdownMarker.
+    // Construct Timer — must NOT call recoverStartupCheckpoints.
     Timer tracker(settings, fakeDb);
-    QVERIFY(!fakeDb.callLog.contains("consumeLastCleanShutdownMarker"));
-    QVERIFY(!fakeDb.callLog.contains("loadUnfinalizedCheckpoints"));
-    QVERIFY(!fakeDb.callLog.contains("reconcileUnfinalizedCheckpoints"));
+    QVERIFY(!fakeDb.callLog.contains("recoverStartupCheckpoints"));
 
-    // After initializeFromStore(), the marker should have been consumed.
+    // After initializeFromStore(), recovery should have run.
     tracker.initializeFromStore();
-    QVERIFY(fakeDb.callLog.contains("consumeLastCleanShutdownMarker"));
-    QVERIFY(fakeDb.callLog.contains("loadUnfinalizedCheckpoints"));
+    QVERIFY(fakeDb.callLog.contains("recoverStartupCheckpoints"));
 }
 
 void DatabaseTest::test_outdated_schema_does_not_mutate_db()

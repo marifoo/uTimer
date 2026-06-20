@@ -41,11 +41,14 @@
 #include <QFileInfo>
 #include <QStorageInfo>
 #include <QTextStream>
+#include <algorithm>
 #include <atomic>
 #include "logger.h"
 
 namespace {
 const char* kLastCleanShutdownKey = "last_clean_shutdown";
+constexpr qint64 kMinRecoverableOrphanDurationMs = 1000;
+constexpr qint64 kOrphanStaleAgeMs = 24LL * 60LL * 60LL * 1000LL;
 
 static QString toUtcIso(const QDateTime& dt)
 {
@@ -1167,7 +1170,7 @@ void SqliteSessionStore::flushToDisc()
     Logger::Log("[DB] flushToDisc: durable heartbeat committed");
 }
 
-std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
+std::deque<SqliteSessionStore::OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1292,8 +1295,8 @@ bool SqliteSessionStore::finalizeIfNoOverlap(qint64 rowId, const QDateTime& star
     return true;
 }
 
-ReconcileResult SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
-                                                                   const std::vector<long long>& outrightDropIds)
+SqliteSessionStore::ReconcileResult SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
+                                                                                       const std::vector<long long>& outrightDropIds)
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1391,7 +1394,7 @@ bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
     return committed;
 }
 
-std::optional<MarkerResult> SqliteSessionStore::consumeLastCleanShutdownMarker()
+std::optional<SqliteSessionStore::MarkerResult> SqliteSessionStore::consumeLastCleanShutdownMarker()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1443,4 +1446,105 @@ std::optional<MarkerResult> SqliteSessionStore::consumeLastCleanShutdownMarker()
         return MarkerResult { *parsedTs, MarkerResult::Status::Found };
     }
     return MarkerResult { {}, MarkerResult::Status::NotFound };
+}
+
+/**
+ * Startup checkpoint recovery.
+ *
+ * Consumes the last-clean-shutdown marker, loads unfinalized checkpoint rows,
+ * applies the too-short (<1 s) / stale (>24 h) / overlap policies, finalizes
+ * qualifying rows, and decides whether the user needs to be notified.
+ *
+ * All internal mechanics (row ids, finalize/drop lists, marker timestamps) stay
+ * inside this method.  Timer receives only domain facts via StartupRecoveryResult.
+ */
+StartupRecoveryResult SqliteSessionStore::recoverStartupCheckpoints(const QDateTime& now)
+{
+    StartupRecoveryResult result;
+
+    // Consume the marker first.  If the read fails, do not reconcile — DB state
+    // is unknown and finalising rows could conflict with in-progress data.
+    const std::optional<MarkerResult> markerResult = consumeLastCleanShutdownMarker();
+    if (markerResult.has_value() && markerResult->status == MarkerResult::Status::Error) {
+        Logger::Log("[DB] recoverStartupCheckpoints: marker read failed — skipping orphan reconciliation");
+        result.ok = false;
+        return result;
+    }
+    // When markerResult is nullopt (history disabled), loadUnfinalizedCheckpoints()
+    // also returns empty (ensureOpen returns false), so reconciliation is a safe no-op.
+
+    const std::deque<OrphanCheckpoint> orphans = loadUnfinalizedCheckpoints();
+    if (orphans.empty()) {
+        return result;
+    }
+
+    std::vector<OrphanCheckpoint> toFinalize;
+    std::vector<long long> dropIds;
+
+    for (const auto& orphan : orphans) {
+        const bool tooShort = orphan.duration < kMinRecoverableOrphanDurationMs;
+        const bool stale = orphan.endTime.isValid() && (orphan.endTime.msecsTo(now) > kOrphanStaleAgeMs);
+
+        if (tooShort || stale) {
+            dropIds.push_back(orphan.id);
+        } else {
+            toFinalize.push_back(orphan);
+        }
+    }
+
+    ReconcileResult reconcile = reconcileUnfinalizedCheckpoints(toFinalize, dropIds);
+    if (!reconcile.ok) {
+        Logger::Log("[DB] recoverStartupCheckpoints: reconciliation transaction failed");
+        result.ok = false;
+        return result;
+    }
+
+    result.finalized_count = static_cast<int>(reconcile.finalized.size());
+    result.dropped_count   = static_cast<int>(dropIds.size()) + static_cast<int>(reconcile.dropped.size());
+
+    // Count seconds only for rows the store actually finalized.
+    for (const auto& orphan : toFinalize) {
+        if (std::find(reconcile.finalized.begin(), reconcile.finalized.end(), orphan.id)
+                != reconcile.finalized.end()) {
+            result.recovered_seconds += orphan.duration / 1000;
+        }
+    }
+
+    // Decide whether to notify the user.
+    // If a valid clean-shutdown marker exists and its timestamp covers (is >= )
+    // the oldest finalized orphan's end time, the shutdown was clean — no notification.
+    if (!reconcile.finalized.empty()) {
+        bool showNotification = true;
+
+        const bool hasValidMarker = markerResult.has_value()
+            && markerResult->status == MarkerResult::Status::Found
+            && markerResult->timestamp.isValid();
+        if (hasValidMarker) {
+            const QDateTime markerUtc = markerResult->timestamp.toUTC();
+            QDateTime oldestFinalizedOrphanEndUtc;
+            for (const auto& orphan : orphans) {
+                if (std::find(reconcile.finalized.begin(), reconcile.finalized.end(), orphan.id)
+                        == reconcile.finalized.end()) {
+                    continue;
+                }
+                const QDateTime orphanEndUtc = orphan.endTime.toUTC();
+                if (!oldestFinalizedOrphanEndUtc.isValid() || orphanEndUtc < oldestFinalizedOrphanEndUtc) {
+                    oldestFinalizedOrphanEndUtc = orphanEndUtc;
+                }
+            }
+            if (oldestFinalizedOrphanEndUtc.isValid() && markerUtc >= oldestFinalizedOrphanEndUtc) {
+                showNotification = false;
+            }
+        }
+
+        result.notify_user = showNotification;
+    }
+
+    Logger::Log(QString("[DB] Startup checkpoint recovery: finalized=%1, dropped=%2, overlap_rejected=%3, recovered_seconds=%4")
+        .arg(reconcile.finalized.size())
+        .arg(dropIds.size())
+        .arg(reconcile.dropped.size())
+        .arg(result.recovered_seconds));
+
+    return result;
 }

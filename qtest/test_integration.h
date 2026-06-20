@@ -51,10 +51,10 @@ private slots:
     void test_AA_no_duplicate_stop_signal();
     void test_AB_scheduleMidnightStop_is_gone();
 
-    // Step 3 (S2 + T3): atomic overlap-guarded finalisation.
-    void test_fakeStore_finalizeIfNoOverlap_mirrors_sqlite_semantics();
-    void test_fakeStore_reconcile_reports_finalized_and_overlap_dropped();
-    void test_timer_reconcileOrphans_excludes_overlap_dropped_from_recovered_seconds();
+    // Phase 3: recoverStartupCheckpoints API tests.
+    void test_recoverStartupCheckpoints_overlap_rejected_not_counted();
+    void test_recoverStartupCheckpoints_reports_finalized_and_dropped_counts();
+    void test_timer_startup_recovery_uses_store_recovered_seconds();
 
     // Step 19 (C9 timezone): parameterized timezone tests for hasEntriesForDate.
     void test_hasEntriesForDate_timezone_data();

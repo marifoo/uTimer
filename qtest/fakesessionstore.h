@@ -21,7 +21,6 @@
 #include <QSet>
 #include <QStringList>
 #include <deque>
-#include <optional>
 #include <vector>
 
 class FakeSessionStore : public SessionStore
@@ -40,16 +39,12 @@ public:
                                       const QDateTime& endTime, const SegmentId& segmentId) override;
     SchemaStatus checkSchemaOnStartup() override;
     void flushToDisc() override;
-    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
-    bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc);
-    ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
-                                                   const std::vector<long long>& outrightDropIds) override;
     bool setLastCleanShutdownMarker(const QDateTime& timestamp) override;
-    std::optional<MarkerResult> consumeLastCleanShutdownMarker() override;
+    StartupRecoveryResult recoverStartupCheckpoints(const QDateTime& now) override;
 
     // ---- Call log (for assertions) ----
 
-    /// Ordered log of method names invoked, e.g. "saveDurations", "saveCheckpoint".
+    /// Ordered log of method names invoked, e.g. "saveCheckpoint".
     QStringList callLog;
 
     // ---- In-memory data store ----
@@ -72,7 +67,6 @@ public:
     bool replaceDurationsResult = true;
     SessionStoreResult saveCheckpointResult = SessionStoreResult::success();
     SchemaStatus checkSchemaResult = SchemaStatus::Ready;
-    bool reconcileResult = true;
     bool setMarkerResult = true;
 
     /// Set of segment_ids that have been committed via commitSession().
@@ -82,15 +76,12 @@ public:
     /// Pre-loaded durations returned by loadDurations(). Tests populate this.
     LoadResult loadDurationsResult;
 
-    /// Pre-loaded orphans returned by loadUnfinalizedCheckpoints().
-    std::deque<OrphanCheckpoint> orphanCheckpoints;
-
     /// Result returned by hasEntriesForDate(). Default: No entries.
     EntriesForDateResult entriesForDateResult = EntriesForDateResult::No;
 
-    /// Marker returned (once) by consumeLastCleanShutdownMarker().
-    /// Default is NotFound so Timer::reconcileOrphanCheckpoints() runs normally.
-    std::optional<MarkerResult> cleanShutdownMarker = MarkerResult { {}, MarkerResult::Status::NotFound };
+    /// Result returned by recoverStartupCheckpoints().
+    /// Default: success with zero recovery and no notification.
+    StartupRecoveryResult startupRecoveryResult;
 };
 
 #endif // FAKESESSIONSTORE_H

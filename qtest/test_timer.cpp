@@ -1632,34 +1632,28 @@ void TimerTest::test_C6_replaceCurrentDurations_writes_checkpoint_after_endExclu
 
 void TimerTest::test_S12_marker_error_skips_reconciliation()
 {
-    // When consumeLastCleanShutdownMarker() returns Status::Error (DB failure),
-    // Timer must NOT reconcile orphan checkpoints — the DB state is unknown and
-    // finalising orphans could conflict with in-progress data.
+    // When recoverStartupCheckpoints() returns ok=false (e.g. marker read error),
+    // Timer must treat recovered seconds as 0 and must NOT show a notification.
+    // The store is responsible for skipping reconciliation on error; Timer only
+    // acts on the domain facts returned.
 
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
 
-    // Seed an orphan checkpoint that would normally be reconciled.
-    OrphanCheckpoint orphan;
-    orphan.id = 1;
-    orphan.segment_id = SegmentId::mint();
-    orphan.type = DurationType::Activity;
-    orphan.startTime = QDateTime::currentDateTime().addSecs(-120);
-    orphan.endTime   = QDateTime::currentDateTime().addSecs(-60);
-    orphan.duration  = orphan.startTime.msecsTo(orphan.endTime);
-    fakeDb.orphanCheckpoints.push_back(orphan);
-
-    // Simulate a marker read failure.
-    fakeDb.cleanShutdownMarker = MarkerResult { {}, MarkerResult::Status::Error };
+    // Simulate store-level failure (marker error or other critical failure).
+    fakeDb.startupRecoveryResult.ok = false;
+    fakeDb.startupRecoveryResult.recovered_seconds = 0;
+    fakeDb.startupRecoveryResult.notify_user = false;
 
     Timer tracker(settings, fakeDb);
     tracker.initializeFromStore();
 
-    // No seconds recovered and no reconciliation attempted.
+    // No seconds recovered; notification suppressed.
     QCOMPARE(tracker.getStartupRecoveredSeconds(), (qint64)0);
-    QVERIFY(!fakeDb.callLog.contains("reconcileUnfinalizedCheckpoints"));
+    QVERIFY(!tracker.shouldShowStartupRecoveryNotification());
+    QVERIFY(fakeDb.callLog.contains("recoverStartupCheckpoints"));
 }
 
 void TimerTest::test_QF1_explicit_pause_emits_paused_not_modeChanged()

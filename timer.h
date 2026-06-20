@@ -11,7 +11,6 @@
 #include <deque>
 #include <memory>
 #include <utility>
-#include <vector>
 #include "settings.h"
 #include "types.h"
 #include "sessionstore.h"
@@ -190,9 +189,6 @@ private:
     // Retries saving previously unsaved durations at the start of a new session.
     // Returns true if startTimer should continue, false if it should abort.
     bool retryUnsavedDurations();
-    qint64 reconcileOrphanCheckpoints(
-        const std::deque<OrphanCheckpoint>& orphans,
-        const std::optional<MarkerResult>& markerResult);
     void maybeReanchorCheckpoint(const TimeDuration& seg);
 
 #ifndef QT_NO_DEBUG
