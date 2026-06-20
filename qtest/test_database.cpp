@@ -893,7 +893,7 @@ void DatabaseTest::test_database_backup_file_creation()
     QVERIFY(durationTxtFiles.size() > 0);
 }
 
-void DatabaseTest::test_database_backup_preserves_data()
+void DatabaseTest::test_database_backup_preserves_contents()
 {
     resetDatabaseFile();
     QTemporaryDir tempDir;
@@ -907,25 +907,39 @@ void DatabaseTest::test_database_backup_preserves_data()
     original.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-90));
     original.emplace_back(DurationType::Pause, now.addSecs(-80), now.addSecs(-70));
     
+    QDir testDir(QCoreApplication::applicationDirPath());
+    QStringList backupsBeforeList = testDir.entryList(QStringList() << "*.backup", QDir::Files);
+    QSet<QString> backupsBefore(backupsBeforeList.begin(), backupsBeforeList.end());
+
     QVERIFY(manager.saveDurations(original, TransactionMode::Append));
-    
-    // Trigger backup with Replace mode
+
+    // Wait >1 s so the Replace backup gets a distinct timestamp from the Append backup.
+    QTest::qWait(1100);
+
+    // Trigger backup with Replace mode — creates a backup of the 2-row DB, then writes 1 row
     std::deque<TimeDuration> replacement;
     replacement.emplace_back(DurationType::Activity, now.addSecs(-50), now.addSecs(-40));
     QVERIFY(manager.saveDurations(replacement, TransactionMode::Replace));
-    
-    // Find the most recent backup file
-    QDir testDir(QCoreApplication::applicationDirPath());
-    QStringList backupFiles = testDir.entryList(QStringList() << "*.backup", QDir::Files, QDir::Time);
-    QVERIFY(backupFiles.size() > 0);
-    
-    QString backupPath = testDir.filePath(backupFiles.first());
-    
+
+    // Find backup files created by this test (delta from snapshot), sorted newest-first
+    QStringList allBackups = testDir.entryList(QStringList() << "*.backup", QDir::Files, QDir::Time);
+    QString newBackup;
+    for (const QString& f : allBackups) {
+        if (!backupsBefore.contains(f)) {
+            newBackup = f;
+            break; // newest new backup = the Replace backup containing 2 rows
+        }
+    }
+    QVERIFY2(!newBackup.isEmpty(), "No new backup file was created by this test");
+    QString backupPath = testDir.filePath(newBackup);
+
     // Restore from backup and verify it has original data
     QFile::remove(db_path_);
     QVERIFY(QFile::copy(backupPath, db_path_));
-    
-    auto loaded = manager.loadDurations();
+
+    // Open a fresh connection so we read the restored file, not the old cached connection.
+    SqliteSessionStore restored(settings);
+    auto loaded = restored.loadDurations();
     QCOMPARE(loaded.size(), (size_t)2); // Original had 2 entries
 }
 
