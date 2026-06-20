@@ -56,6 +56,7 @@ private slots:
     void test_H4_overlap_cancel_aborts_save();
     void test_H2_midnight_crossing_shown_on_both_pages();
     void test_H6_split_dialog_preset_from_source_row_type();
+    void test_H14_cross_midnight_totals_and_counts();
 };
 
 #endif // TEST_HISTORYDIALOG_H

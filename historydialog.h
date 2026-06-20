@@ -29,6 +29,7 @@ private:
         std::deque<TimeDuration> crossMidnight;      // cross-midnight rows starting on this day (display-only)
         std::deque<TimeDuration> continuations;      // cross-midnight rows ending on this day (display-only)
         bool isCurrent;
+        QDate pageDate;                              // local calendar date this page represents
     };
 
     Timer& timetracker_;

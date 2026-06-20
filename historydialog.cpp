@@ -171,12 +171,15 @@ void HistoryDialog::createPages()
         auto contIt = continuationsByEndDay.find(today);
         if (contIt != continuationsByEndDay.end()) todayConts = *contIt;
 
+        const int todayShown = static_cast<int>(currentPageDurations.size()
+                              + todayCrossMidnight.size() + todayConts.size());
         pages_.push_back({
-            QString("Today (entries: ") + QString::number(currentPageDurations.size()) + QString(")"),
+            QString("Today (entries: ") + QString::number(todayShown) + QString(")"),
             currentPageDurations,
             todayCrossMidnight,
             todayConts,
-            true
+            true,
+            today
         });
     }
 
@@ -193,12 +196,15 @@ void HistoryDialog::createPages()
         auto contIt = continuationsByEndDay.find(date);
         if (contIt != continuationsByEndDay.end()) conts = *contIt;
 
+        const int histShown = static_cast<int>(historyByDay[date].size()
+                             + crossMidnight.size() + conts.size());
         pages_.push_back({
-            date.toString("yyyy-MM-dd") + QString(" (entries: ") + QString::number(historyByDay[date].size()) + QString(")"),
+            date.toString("yyyy-MM-dd") + QString(" (entries: ") + QString::number(histShown) + QString(")"),
             historyByDay[date],
             crossMidnight,
             conts,
-            false
+            false,
+            date
         });
     }
 
@@ -317,7 +323,20 @@ void HistoryDialog::updateTotalsLabel(uint idx)
     }
 
     qint64 totalActivity = pendingTimelines_[idx].activeMsec();
-    qint64 totalPause = pendingTimelines_[idx].pauseMsec();
+    qint64 totalPause    = pendingTimelines_[idx].pauseMsec();
+
+    const QDateTime dayStart(pages_[idx].pageDate, QTime(0, 0, 0), Qt::LocalTime);
+    const QDateTime dayEnd = dayStart.addDays(1);
+    auto portionInDay = [&](const TimeDuration& d) -> qint64 {
+        const QDateTime s = std::max(d.startTime.toLocalTime(), dayStart);
+        const QDateTime e = std::min(d.endTime.toLocalTime(), dayEnd);
+        return s < e ? s.msecsTo(e) : 0;
+    };
+    for (const auto& d : pages_[idx].crossMidnight)
+        (d.type == DurationType::Activity ? totalActivity : totalPause) += portionInDay(d);
+    for (const auto& d : pages_[idx].continuations)
+        (d.type == DurationType::Activity ? totalActivity : totalPause) += portionInDay(d);
+
     QString totalsStr = QString("\nActivity: ") + convMSecToTimeStr(totalActivity) + QString("  Pause: ") + convMSecToTimeStr(totalPause);
     pageLabel_->setText(pages_[idx].title + totalsStr);
 }

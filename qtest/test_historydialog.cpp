@@ -1253,6 +1253,80 @@ void HistoryDialogTest::test_H2_midnight_crossing_shown_on_both_pages()
     QCOMPARE(dialog.crossMidnightRows_.size(), static_cast<size_t>(1));
 }
 
+void HistoryDialogTest::test_H14_cross_midnight_totals_and_counts()
+{
+    // Seed a finalized cross-midnight Activity row: 23:50 yesterday → 00:10 today (20 min total).
+    // Start-day (yesterday) page should show 10 min Activity in totals and count the row.
+    // End-day (today) page (continuation) should show 10 min Activity in totals.
+    // Both portions together sum to 20 min — no double-counting.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    const QDate yesterday = QDate::currentDate().addDays(-1);
+    const QDateTime segStart(yesterday, QTime(23, 50, 0), Qt::LocalTime);
+    const QDateTime segEnd(QDate::currentDate(), QTime(0, 10, 0), Qt::LocalTime); // 20 min total
+
+    // Seed DB schema, then insert cross-midnight row directly via SQL.
+    QVERIFY(tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt)));
+    {
+        const QString connName = "h14_insert";
+        QSqlDatabase rawDb = QSqlDatabase::addDatabase("QSQLITE", connName);
+        rawDb.setDatabaseName(db_path_);
+        QVERIFY(rawDb.open());
+        QSqlQuery q(rawDb);
+        q.prepare(
+            "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
+            "VALUES (:sid, 0, :s, :e, 1)"
+        );
+        q.bindValue(":sid", TimeDuration::createSegmentId().toString());
+        q.bindValue(":s", segStart.toUTC().toString(Qt::ISODateWithMs));
+        q.bindValue(":e", segEnd.toUTC().toString(Qt::ISODateWithMs));
+        QVERIFY(q.exec());
+        rawDb.close();
+        rawDb = QSqlDatabase();
+        QSqlDatabase::removeDatabase(connName);
+    }
+
+    HistoryDialog dialog(tracker, settings);
+
+    // Two pages: today (isCurrent, index 0) and yesterday (index 1).
+    QCOMPARE(dialog.pages_.size(), static_cast<size_t>(2));
+    QCOMPARE(dialog.pages_[0].isCurrent, true);
+    QCOMPARE(dialog.pages_[1].isCurrent, false);
+
+    // Yesterday page: has the crossMidnight row (display-only) — count must be 1, not 0.
+    QCOMPARE(dialog.pages_[1].crossMidnight.size(), static_cast<size_t>(1));
+    QVERIFY(dialog.pages_[1].title.contains("entries: 1"));
+
+    // Today page: has the continuation row — count must be 1, not 0.
+    QCOMPARE(dialog.pages_[0].continuations.size(), static_cast<size_t>(1));
+    QVERIFY(dialog.pages_[0].title.contains("entries: 1"));
+
+    // Today page is page 0 — pageLabel_ already shows its totals.
+    // The continuation is midnight→00:10 (10 min = 600 s = 00:10:00 Activity).
+    dialog.show();
+    const QString todayLabel = dialog.pageLabel_->text();
+    QVERIFY2(todayLabel.contains("00:10:00"),
+             qPrintable("Today page label should contain 00:10:00 but got: " + todayLabel));
+
+    // Navigate to yesterday's page and verify its totals.
+    dialog.updateTotalsLabel(1);
+    const QString yesterdayLabel = dialog.pageLabel_->text();
+    QVERIFY2(yesterdayLabel.contains("00:10:00"),
+             qPrintable("Yesterday page label should contain 00:10:00 but got: " + yesterdayLabel));
+
+    // The two portions together must sum to the full 20-minute span.
+    // Extract activity from each page's pending + display-only totals.
+    // Today: continuation portion = 00:10:00, Yesterday: crossMidnight portion = 00:10:00.
+    // Neither page should show 00:00:00 Activity (which was the pre-fix bug).
+    QVERIFY(!todayLabel.contains("Activity: 00:00:00"));
+    QVERIFY(!yesterdayLabel.contains("Activity: 00:00:00"));
+}
+
 void HistoryDialogTest::test_H6_split_dialog_preset_from_source_row_type()
 {
     // H6: onSplitRow() presets SplitDialog's first-segment type to match the
