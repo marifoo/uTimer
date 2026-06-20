@@ -26,6 +26,8 @@ SOURCES += \
     test_database.cpp \
     test_integration.cpp \
     test_historydialog.cpp \
+    test_historyeditsession.cpp \
+    test_history_commit.cpp \
     test_shutdowncoordinator.cpp \
     test_healthmonitor.cpp \
     test_timeline.cpp \
@@ -33,6 +35,7 @@ SOURCES += \
     $$PWD/../healthmonitor.cpp \
     $$PWD/../splitdialog.cpp \
     $$PWD/../historydialog.cpp \
+    $$PWD/../historyeditsession.cpp \
     $$PWD/../shutdowncoordinator.cpp \
     $$PWD/../timer.cpp \
     $$PWD/../lockstatewatcher.cpp \
@@ -55,12 +58,15 @@ HEADERS += \
     test_database.h \
     test_integration.h \
     test_historydialog.h \
+    test_historyeditsession.h \
+    test_history_commit.h \
     test_shutdowncoordinator.h \
     test_healthmonitor.h \
     test_timeline.h \
     test_renames.h \
     $$PWD/../apppaths.h \
     $$PWD/../splitdialog.h \
+    $$PWD/../historyeditsession.h \
     $$PWD/../healthmonitor.h \
     $$PWD/../shutdowncoordinator.h \
     $$PWD/../timer.h \

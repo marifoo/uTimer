@@ -16,6 +16,7 @@ HEADERS = \
    $$PWD/splitdialog.h \
    $$PWD/logger.h \
    $$PWD/historydialog.h \
+   $$PWD/historyeditsession.h \
    $$PWD/timeline.h
 
 SOURCES = \
@@ -29,6 +30,7 @@ SOURCES = \
    $$PWD/lockstatewatcher.cpp \
    $$PWD/splitdialog.cpp \
    $$PWD/historydialog.cpp \
+   $$PWD/historyeditsession.cpp \
    $$PWD/settings.cpp \
    $$PWD/timeformat.cpp \
    $$PWD/logger.cpp \

@@ -18,6 +18,8 @@ class TimerTest;
 class DatabaseTest;
 class IntegrationTest;
 class HistoryDialogTest;
+class HistoryEditSessionTest;
+class HistoryCommitTest;
 class ShutdownCoordinatorTest;
 class HealthMonitorTest;
 class TimelineTest;
@@ -33,6 +35,8 @@ class RenamesTest;
 #include "test_database.h"
 #include "test_integration.h"
 #include "test_historydialog.h"
+#include "test_historyeditsession.h"
+#include "test_history_commit.h"
 #include "test_shutdowncoordinator.h"
 #include "test_healthmonitor.h"
 #include "test_timeline.h"
@@ -156,6 +160,8 @@ int main(int argc, char *argv[])
     runTest(new DatabaseTest, "DatabaseTest");
     runTest(new IntegrationTest, "IntegrationTest");
     runTest(new HistoryDialogTest, "HistoryDialogTest");
+    runTest(new HistoryEditSessionTest, "HistoryEditSessionTest");
+    runTest(new HistoryCommitTest, "HistoryCommitTest");
     runTest(new ShutdownCoordinatorTest, "ShutdownCoordinatorTest");
     runTest(new HealthMonitorTest, "HealthMonitorTest");
     runTest(new TimelineTest, "TimelineTest");
