@@ -40,7 +40,7 @@
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|Win32'" Label="QtSettings">
     <QtInstall>Qt 5.14.2 x86</QtInstall>
-    <QtModules>core;sql;testlib</QtModules>
+    <QtModules>core;gui;sql;testlib;widgets</QtModules>
     <QtBuildConfig>debug</QtBuildConfig>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|Win32'" Label="QtSettings">
@@ -101,21 +101,68 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <QtMoc Include="utimertest.cpp">
-      <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">input</DynamicSource>
-      <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">%(Filename).moc</QtMocFileName>
-      <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">input</DynamicSource>
-      <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">%(Filename).moc</QtMocFileName>
-    </QtMoc>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="testcommon.cpp" />
+    <ClCompile Include="fakesessionstore.cpp" />
+    <ClCompile Include="test_logger.cpp" />
+    <ClCompile Include="test_settings.cpp" />
+    <ClCompile Include="test_helpers.cpp" />
+    <ClCompile Include="test_lockstatewatcher.cpp" />
+    <ClCompile Include="test_cleanduration.cpp" />
+    <ClCompile Include="test_timer.cpp" />
+    <ClCompile Include="test_database.cpp" />
+    <ClCompile Include="test_integration.cpp" />
+    <ClCompile Include="test_historydialog.cpp" />
+    <ClCompile Include="test_shutdowncoordinator.cpp" />
+    <ClCompile Include="test_healthmonitor.cpp" />
+    <ClCompile Include="test_timeline.cpp" />
+    <ClCompile Include="test_renames.cpp" />
+    <ClCompile Include="..\healthmonitor.cpp" />
+    <ClCompile Include="..\splitdialog.cpp" />
+    <ClCompile Include="..\historydialog.cpp" />
+    <ClCompile Include="..\shutdowncoordinator.cpp" />
+    <ClCompile Include="..\timer.cpp" />
+    <ClCompile Include="..\lockstatewatcher.cpp" />
+    <ClCompile Include="..\sqlitesessionstore.cpp" />
+    <ClCompile Include="..\timeformat.cpp" />
+    <ClCompile Include="..\settings.cpp" />
+    <ClCompile Include="..\logger.cpp" />
+    <ClCompile Include="..\timeline.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="test_logger.h" />
+    <QtMoc Include="test_settings.h" />
+    <QtMoc Include="test_helpers.h" />
+    <QtMoc Include="test_lockstatewatcher.h" />
+    <QtMoc Include="test_cleanduration.h" />
+    <QtMoc Include="test_timer.h" />
+    <QtMoc Include="test_database.h" />
+    <QtMoc Include="test_integration.h" />
+    <QtMoc Include="test_historydialog.h" />
+    <QtMoc Include="test_shutdowncoordinator.h" />
+    <QtMoc Include="test_healthmonitor.h" />
+    <QtMoc Include="test_timeline.h" />
+    <QtMoc Include="test_renames.h" />
+    <QtMoc Include="..\healthmonitor.h" />
+    <QtMoc Include="..\splitdialog.h" />
+    <QtMoc Include="..\historydialog.h" />
+    <QtMoc Include="..\timer.h" />
+    <QtMoc Include="..\lockstatewatcher.h" />
+    <QtMoc Include="..\sqlitesessionstore.h" />
+    <ClInclude Include="testcommon.h" />
+    <ClInclude Include="fakeclock.h" />
+    <ClInclude Include="fakesessionstore.h" />
+    <ClInclude Include="..\apppaths.h" />
+    <ClInclude Include="..\sessionstore.h" />
+    <ClInclude Include="..\shutdowncoordinator.h" />
+    <ClInclude Include="..\timeformat.h" />
+    <ClInclude Include="..\settings.h" />
+    <ClInclude Include="..\logger.h" />
+    <ClInclude Include="..\types.h" />
+    <ClInclude Include="..\timeline.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="qtest.runsettings" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="..\helpers.cpp" />
-    <ClCompile Include="..\databasemanager.cpp" />
-    <ClCompile Include="..\settings.cpp" />
-    <ClCompile Include="..\logger.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

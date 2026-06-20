@@ -189,26 +189,36 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="contentwidget.cpp" />
-    <ClCompile Include="databasemanager.cpp" />
-    <ClCompile Include="helpers.cpp" />
+    <ClCompile Include="healthmonitor.cpp" />
     <ClCompile Include="historydialog.cpp" />
     <ClCompile Include="lockstatewatcher.cpp" />
     <ClCompile Include="logger.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="mainwin.cpp" />
     <ClCompile Include="settings.cpp" />
-    <ClCompile Include="timetracker.cpp" />
+    <ClCompile Include="shutdowncoordinator.cpp" />
+    <ClCompile Include="splitdialog.cpp" />
+    <ClCompile Include="sqlitesessionstore.cpp" />
+    <ClCompile Include="timeformat.cpp" />
+    <ClCompile Include="timeline.cpp" />
+    <ClCompile Include="timer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="contentwidget.h" />
-    <QtMoc Include="databasemanager.h" />
-    <ClInclude Include="helpers.h" />
-    <QtMoc Include="lockstatewatcher.h" />
+    <QtMoc Include="healthmonitor.h" />
     <QtMoc Include="historydialog.h" />
-    <ClInclude Include="logger.h" />
+    <QtMoc Include="lockstatewatcher.h" />
     <QtMoc Include="mainwin.h" />
+    <QtMoc Include="splitdialog.h" />
+    <QtMoc Include="sqlitesessionstore.h" />
+    <QtMoc Include="timer.h" />
+    <ClInclude Include="apppaths.h" />
+    <ClInclude Include="logger.h" />
+    <ClInclude Include="sessionstore.h" />
     <ClInclude Include="settings.h" />
-    <QtMoc Include="timetracker.h" />
+    <ClInclude Include="shutdowncoordinator.h" />
+    <ClInclude Include="timeformat.h" />
+    <ClInclude Include="timeline.h" />
     <ClInclude Include="types.h" />
   </ItemGroup>
   <ItemGroup>
