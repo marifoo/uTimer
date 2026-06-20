@@ -1187,6 +1187,50 @@ void TimerTest::test_E_boot_time_gate_entries_unknown_skips_boot_time()
     tracker.useTimerViaButton(Button::Stop);
 }
 
+void TimerTest::test_E_boot_time_inmemory_start_date_skips_boot_time()
+{
+    // Regression guard for #3: in-memory check uses startTime.date() (not endTime.date()).
+    // DB says No entries, but an in-memory completed cross-midnight segment with
+    // startTime == today (endTime == tomorrow) must block boot time from being added.
+    // Discriminating: reverting to endTime.date() would fail (endTime is tomorrow ≠ today).
+
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    QString settingsPath = createSettingsFile(tempDir.path(), 7);
+    QSettings writer(settingsPath, QSettings::IniFormat);
+    writer.setValue("uTimer/boot_time_seconds", 30);
+    writer.sync();
+
+    Settings settings(settingsPath);
+    FakeSessionStore fakeDb;
+    fakeDb.entriesForDateResult = EntriesForDateResult::No;
+    Timer tracker(settings, fakeDb);
+
+    // Pre-seed a cross-midnight completed segment: startTime is today, endTime is
+    // tomorrow. This is the discriminating case — if the production check used
+    // endTime.date() instead of startTime.date(), endTime (tomorrow) != today,
+    // the check would miss, and boot time would be added (test would FAIL).
+    QDateTime now = QDateTime::currentDateTime();
+    QDateTime startToday = QDateTime(now.date(), QTime(23, 0, 0));
+    QDateTime endTomorrow = startToday.addSecs(3600); // crosses midnight
+    tracker.session_.durations.push_back(
+        TimeDuration::fromTrusted(DurationType::Activity, startToday, endTomorrow));
+
+    // Act: start the timer (DB says No, but in-memory entry exists for today)
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+
+    // Assert: boot time was NOT added (in-memory start-date check fired).
+    qint64 totalActivity = 0;
+    for (const auto& d : tracker.session_.durations)
+        if (d.type == DurationType::Activity && d.duration >= 25000)
+            totalActivity += d.duration;
+    QVERIFY2(totalActivity < 29000,
+             "Boot time must not be added when in-memory entry has startTime == today");
+
+    tracker.useTimerViaButton(Button::Stop);
+}
+
 // ============================================================================
 // Phase 4 test gate — Test X
 // ============================================================================

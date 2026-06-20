@@ -124,7 +124,7 @@ public:
     virtual SessionStoreResult commitSession(const Timeline& session) = 0;
     virtual bool replaceAll(const Timeline& history, const Timeline& session) = 0;
     virtual LoadResult loadDurations() = 0;
-    // Returns Yes iff at least one finalised row's end falls on `localDate`
+    // Returns Yes iff at least one finalised row's start falls on `localDate`
     // interpreted in the system local time zone.
     virtual EntriesForDateResult hasEntriesForDate(const QDate& localDate) = 0;
     /// @pre segmentId must be non-empty

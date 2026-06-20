@@ -499,7 +499,7 @@ void Timer::startTimer(const QDateTime& now)
             QDate today = now.date();
             bool hasEntriesInMemory = false;
             for (const auto &d : session_.durations) {
-                if (d.endTime.date() == today) {
+                if (d.startTime.date() == today) {
                     hasEntriesInMemory = true;
                     break;
                 }
