@@ -995,9 +995,25 @@ void HistoryDialogTest::test_saveChanges_deduplicates_cross_bucket_overlaps()
         QCOMPARE(savedStart.toUTC().time(), QTime(10, 0, 0));
         QCOMPARE(savedEnd.toUTC().time(), QTime(10, 45, 0));
 
+        // The merged row absorbed current-session time, so it must be written as unfinalized
+        // (current-session) in the DB — accepted side effect documented in plan01.md #6.
+        QSqlQuery unfinalizedQuery(sqlDb);
+        QVERIFY(unfinalizedQuery.exec("SELECT COUNT(*) FROM durations WHERE is_finalized = 0 AND type = " +
+            QString::number(static_cast<int>(DurationType::Activity))));
+        QVERIFY(unfinalizedQuery.next());
+        QCOMPARE(unfinalizedQuery.value(0).toInt(), 1);
+
         sqlDb.close();
     }
     QSqlDatabase::removeDatabase(connName);
+
+    // The merged 10:00-10:45 row must be retained in the live session after save.
+    // Before fix #6: session loses the row entirely (bug — current-session time drops to 0).
+    // After fix #6: session contains exactly the merged row (inflated from 30 min to 45 min).
+    QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(1));
+    QCOMPARE(tracker.session_.durations[0].type, DurationType::Activity);
+    QCOMPARE(tracker.session_.durations[0].startTime.toUTC().time(), QTime(10, 0, 0));
+    QCOMPARE(tracker.session_.durations[0].endTime.toUTC().time(), QTime(10, 45, 0));
 }
 
 void HistoryDialogTest::test_saveChanges_noop_save_unchanged()

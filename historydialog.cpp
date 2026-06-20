@@ -577,6 +577,16 @@ void HistoryDialog::saveChanges()
             ongoingDurationForSave = pendingTimelines_[i].ongoing();
     }
 
+    // Capture memory-origin intervals before normalization so we can re-route merged rows
+    // that absorbed current-session time back into the live session (fix for #6).
+    struct OriginInterval { DurationType type; QDateTime start, end; };
+    std::vector<OriginInterval> memoryIntervals;
+    for (const auto& d : unifiedCompleted) {
+        auto it = originIsMemory_.find(d.segment_id.toString());
+        if (it != originIsMemory_.end() && it.value())
+            memoryIntervals.push_back({d.type, d.startTime, d.endTime});
+    }
+
     // Step B: Normalize once across all buckets; confirm if merges will occur (H4).
     // Cross-midnight rows are not included in normalization (Timeline rejects them);
     // they are preserved as-is and appended after normalization.
@@ -597,10 +607,19 @@ void HistoryDialog::saveChanges()
     std::deque<TimeDuration> currentSessionDurations;
 
     for (const auto& d : normalised.completed()) {
-        auto it = originIsMemory_.find(d.segment_id.toString());
-        // normalized() only carries existing segment_ids forward — this should never fire.
-        Q_ASSERT(it != originIsMemory_.end());
-        const bool isMemory = (it == originIsMemory_.end()) ? true : it.value();
+        auto idIt = originIsMemory_.find(d.segment_id.toString());
+        Q_ASSERT(idIt != originIsMemory_.end());
+        bool isMemory = (idIt != originIsMemory_.end()) && idIt.value();
+        if (!isMemory) {
+            // The surviving id is a history id, but the merged span may have absorbed a
+            // current-session row. Keep it in the live session if it covers one.
+            for (const auto& m : memoryIntervals) {
+                if (m.type == d.type && m.start < d.endTime && d.startTime < m.end) {
+                    isMemory = true;
+                    break;
+                }
+            }
+        }
         if (isMemory) {
             currentMemoryDurations.push_back(d);
             currentSessionDurations.push_back(d);
