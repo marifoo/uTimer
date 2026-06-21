@@ -10,6 +10,8 @@ class LockStateWatcherTest : public QObject
 
 private slots:
     void test_lockstatewatcher_debounce_logic();
+    // 9.5: Unknown query result must not change the debounce buffer
+    void test_lockstatewatcher_unknown_does_not_unlock();
 };
 
 #endif // TEST_LOCKSTATEWATCHER_H

@@ -61,6 +61,8 @@ private slots:
     void test_addduration_appends_single_same_day_segment();
     void test_addduration_discards_cross_midnight_segment();
     void test_addduration_discards_zero_and_negative_duration();
+    // 9.1: all three DurationCreateError causes discard the segment
+    void test_addduration_discards_invalid_timestamp();
 
     void test_isOngoingSegmentCrossMidnight_returns_false_when_stopped();
     void test_isOngoingSegmentCrossMidnight_returns_false_for_same_day();
@@ -79,45 +81,49 @@ private slots:
 
     void test_getOngoingDuration_returns_nullopt_when_cross_midnight();
 
-    // Phase 1 test gate (T1)
-    // Test D: regression guard — exercises all remaining public methods.
+    // Timer public surface regression guard and initializeFromStore tests
     void test_D_timetracker_public_surface_regression();
-    // Test E: boot-time gate via FakeSessionStore for each tri-state result.
+    // Boot-time gate via FakeSessionStore for each tri-state hasEntriesForDate result.
     void test_E_boot_time_gate_entries_yes_skips_boot_time();
     void test_E_boot_time_gate_entries_no_adds_boot_time();
     void test_E_boot_time_gate_entries_unknown_skips_boot_time();
-    // #3 regression guard: in-memory check uses startTime (not endTime).
+    // In-memory boot-time check uses startTime (not endTime) — same-day guard.
     void test_E_boot_time_inmemory_start_date_skips_boot_time();
 
-    // Phase 4 test gate (T4)
-    // Test X: stop persists state via commitSession only.
+    // Stop persists state via commitSession only (no direct DB write methods).
     void test_X_stop_persists_via_commitSession_only();
 
-    // Issue 3 / Issue 8: dialog-open suspension tests
+    // beginExclusiveEdit suspends mutations while dialog is open
     void test_dialog_open_blocks_backpause();
     void test_dialog_open_defers_midnight_stop();
     void test_dialog_open_allows_lock_bookkeeping();
 
-    // Step 4: T1+T9 — Pause-merge removal tests
+    // Unpause creates a new Pause segment with a fresh id (no segment reuse)
     void test_T1_unpause_creates_new_pause_segment_with_fresh_id();
     void test_T9_new_activity_segment_after_unpause_has_activity_type();
 
-    // Step 4: T10 — autopause flag cleared in startTimer
+    // Autopause flag cleared in startTimer
     void test_T10_was_active_cleared_on_start_from_none();
     void test_T10_was_active_cleared_on_start_from_pause();
 
-    // Step 4: T8 — destructor ordering (crash-absence smoke test)
+    // Destructor ordering: crash-absence smoke test
     void test_T8_destructor_does_not_crash_while_active();
 
-    // Step 5: C6 + T2 — beginExclusiveEdit/endExclusiveEdit + checkpoint guard
+    // beginExclusiveEdit/endExclusiveEdit checkpoint guard
     void test_T2_replaceCurrentDurations_skips_checkpoint_while_dialog_open();
     void test_C6_replaceCurrentDurations_writes_checkpoint_after_endExclusiveEdit();
 
-    // Step 8: S12 — MarkerResult::Error skips orphan reconciliation
+    // MarkerResult::Error skips orphan reconciliation
     void test_S12_marker_error_skips_reconciliation();
 
-    // Issue #1: commit of an ongoing type edit aligns mode_
+    // Commit of an ongoing type edit aligns mode_
     void test_commit_ongoing_type_edit_changes_mode();
+    // commitEditedTimeline returns success and aligns mode_ with edited ongoing type
+    void test_commitEditedTimeline_mode_aligns_with_edited_ongoing_type();
+
+    // Disabled history is a no-op, not a save/checkpoint failure
+    void test_disabled_history_stop_keeps_clean_state_no_warning();
+    void test_disabled_history_commitEditedTimeline_succeeds();
 
     // QF1: signal contract — started/paused/modeChanged emit counts
     void test_QF1_explicit_pause_emits_paused_not_modeChanged();

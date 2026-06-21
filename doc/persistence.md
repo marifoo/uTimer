@@ -3,9 +3,12 @@
 µTimer stores its history in a single SQLite file, `uTimer.sqlite`, that
 lives next to the binary. There is no server, no migration tooling, and no
 external client — `SqliteSessionStore` is the only thing that reads or
-writes it. The schema is versioned via column presence and checked at
-startup; if it does not match, the application refuses to start and asks the
-user to delete or rename the file.
+writes it. The schema is checked at startup via `checkSchemaOnStartup()`,
+which returns a `SchemaStatus` enum (`Ready`, `Created`, `Outdated`, or
+`Inaccessible`). If the result is `Outdated` or `Inaccessible`, the
+application refuses to start and asks the user to delete or rename the file.
+Only on `Ready` or `Created` does `main.cpp` call `Timer::initializeFromStore()`
+to consume the clean-shutdown marker and reconcile orphan checkpoints.
 
 This document is the storage model. For the seam it sits behind, see the
 `SessionStore` section in `architecture.md`.

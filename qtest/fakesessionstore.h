@@ -1,16 +1,21 @@
 /**
- * FakeSessionStore -- in-memory test double for SessionStore.
+ * FakeSessionStore -- spy test double for SessionStore.
  *
- * Records every call made to it so tests can assert which operations were
- * performed and in what order.  Return values are configurable per-method
- * so tests can simulate failures.  Data is stored in-memory (no SQLite).
+ * Records every call made to it (callLog) so tests can assert which
+ * operations were performed and in what order.  Stores raw segments passed
+ * to commitSession/replaceAll for inspection.  Return values are
+ * configurable per-method to simulate failures.
+ *
+ * Intentionally contains NO normalization, upsert, overlap, or reconcile
+ * policy — those behaviors are verified against the real SqliteSessionStore
+ * in test_persistence_contract.cpp.
  *
  * Typical usage:
  *     FakeSessionStore fakeDb;
  *     Timer tracker(settings, fakeDb);
  *     // ... exercise tracker ...
  *     QCOMPARE(fakeDb.callLog.count("saveCheckpoint"), 1);
- *     QCOMPARE(fakeDb.storedDurations.size(), 3);
+ *     QVERIFY(fakeDb.callLog.contains("commitSession"));
  */
 
 #ifndef FAKESESSIONSTORE_H
@@ -21,7 +26,6 @@
 #include <QSet>
 #include <QStringList>
 #include <deque>
-#include <optional>
 #include <vector>
 
 class FakeSessionStore : public SessionStore
@@ -33,23 +37,19 @@ public:
     // ---- SessionStore interface ----
 
     SessionStoreResult commitSession(const Timeline& session) override;
-    bool replaceAll(const Timeline& history, const Timeline& session) override;
+    SessionStoreResult replaceAll(const Timeline& history, const Timeline& session) override;
     LoadResult loadDurations() override;
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
     SessionStoreResult saveCheckpoint(DurationType type, const QDateTime& startTime,
                                       const QDateTime& endTime, const SegmentId& segmentId) override;
-    bool checkSchemaOnStartup() override;
-    void flushToDisc() override;
-    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
-    bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc);
-    ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
-                                                   const std::vector<long long>& outrightDropIds) override;
-    bool setLastCleanShutdownMarker(const QDateTime& timestamp) override;
-    std::optional<MarkerResult> consumeLastCleanShutdownMarker() override;
+    SchemaStatus checkSchemaOnStartup() override;
+    SessionStoreResult flushToDisc() override;
+    SessionStoreResult setLastCleanShutdownMarker(const QDateTime& timestamp) override;
+    StartupRecoveryResult recoverStartupCheckpoints(const QDateTime& now) override;
 
     // ---- Call log (for assertions) ----
 
-    /// Ordered log of method names invoked, e.g. "saveDurations", "saveCheckpoint".
+    /// Ordered log of method names invoked, e.g. "saveCheckpoint".
     QStringList callLog;
 
     // ---- In-memory data store ----
@@ -69,28 +69,25 @@ public:
     // ---- Configurable return values ----
 
     SessionStoreResult commitSessionResult = SessionStoreResult::success();
-    bool replaceDurationsResult = true;
+    SessionStoreResult replaceDurationsResult = SessionStoreResult::success();
     SessionStoreResult saveCheckpointResult = SessionStoreResult::success();
-    bool checkSchemaResult = true;
-    bool reconcileResult = true;
-    bool setMarkerResult = true;
+    SchemaStatus checkSchemaResult = SchemaStatus::Ready;
+    SessionStoreResult setMarkerResult = SessionStoreResult::success();
+    SessionStoreResult flushToDiscResult = SessionStoreResult::success();
 
-    /// Set of segment_ids that have been committed via commitSession().
-    /// Used to enforce UNIQUE(segment_id): duplicate submissions Q_ASSERT-fail.
+    /// Set of segment_ids seen in commitSession() calls.
+    /// Populated on success for cross-path uniqueness checks in saveCheckpoint.
     QSet<QString> committedSegmentIds;
 
     /// Pre-loaded durations returned by loadDurations(). Tests populate this.
     LoadResult loadDurationsResult;
 
-    /// Pre-loaded orphans returned by loadUnfinalizedCheckpoints().
-    std::deque<OrphanCheckpoint> orphanCheckpoints;
-
     /// Result returned by hasEntriesForDate(). Default: No entries.
     EntriesForDateResult entriesForDateResult = EntriesForDateResult::No;
 
-    /// Marker returned (once) by consumeLastCleanShutdownMarker().
-    /// Default is NotFound so Timer::reconcileOrphanCheckpoints() runs normally.
-    std::optional<MarkerResult> cleanShutdownMarker = MarkerResult { {}, MarkerResult::Status::NotFound };
+    /// Result returned by recoverStartupCheckpoints().
+    /// Default: success with zero recovery and no notification.
+    StartupRecoveryResult startupRecoveryResult;
 };
 
 #endif // FAKESESSIONSTORE_H

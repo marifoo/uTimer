@@ -11,7 +11,6 @@
 #include <deque>
 #include <memory>
 #include <utility>
-#include <vector>
 #include "settings.h"
 #include "types.h"
 #include "sessionstore.h"
@@ -112,8 +111,10 @@ public:
         LockResume,    ///< Desktop unlocked and timer was auto-resumed.
     };
 
-private:
+public:
     enum class Mode {Activity, Pause, None};
+
+private:
 
     /**
      * DayBoundaryWatcher — owns the 23:59:59.500 single-shot QTimer and the
@@ -190,10 +191,18 @@ private:
     // Retries saving previously unsaved durations at the start of a new session.
     // Returns true if startTimer should continue, false if it should abort.
     bool retryUnsavedDurations();
-    qint64 reconcileOrphanCheckpoints(
-        const std::deque<OrphanCheckpoint>& orphans,
-        const std::optional<MarkerResult>& markerResult);
-    void maybeReanchorCheckpoint(const TimeDuration& seg);
+    bool maybeReanchorCheckpoint(const TimeDuration& seg);
+    /// Locked variant of getOngoingDuration() for callers that already hold mutex_.
+    std::optional<TimeDuration> getOngoingDuration_locked() const;
+    /// Appends session_.durations to the DB. Returns true on success.
+    bool appendDurationsToDB();
+    /// Rewrites all completed segments to the DB. Returns true on success.
+    bool updateDurationsInDB();
+    void replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
+                                 const std::optional<TimeDuration>& ongoing = std::nullopt);
+    // Atomically replaces the live session with `edited`. Delegates to
+    // commitEditedTimeline; use commitEditedTimeline directly from outside Timer.
+    void commit(const Timeline& edited);
 
 #ifndef QT_NO_DEBUG
     /// Debug-build state snapshot used by StateGuard to detect unlogged mutations.
@@ -241,8 +250,31 @@ public:
     bool isPaused() const  { QMutexLocker lk(&mutex_); return mode_ == Mode::Pause; }
     bool isStopped() const { QMutexLocker lk(&mutex_); return mode_ == Mode::None; }
 
+    /**
+     * Result returned by commitEditedTimeline().
+     *
+     *   ok == true  — all operations succeeded (durations replaced, mode aligned,
+     *                 checkpoint re-anchored if applicable).
+     *   ok == false — the checkpoint write after re-anchoring failed; durations
+     *                 are already replaced in memory but the checkpoint row may
+     *                 be stale.  The error is also logged and emitted as
+     *                 userWarning by the internal handler.
+     */
+    struct EditCommitResult {
+        bool ok;
+        QString message;
+        static EditCommitResult success() { return {true, {}}; }
+        static EditCommitResult failure(QString msg) { return {false, std::move(msg)}; }
+    };
+
     explicit Timer(const Settings & settings, SessionStore& db, QObject *parent = nullptr);
     ~Timer();
+
+    /// Consumes the clean-shutdown marker and reconciles orphan checkpoints.
+    /// Must be called once after checkSchemaOnStartup() returns Ready or Created,
+    /// and before the event loop starts.  The Timer constructor performs no
+    /// persistence side effects; this method is where recovery happens.
+    void initializeFromStore();
 
     qint64 getActiveTime() const;
     qint64 getPauseTime() const;
@@ -250,26 +282,33 @@ public:
     Timeline snapshot() const;
     /// Returns completed segments only (excludes ongoing). Use for checkpoint saves.
     Timeline getCurrentDurations() const;
-    void replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
-                                 const std::optional<TimeDuration>& ongoing = std::nullopt);
-    // Atomically replaces the live session with `edited`.
-    // Precondition: caller holds no Timer locks.
-    void commit(const Timeline& edited);
+    /**
+     * Atomically replaces the live session with `edited`, aligning mode_,
+     * re-anchoring checkpoint state, and deciding whether checkpoint writes
+     * are allowed.  Thread-safe; caller must hold no Timer locks.
+     *
+     * Owns internally:
+     *   - replacing completed segments and clearing the retry cache,
+     *   - adopting or clearing the ongoing segment,
+     *   - aligning mode_ with the edited ongoing segment type,
+     *   - re-anchoring checkpoint tracking (segment id, start time, DB row),
+     *   - deciding whether checkpoint writes are allowed (suspended while
+     *     dialog_open_ or is_locked_).
+     *
+     * Returns EditCommitResult::failure if the checkpoint write fails;
+     * success otherwise.
+     */
+    EditCommitResult commitEditedTimeline(const Timeline& edited);
     std::deque<TimeDuration> getDurationsHistory();
     std::pair<int, int> getLastHistoryLoadStats() const;
     std::optional<TimeDuration> getOngoingDuration() const;
-    /// Locked variant for callers that already hold mutex_ (e.g. snapshot()).
-    /// Body is identical to getOngoingDuration() without re-acquiring the lock.
-    std::optional<TimeDuration> getOngoingDuration_locked() const;
     // Cheap thread-safe predicate used by the MainWin watchdog. Returns true
     // iff there is an ongoing segment whose start date is earlier than today.
     bool isOngoingSegmentCrossMidnight() const;
     qint64 getStartupRecoveredSeconds() const;
     bool shouldShowStartupRecoveryNotification() const;
     void setDurationType(size_t idx, DurationType type);
-    bool appendDurationsToDB();
-    bool updateDurationsInDB();
-    bool replaceAll(const Timeline& history, const Timeline& session);
+    SessionStoreResult replaceAll(const Timeline& history, const Timeline& session);
     /// Freezes checkpoints and defers midnight/lock events. Call before opening HistoryDialog.
     void beginExclusiveEdit();
     /// Resumes checkpoints and replays deferred events. Call after closing HistoryDialog.
@@ -311,6 +350,67 @@ signals:
 
 private slots:
     void saveCheckpoint();  // Periodic checkpoint saving every 5 minutes
+
+#ifndef QT_NO_DEBUG
+public:
+    // ---- Debug-build test probes ----
+    // Narrow accessors for white-box tests. NOT compiled in release builds.
+
+    /// Direct access to the SessionState for test setup and assertions.
+    SessionState& sessionState_dbg() { return session_; }
+    const SessionState& sessionState_dbg() const { return session_; }
+
+    /// Expose frequently-checked flags for test assertions.
+    bool isDialogOpen_dbg() const { return dialog_open_; }
+    bool isLocked_dbg() const { return is_locked_; }
+    bool isAutopausePendingResume_dbg() const { return autopause_pending_resume_; }
+    void setAutopausePendingResume_dbg(bool v) { autopause_pending_resume_ = v; }
+
+    /// Forces the engine into a specific mode without transition logic.
+    /// Use only in tests that need to arrange a pre-condition state.
+    void forceMode_dbg(Mode m) { mode_ = m; }
+
+    /// Expose the QElapsedTimer so tests can reset it to control elapsed time.
+    QElapsedTimer& elapsedTimer_dbg() { return timer_; }
+
+    /// Exposes the internal checkpoint-save path for direct testing.
+    void saveCheckpointInternal_dbg(const QDateTime& now) { saveCheckpointInternal(now); }
+
+    /// Exposes the backpause path for direct testing.
+    void backpauseTimer_dbg(const QDateTime& now) { backpauseTimer(now); }
+
+    /// Exposes the addDuration path for direct testing.
+    void addDuration_dbg(DurationType type, const QDateTime& start, const QDateTime& end) {
+        addDuration(type, start, end);
+    }
+
+    /// Returns whether the periodic checkpoint QTimer is currently running.
+    bool isCheckpointTimerActive_dbg() const { return checkpointTimer_.isActive(); }
+
+    /// Exposes the pending deferred lock event (set while dialog_open_).
+    LockEvent pendingLockEvent_dbg() const { return pending_lock_event_; }
+    void setPendingMidnightStop_dbg(bool v) { pending_midnight_stop_ = v; }
+    bool pendingMidnightStop_dbg() const { return pending_midnight_stop_; }
+
+    /// Triggers the periodic checkpoint slot directly (bypasses timer interval).
+    void triggerCheckpoint_dbg() { saveCheckpoint(); }
+
+    /// Calls the internal cross-midnight discard helper directly.
+    bool discardCrossMidnightOngoingAndStop_dbg(const QDateTime& now) {
+        return discardCrossMidnightOngoingAndStop(now);
+    }
+
+    /// Exposes the DayBoundaryWatcher for test control of the scheduled-stop timer.
+    DayBoundaryWatcher& dayBoundaryWatcher_dbg() { return day_boundary_watcher_; }
+
+    /// Exposes the internal DB-write helpers for the regression surface test.
+    bool appendDurationsToDB_dbg() { return appendDurationsToDB(); }
+    bool updateDurationsInDB_dbg() { return updateDurationsInDB(); }
+    void replaceCurrentDurations_dbg(const std::deque<TimeDuration>& d,
+                                     const std::optional<TimeDuration>& o = std::nullopt) {
+        replaceCurrentDurations(d, o);
+    }
+#endif // QT_NO_DEBUG
 };
 
 Q_DECLARE_METATYPE(Timer::StopReason)

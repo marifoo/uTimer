@@ -5,7 +5,7 @@
 #include <QStringList>
 
 /**
- * RenamesTest — checks that Phase 6 renames are not accidentally reverted.
+ * RenamesTest — checks that old class names are not accidentally reintroduced.
  *
  * Reads production headers and asserts the old class names are absent.
  * Catches accidental reintroduction during merges or cherry-picks.

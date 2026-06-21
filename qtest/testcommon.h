@@ -15,14 +15,9 @@
 #include <QTemporaryDir>
 #include <QtDebug>
 
-// Expose private members for testing
-#define private public
-#define protected public
 #include "timer.h"
 #include "lockstatewatcher.h"
 #include "sqlitesessionstore.h"
-#undef private
-#undef protected
 
 #include "settings.h"
 #include "timeline.h"

@@ -6,7 +6,7 @@
  * - Global event handling (Shutdown, Sleep/Wake)
  * - User warning system (Health checks for too much work / no pause)
  *
- * Day-boundary policy (Phase 5): owned by Timer::DayBoundaryWatcher.
+ * Day-boundary policy: owned by Timer::DayBoundaryWatcher.
  * MainWin only syncs the GUI when it observes the engine has stopped.
  */
 
@@ -191,24 +191,25 @@ void MainWin::start()
  * 2. Waits for events to process (ensures DB writes complete)
  * 3. Handles both graceful (Quit) and forced (System Shutdown) paths
  *
- * @param force_direct If true, bypasses the event loop (needed for Windows WM_ENDSESSION)
+ * @param mode DrainEvents for normal quit; Direct for OS-restricted paths
+ *             (Windows WM_QUERYENDSESSION / WM_ENDSESSION).
  */
-void MainWin::shutdown(bool force_direct)
+void MainWin::shutdown(ShutdownMode mode)
 {
-	shutdown_coordinator_.run(force_direct);
+	shutdown_coordinator_.run(mode);
 }
 
 void MainWin::onAboutToQuit()
 {
 	Logger::Log("[TIMER] AboutToQuit received");
-	shutdown(false);
+	shutdown(ShutdownMode::DrainEvents);
 }
 
 void MainWin::closeEvent(QCloseEvent *event)
 {
 	Logger::Log("[TIMER] CloseEvent received");
 	// Handle manual window closing (Alt+F4, X button, etc.)
-	shutdown(false);
+	shutdown(ShutdownMode::DrainEvents);
 	event->accept();
 }
 
@@ -222,8 +223,8 @@ bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* mes
 
 		// Windows is asking if we can shutdown
 		// Best practice: start saving NOW to have more time before WM_ENDSESSION
-		// Use force_direct=true since event loop may be restricted during shutdown
-		shutdown(true);
+		// Use Direct mode since the OS event loop is restricted during shutdown.
+		shutdown(ShutdownMode::Direct);
 
 		*result = TRUE;
 		return true;
@@ -238,7 +239,7 @@ bool MainWin::nativeEvent([[maybe_unused]]const QByteArray& eventType, void* mes
 		if (session_ending) {
 			// Windows is actually shutting down - ensure timer is stopped
 			// shutdown() guard will skip if already done in WM_QUERYENDSESSION
-			shutdown(true);
+			shutdown(ShutdownMode::Direct);
 		}
 		// If session_ending is false, shutdown was cancelled - nothing to do
 		// (data was already saved in WM_QUERYENDSESSION, which is fine)

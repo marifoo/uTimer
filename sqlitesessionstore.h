@@ -6,8 +6,8 @@
 #include <QDateTime>
 #include <QMutex>
 #include <deque>
-#include <vector>
 #include <optional>
+#include <vector>
 #include "types.h"
 #include "settings.h"
 #include "sessionstore.h"
@@ -41,18 +41,14 @@ public:
     ~SqliteSessionStore();
 
     SessionStoreResult commitSession(const Timeline& session) override;
-    bool replaceAll(const Timeline& history, const Timeline& session) override;
+    SessionStoreResult replaceAll(const Timeline& history, const Timeline& session) override;
     LoadResult loadDurations() override;
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
     SessionStoreResult saveCheckpoint(DurationType type, const QDateTime& startTime, const QDateTime& endTime, const SegmentId& segmentId) override;
-    bool checkSchemaOnStartup() override;
-    void flushToDisc() override;
-    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints() override;
-    bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc);
-    ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
-                                                   const std::vector<long long>& outrightDropIds) override;
-    bool setLastCleanShutdownMarker(const QDateTime& timestamp) override;
-    std::optional<MarkerResult> consumeLastCleanShutdownMarker() override;
+    SchemaStatus checkSchemaOnStartup() override;
+    SessionStoreResult flushToDisc() override;
+    SessionStoreResult setLastCleanShutdownMarker(const QDateTime& timestamp) override;
+    StartupRecoveryResult recoverStartupCheckpoints(const QDateTime& now) override;
 
     // Non-virtual helpers kept for test seeding and internal use.
     // No longer part of SessionStore — callers that previously used the
@@ -63,8 +59,29 @@ public:
                                            const std::vector<QString>& removedSegmentIds = {});
 
 private:
+    // Private types used by startup recovery helpers.
+    struct OrphanCheckpoint {
+        long long id = -1;
+        SegmentId segment_id;
+        DurationType type = DurationType::Activity;
+        qint64 duration = 0;
+        QDateTime startTime;
+        QDateTime endTime;
+    };
+    struct ReconcileResult {
+        std::vector<long long> finalized;
+        std::vector<long long> dropped;
+        bool ok = true;
+    };
+    struct MarkerResult {
+        enum class Status { Found, NotFound, Error };
+        QDateTime timestamp;  // valid only when status == Found
+        Status status = Status::NotFound;
+    };
+
     QSqlDatabase db;
     uint history_days_to_keep_;
+    bool db_was_fresh_;  // true if the DB file did not exist when the connection was first opened
 
     // Guards all public entry points so that no two operations can interleave.
     // This is particularly important for createBackup(), which closes and
@@ -83,13 +100,52 @@ private:
     void pruneOldBackups(int keepCount = 5);
     bool insertRows(QSqlQuery& query, const std::deque<TimeDuration>& rows);
 
+    // Startup recovery helpers (implementation details of recoverStartupCheckpoints).
+    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints();
+    bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc);
+    ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
+                                                    const std::vector<long long>& outrightDropIds);
+    std::optional<MarkerResult> consumeLastCleanShutdownMarker();
+
 #ifndef QT_NO_DEBUG
     /// Debug-build verification: checks that no segment_id appears more than
     /// once in the durations table.  Called after every successful write
     /// operation.  Violations are logged via qWarning (not fatal).
     /// The database must be open when this is called.
     void checkSegmentIdUniqueness();
-#endif
+
+public:
+    // ---- Debug-build test probes ----
+    // Expose internal DB connection management for test seeding via raw SQL.
+    // NOT compiled in release builds.
+
+    /// Opens (or reopens) the database connection. Returns true on success.
+    /// Exposed for tests that need to seed the DB via rawDb_dbg() directly.
+    bool ensureOpen_dbg() { return ensureOpen(); }
+
+    /// Closes the database connection (lazy: happens at next open).
+    /// Call after raw SQL seeding to release the connection for the next open.
+    void lazyClose_dbg() { lazyClose(); }
+
+    /// Returns the raw QSqlDatabase handle for test-only SQL seeding.
+    /// The connection must be open (call ensureOpen_dbg() first).
+    QSqlDatabase& rawDb_dbg() { return db; }
+
+    /// Exposes private types and methods for white-box tests of recovery internals.
+    using OrphanCheckpoint_dbg = OrphanCheckpoint;
+    using ReconcileResult_dbg  = ReconcileResult;
+    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints_dbg() { return loadUnfinalizedCheckpoints(); }
+    bool finalizeIfNoOverlap_dbg(qint64 rowId, const QDateTime& s, const QDateTime& e) {
+        return finalizeIfNoOverlap(rowId, s, e);
+    }
+    ReconcileResult reconcileUnfinalizedCheckpoints_dbg(
+        const std::vector<OrphanCheckpoint>& toFinalize,
+        const std::vector<long long>& outrightDropIds)
+    {
+        return reconcileUnfinalizedCheckpoints(toFinalize, outrightDropIds);
+    }
+    QString dbConnectionName_dbg() const { return db.connectionName(); }
+#endif // QT_NO_DEBUG
 
 };
 

@@ -44,6 +44,12 @@ private:
 
     QRadioButton* activityPauseOption_;
     QRadioButton* pauseActivityOption_;
+
+#ifndef QT_NO_DEBUG
+public:
+    /// Debug-build probe: exposes the split-point slider for white-box tests.
+    QSlider* slider_dbg() const { return slider_; }
+#endif
 };
 
 #endif // SPLITDIALOG_H

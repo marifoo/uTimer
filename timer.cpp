@@ -32,14 +32,8 @@
 #include <QtDebug>
 #include <QDateTime>
 #include <QMutexLocker>
-#include <algorithm>
 #include <new>  // for std::bad_alloc
 #include "logger.h"
-
-namespace {
-constexpr qint64 kMinRecoverableOrphanDurationMs = 1000;
-constexpr qint64 kOrphanStaleAgeMs = 24LL * 60LL * 60LL * 1000LL;
-}
 
 // ============================================================================
 // DayBoundaryWatcher implementation
@@ -372,15 +366,16 @@ Timer::Timer(const Settings &settings, SessionStore& db, QObject *parent)
         Logger::Log("[CHECKPOINT] Checkpoints disabled (interval = 0)");
     }
 
-    const std::optional<MarkerResult> markerResult = db_.consumeLastCleanShutdownMarker();
-    if (markerResult.has_value() && markerResult->status == MarkerResult::Status::Error) {
-        // DB state is unknown after a transaction failure — do not reconcile orphans
-        // to avoid finalising rows that may conflict with in-progress data.
-        Logger::Log("[TIMER] consumeLastCleanShutdownMarker failed — skipping orphan reconciliation");
-    } else {
-        // When markerResult is nullopt (history disabled), loadUnfinalizedCheckpoints()
-        // also returns empty (ensureOpen returns false), so reconciliation is harmless.
-        startup_recovered_seconds_ = reconcileOrphanCheckpoints(db_.loadUnfinalizedCheckpoints(), markerResult);
+    // No persistence side effects in the constructor.
+    // Call initializeFromStore() after checkSchemaOnStartup() returns Ready/Created.
+}
+
+void Timer::initializeFromStore()
+{
+    const StartupRecoveryResult recovery = db_.recoverStartupCheckpoints(QDateTime::currentDateTime());
+    if (recovery.ok) {
+        startup_recovered_seconds_ = recovery.recovered_seconds;
+        startup_recovery_notification_needed_ = recovery.notify_user;
     }
 }
 
@@ -413,7 +408,8 @@ bool Timer::retryUnsavedDurations()
 
     Logger::Log("[DB] Retrying save of previously unsaved durations");
     const SessionStoreResult retryResult = appendDurationsChunkToDB(retry_source);
-    if (retryResult.ok()) {
+    if (retryResult.okOrDisabled()) {
+        // Disabled history is a no-op, not a retry failure.
         session_.clearUnsaved();
         session_.consecutive_retry_failures = 0;
         Logger::Log("[DB] Previously unsaved durations saved successfully");
@@ -886,49 +882,56 @@ void Timer::setDurationType(size_t idx, DurationType type)
  *                      tracking state is left unchanged (appropriate when the timer
  *                      is stopped and there is no ongoing segment).
  */
-void Timer::maybeReanchorCheckpoint(const TimeDuration& seg)
+bool Timer::maybeReanchorCheckpoint(const TimeDuration& seg)
 {
     if (checkpoint_interval_msec_ == 0 || mode_ != Mode::Activity || seg.type != DurationType::Activity)
-        return;
+        return true;
     if (seg.duration <= 0 || !seg.startTime.isValid() || !seg.endTime.isValid())
-        return;
+        return true;
     if (dialog_open_ || is_locked_)
-        return;
+        return true;
 
     const SessionStoreResult cpResult = db_.saveCheckpoint(seg.type,
                                                            seg.startTime,
                                                            seg.endTime,
                                                            session_.segment_id);
-    if (cpResult.ok()) {
-        // success — nothing to do
+    if (cpResult.okOrDisabled()) {
+        // Disabled history is a no-op, not a checkpoint write failure.
+        return true;
     } else if (cpResult.category == SessionStoreResult::CallerBug) {
         Logger::Log("[CHECKPOINT] replaceCurrentDurations: saveCheckpoint caller bug: " + cpResult.message);
+        return false;
     } else if (cpResult.category == SessionStoreResult::FatalError) {
         Logger::Log("[CHECKPOINT] replaceCurrentDurations: Fatal DB error saving checkpoint: " + cpResult.message);
         emit userWarning("Database error while saving checkpoint: " + cpResult.message);
+        return false;
     } else {
         Logger::Log("[CHECKPOINT] replaceCurrentDurations: saveCheckpoint failed: " + cpResult.message);
+        return false;
     }
 }
 
-void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
-                                          const std::optional<TimeDuration>& ongoing)
+Timer::EditCommitResult Timer::commitEditedTimeline(const Timeline& edited)
 {
     QMutexLocker locker(&mutex_);
 #ifndef QT_NO_DEBUG
-    StateGuard guard(*this, "replaceCurrentDurations");
+    StateGuard guard(*this, "commitEditedTimeline");
     guard.markTransitioned(); // Intentionally replaces durations
 #endif
+    const std::deque<TimeDuration>& newDurations = edited.completed();
+    const std::optional<TimeDuration>& ongoing = edited.ongoing();
+
     session_.durations = newDurations;
     session_.clearUnsaved();
 
+    bool checkpointOk = true;
     if (ongoing.has_value()) {
         const TimeDuration& seg = ongoing.value();
         session_.adoptOngoingSegment(seg);
 
-        // Honour an edited ongoing type: align mode_ with the committed segment so the
-        // live row and the next checkpoint/stop reflect the user's choice rather than
-        // the pre-edit mode. (adoptOngoingSegment intentionally ignores type.)
+        // Align mode_ with the edited ongoing segment type so the live row and
+        // the next checkpoint/stop reflect the user's choice rather than the
+        // pre-edit mode. (adoptOngoingSegment intentionally ignores type.)
         const Mode desired = (seg.type == DurationType::Activity) ? Mode::Activity : Mode::Pause;
         if (mode_ != Mode::None && mode_ != desired) {
             mode_ = desired;
@@ -941,17 +944,25 @@ void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations
             }
         }
 
-        maybeReanchorCheckpoint(seg);       // already keyed on mode_ == Activity
+        checkpointOk = maybeReanchorCheckpoint(seg);
     }
 
 #ifndef QT_NO_DEBUG
     checkDurationInvariants();
 #endif
+    return checkpointOk ? EditCommitResult::success()
+                        : EditCommitResult::failure("checkpoint write failed after edit commit");
+}
+
+void Timer::replaceCurrentDurations(const std::deque<TimeDuration>& newDurations,
+                                    const std::optional<TimeDuration>& ongoing)
+{
+    commitEditedTimeline(Timeline(newDurations, ongoing));
 }
 
 void Timer::commit(const Timeline& edited)
 {
-    replaceCurrentDurations(edited.completed(), edited.ongoing());
+    commitEditedTimeline(edited);
 }
 
 std::deque<TimeDuration> Timer::getDurationsHistory()
@@ -988,7 +999,7 @@ std::optional<TimeDuration> Timer::getOngoingDuration_locked() const
         return std::nullopt;
     }
     DurationType type = (mode_ == Mode::Activity) ? DurationType::Activity : DurationType::Pause;
-    return TimeDuration::fromTrusted(type, session_.segment_start_time, now, session_.segment_id);
+    return TimeDuration::fromLiveSession(type, session_.segment_start_time, now, session_.segment_id);
 }
 
 qint64 Timer::getStartupRecoveredSeconds() const
@@ -1024,7 +1035,8 @@ Timer::ShutdownResult Timer::shutdown()
 
 bool Timer::appendDurationsToDB()
 {
-    return appendDurationsChunkToDB(session_.durations).ok();
+    // Disabled history is a no-op, not a failure.
+    return appendDurationsChunkToDB(session_.durations).okOrDisabled();
 }
 
 void Timer::logDbResultOrWarn(const SessionStoreResult& result, const QString& context)
@@ -1057,7 +1069,9 @@ bool Timer::updateDurationsInDB()
     }
     const SessionStoreResult result = db_.commitSession(Timeline(session_.durations, std::nullopt));
     logDbResultOrWarn(result, "commitSession");
-    const bool ok = result.ok();
+    // Disabled history is a no-op, not a save failure: treat it as success so
+    // we don't retain bogus unsaved data or skip the clean-shutdown marker.
+    const bool ok = result.okOrDisabled();
 #ifndef QT_NO_DEBUG
     if (ok) {
         checkCrossLayerInvariants();
@@ -1066,15 +1080,15 @@ bool Timer::updateDurationsInDB()
     return ok;
 }
 
-bool Timer::replaceAll(const Timeline& history, const Timeline& session)
+SessionStoreResult Timer::replaceAll(const Timeline& history, const Timeline& session)
 {
     QMutexLocker locker(&mutex_);
-    const bool ok = db_.replaceAll(history, session);
-    if (ok) {
+    const SessionStoreResult result = db_.replaceAll(history, session);
+    if (result.okOrDisabled()) {
         // DB is now authoritative; stale retry cache must not survive past here.
         session_.clearUnsaved();
     }
-    return ok;
+    return result;
 }
 
 EntriesForDateResult Timer::hasEntriesForDate(const QDate& date)
@@ -1085,11 +1099,10 @@ EntriesForDateResult Timer::hasEntriesForDate(const QDate& date)
 /**
  * Appends a single same-day segment to session_.durations.
  *
- * Cross-midnight inputs are silently discarded (with a [MIDNIGHT] log line).
  * DayBoundaryWatcher's scheduled stop and watchdog prevent cross-midnight
- * inputs from reaching here; this discard is a last-line defence.
- *
- * Zero-duration and negative-duration inputs are also dropped.
+ * inputs from reaching here; this discard is a last-line defence.  Zero-
+ * and negative-duration inputs (e.g. start == end) are also dropped.
+ * Each rejection is logged with the specific reason.
  */
 void Timer::addDuration(DurationType type,
                               const QDateTime& startTime,
@@ -1098,9 +1111,25 @@ void Timer::addDuration(DurationType type,
 {
     auto seg = TimeDuration::create(type, startTime, endTime, segmentId);
     if (!seg.has_value()) {
-        Logger::Log(QString("[MIDNIGHT] Discarding cross-midnight segment: %1 → %2")
-            .arg(startTime.toString(Qt::ISODateWithMs))
-            .arg(endTime.toString(Qt::ISODateWithMs)));
+        switch (seg.error) {
+        case DurationCreateError::InvalidTimestamp:
+            Logger::Log(QString("[ADDURATION] Discarding segment with invalid timestamp: %1 → %2")
+                .arg(startTime.toString(Qt::ISODateWithMs))
+                .arg(endTime.toString(Qt::ISODateWithMs)));
+            break;
+        case DurationCreateError::NonPositive:
+            Logger::Log(QString("[ADDURATION] Discarding zero/negative-duration segment: %1 → %2")
+                .arg(startTime.toString(Qt::ISODateWithMs))
+                .arg(endTime.toString(Qt::ISODateWithMs)));
+            break;
+        case DurationCreateError::CrossMidnight:
+            Logger::Log(QString("[MIDNIGHT] Discarding cross-midnight segment: %1 → %2")
+                .arg(startTime.toString(Qt::ISODateWithMs))
+                .arg(endTime.toString(Qt::ISODateWithMs)));
+            break;
+        default:
+            break;
+        }
         return;
     }
     const qint64 dur = seg->duration;
@@ -1126,7 +1155,7 @@ bool Timer::isOngoingSegmentCrossMidnight() const
  * transition). Safe to call multiple times; only the first call does real work.
  *
  * Emits stopped(MidnightWatchdog). The GUI is updated via the stopped() signal
- * connection in MainWin (established in Phase 5).
+ * connection in MainWin.
  */
 bool Timer::discardCrossMidnightOngoingAndStop(const QDateTime& now)
 {
@@ -1152,7 +1181,7 @@ bool Timer::discardCrossMidnightOngoingAndStop(const QDateTime& now)
     }
 
     // Reuse stopTimer for teardown. The cross-midnight ongoing segment is
-    // silently discarded by addDuration (TimeDuration::create rejects it).
+    // discarded by addDuration (TimeDuration::create returns CrossMidnight).
     // durations is already empty (success path) or retained in unsaved buffer
     // (flush-failure path), so the updateDurationsInDB call inside stopTimer is a
     // no-op on success and a harmless retry on flush failure.
@@ -1247,81 +1276,3 @@ void Timer::endExclusiveEdit()
     }
 }
 
-qint64 Timer::reconcileOrphanCheckpoints(
-    const std::deque<OrphanCheckpoint>& orphans,
-    const std::optional<MarkerResult>& markerResult)
-{
-    startup_recovery_notification_needed_ = false;
-
-    if (orphans.empty()) {
-        return 0;
-    }
-
-    const QDateTime now = QDateTime::currentDateTime();
-    std::vector<OrphanCheckpoint> toFinalize;
-    std::vector<long long> dropIds;
-
-    for (const auto& orphan : orphans) {
-        const bool tooShort = orphan.duration < kMinRecoverableOrphanDurationMs;
-        const bool stale = orphan.endTime.isValid() && (orphan.endTime.msecsTo(now) > kOrphanStaleAgeMs);
-
-        if (tooShort || stale) {
-            dropIds.push_back(orphan.id);
-            continue;
-        }
-
-        toFinalize.push_back(orphan);
-    }
-
-    ReconcileResult reconcile = db_.reconcileUnfinalizedCheckpoints(toFinalize, dropIds);
-    if (!reconcile.ok) {
-        Logger::Log("[DB] Failed to reconcile orphan checkpoints");
-        return 0;
-    }
-
-    // The store atomically rejects orphans that overlap an existing finalised row.
-    // Only count seconds for rows the store actually finalised.
-    const std::vector<long long>& finalizeIds = reconcile.finalized;
-    qint64 recoveredSeconds = 0;
-    for (const auto& orphan : toFinalize) {
-        if (std::find(finalizeIds.begin(), finalizeIds.end(), orphan.id) != finalizeIds.end()) {
-            recoveredSeconds += orphan.duration / 1000;
-        }
-    }
-
-    if (!finalizeIds.empty()) {
-        bool showNotification = true;
-
-        const bool hasValidMarker = markerResult.has_value()
-            && markerResult->status == MarkerResult::Status::Found
-            && markerResult->timestamp.isValid();
-        if (hasValidMarker) {
-            const QDateTime markerUtc = markerResult->timestamp.toUTC();
-            QDateTime oldestFinalizedOrphanEndUtc;
-            for (const auto& orphan : orphans) {
-                if (std::find(finalizeIds.begin(), finalizeIds.end(), orphan.id) == finalizeIds.end()) {
-                    continue;
-                }
-
-                const QDateTime orphanEndUtc = orphan.endTime.toUTC();
-                if (!oldestFinalizedOrphanEndUtc.isValid() || orphanEndUtc < oldestFinalizedOrphanEndUtc) {
-                    oldestFinalizedOrphanEndUtc = orphanEndUtc;
-                }
-            }
-
-            if (oldestFinalizedOrphanEndUtc.isValid() && markerUtc >= oldestFinalizedOrphanEndUtc) {
-                showNotification = false;
-            }
-        }
-
-        startup_recovery_notification_needed_ = showNotification;
-    }
-
-    Logger::Log(QString("[DB] Orphan checkpoint reconciliation finished: finalized=%1, dropped=%2, overlap_rejected=%3, recovered_seconds=%4")
-        .arg(finalizeIds.size())
-        .arg(dropIds.size())
-        .arg(reconcile.dropped.size())
-        .arg(recoveredSeconds));
-
-    return recoveredSeconds;
-}

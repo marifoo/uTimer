@@ -1,14 +1,19 @@
 /**
- * FakeSessionStore -- implementation of the in-memory test double.
+ * FakeSessionStore -- spy test double for SessionStore.
  *
- * Every method records its name in callLog and operates on in-memory data
- * structures.  No SQLite is involved.  Return values come from the
- * configurable *Result members set by the test.
+ * Records every call made to it (callLog) and stores raw segments
+ * passed to commitSession/replaceAll so tests can inspect what was
+ * written.  No normalization, upsert, or overlap logic is duplicated
+ * here; those behaviors are verified against the real SqliteSessionStore
+ * in test_persistence_contract.cpp.
+ *
+ * Return values come from the configurable *Result members set by the test.
  */
 
 #include "fakesessionstore.h"
 
 FakeSessionStore::FakeSessionStore()
+    : startupRecoveryResult{}
 {
 }
 
@@ -16,55 +21,20 @@ SessionStoreResult FakeSessionStore::commitSession(const Timeline& session)
 {
     callLog.append("commitSession");
     if (commitSessionResult.ok()) {
-        // Mirror SqliteSessionStore: normalize internally, compute orphans, then upsert.
-        std::vector<SegmentId> beforeIds;
-        for (const auto& d : session.completed())
-            beforeIds.push_back(d.segment_id);
-
-        Timeline normed = session.normalized();
-
-        // Delete orphaned segment IDs (those that disappeared during normalization)
-        for (const auto& id : beforeIds) {
-            bool stillPresent = false;
-            for (const auto& d : normed.completed())
-                if (d.segment_id == id) { stillPresent = true; break; }
-            if (!stillPresent) {
-                committedSegmentIds.remove(id.toString());
-                for (auto it = storedDurations.begin(); it != storedDurations.end(); ) {
-                    if (it->segment_id == id)
-                        it = storedDurations.erase(it);
-                    else
-                        ++it;
-                }
-            }
-        }
-
-        // Upsert normalized segments; enforce UNIQUE(segment_id) for new inserts.
-        for (const auto& d : normed.completed()) {
-            bool found = false;
-            for (auto& existing : storedDurations) {
-                if (existing.segment_id == d.segment_id) {
-                    existing = d;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                Q_ASSERT_X(!committedSegmentIds.contains(d.segment_id.toString()),
-                           "FakeSessionStore::commitSession",
-                           "UNIQUE(segment_id) violation: duplicate segment_id submitted");
-                committedSegmentIds.insert(d.segment_id.toString());
-                storedDurations.push_back(d);
-            }
+        // Spy: record the segments as submitted, without normalization or upsert policy.
+        // Tests that need normalization semantics should use SqliteSessionStore directly.
+        for (const auto& d : session.completed()) {
+            committedSegmentIds.insert(d.segment_id.toString());
+            storedDurations.push_back(d);
         }
     }
     return commitSessionResult;
 }
 
-bool FakeSessionStore::replaceAll(const Timeline& history, const Timeline& session)
+SessionStoreResult FakeSessionStore::replaceAll(const Timeline& history, const Timeline& session)
 {
     callLog.append("replaceAll");
-    if (replaceDurationsResult) {
+    if (replaceDurationsResult.ok() || replaceDurationsResult.category == SessionStoreResult::Disabled) {
         storedDurations.clear();
         committedSegmentIds.clear();
         for (const auto& d : history.completed()) {
@@ -120,99 +90,26 @@ SessionStoreResult FakeSessionStore::saveCheckpoint(DurationType type, const QDa
     return saveCheckpointResult;
 }
 
-bool FakeSessionStore::checkSchemaOnStartup()
+SchemaStatus FakeSessionStore::checkSchemaOnStartup()
 {
     callLog.append("checkSchemaOnStartup");
     return checkSchemaResult;
 }
 
-void FakeSessionStore::flushToDisc()
+SessionStoreResult FakeSessionStore::flushToDisc()
 {
     callLog.append("flushToDisc");
+    return flushToDiscResult;
 }
 
-std::deque<OrphanCheckpoint> FakeSessionStore::loadUnfinalizedCheckpoints()
-{
-    callLog.append("loadUnfinalizedCheckpoints");
-    return orphanCheckpoints;
-}
-
-bool FakeSessionStore::finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc)
-{
-    callLog.append("finalizeIfNoOverlap");
-
-    // Locate the orphan in the in-memory orphan list.
-    auto it = orphanCheckpoints.begin();
-    for (; it != orphanCheckpoints.end(); ++it) {
-        if (it->id == rowId) break;
-    }
-    if (it == orphanCheckpoints.end()) {
-        return false; // Row missing — same false return as the SQLite path.
-    }
-
-    // Probe finalised rows in storedDurations for an overlap with [startUtc, endUtc).
-    // Intervals [a, b) and [c, d) overlap iff a < d AND c < b.
-    for (const auto& d : storedDurations) {
-        const QDateTime existingStartUtc = d.startTime.toUTC();
-        const QDateTime existingEndUtc   = d.endTime.toUTC();
-        if (existingStartUtc < endUtc && startUtc < existingEndUtc) {
-            return false; // Overlap detected — leave the orphan untouched.
-        }
-    }
-
-    // No overlap: promote the orphan to a finalised row.
-    TimeDuration finalized = TimeDuration::fromTrusted(it->type, it->startTime, it->endTime, it->segment_id);
-    storedDurations.push_back(finalized);
-    orphanCheckpoints.erase(it);
-    return true;
-}
-
-ReconcileResult FakeSessionStore::reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
-                                                                 const std::vector<long long>& outrightDropIds)
-{
-    callLog.append("reconcileUnfinalizedCheckpoints");
-
-    ReconcileResult result;
-    if (!reconcileResult) {
-        result.ok = false;
-        return result;
-    }
-
-    // Outright drops: remove orphan rows by id.
-    for (long long id : outrightDropIds) {
-        for (auto it = orphanCheckpoints.begin(); it != orphanCheckpoints.end(); ) {
-            if (it->id == id) {
-                it = orphanCheckpoints.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
-
-    // Per-row finalise via finalizeIfNoOverlap to mirror the SQLite path.
-    for (const auto& orphan : orphansToFinalize) {
-        const QDateTime startUtc = orphan.startTime.toUTC();
-        const QDateTime endUtc   = orphan.endTime.toUTC();
-        if (finalizeIfNoOverlap(orphan.id, startUtc, endUtc)) {
-            result.finalized.push_back(orphan.id);
-        } else {
-            result.dropped.push_back(orphan.id);
-        }
-    }
-
-    return result;
-}
-
-bool FakeSessionStore::setLastCleanShutdownMarker(const QDateTime& /*timestamp*/)
+SessionStoreResult FakeSessionStore::setLastCleanShutdownMarker(const QDateTime& /*timestamp*/)
 {
     callLog.append("setLastCleanShutdownMarker");
     return setMarkerResult;
 }
 
-std::optional<MarkerResult> FakeSessionStore::consumeLastCleanShutdownMarker()
+StartupRecoveryResult FakeSessionStore::recoverStartupCheckpoints(const QDateTime& /*now*/)
 {
-    callLog.append("consumeLastCleanShutdownMarker");
-    auto result = cleanShutdownMarker;
-    cleanShutdownMarker = MarkerResult { {}, MarkerResult::Status::NotFound };
-    return result;
+    callLog.append("recoverStartupCheckpoints");
+    return startupRecoveryResult;
 }

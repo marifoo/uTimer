@@ -106,14 +106,25 @@ int main(int argc, char *argv[])
 	SqliteSessionStore session_store(settings);
 	Timer time_tracker(settings, session_store);
 
-	// Check database schema before starting the UI
-	if (!session_store.checkSchemaOnStartup()) {
+	// Validate schema before any recovery or data access.
+	const SchemaStatus schemaStatus = session_store.checkSchemaOnStartup();
+	if (schemaStatus == SchemaStatus::Outdated) {
+		QMessageBox::critical(nullptr, "Database Schema Mismatch",
+			"The database schema is not compatible with this version of µTimer.\n\n"
+			"Please rename or delete the following file and restart:\n"
+			+ AppPaths::databaseFile());
+		return 1;
+	}
+	if (schemaStatus == SchemaStatus::Inaccessible) {
 		QMessageBox::critical(nullptr, "Database Error",
 			"Could not open or initialize the database.\n\n"
 			"Please check the following file and restart:\n"
 			+ AppPaths::databaseFile());
 		return 1;
 	}
+
+	// Schema is Ready or Created — safe to recover from the store.
+	time_tracker.initializeFromStore();
 
 	ShutdownCoordinator shutdown_coordinator(time_tracker, session_store);
 	MainWin main_win(settings, time_tracker, session_store, shutdown_coordinator);

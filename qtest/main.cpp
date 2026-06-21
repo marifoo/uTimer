@@ -18,10 +18,14 @@ class TimerTest;
 class DatabaseTest;
 class IntegrationTest;
 class HistoryDialogTest;
+class HistoryEditSessionTest;
+class HistoryCommitTest;
 class ShutdownCoordinatorTest;
 class HealthMonitorTest;
 class TimelineTest;
 class RenamesTest;
+class PersistenceContractTest;
+class ContractMatrixTest;
 
 // Include test class headers
 #include "test_logger.h"
@@ -33,10 +37,14 @@ class RenamesTest;
 #include "test_database.h"
 #include "test_integration.h"
 #include "test_historydialog.h"
+#include "test_historyeditsession.h"
+#include "test_history_commit.h"
 #include "test_shutdowncoordinator.h"
 #include "test_healthmonitor.h"
 #include "test_timeline.h"
 #include "test_renames.h"
+#include "test_persistence_contract.h"
+#include "test_contract_matrix.h"
 
 // ---------------------------------------------------------------------------
 // QWARN counter: pipe-based stdout tee (POSIX/Linux only)
@@ -55,15 +63,17 @@ static std::atomic<int> g_unexpectedWarnings{0};
 
 #ifndef _WIN32
 
-static bool isAllowlistedWarning(const std::string& line) {
-    // Known environmental noise from the offscreen QPA plugin.
-    static const char* kAllow[] = {
-        "propagateSizeHints",
-        "This plugin does not support",
-    };
-    for (const char* a : kAllow)
-        if (line.find(a) != std::string::npos) return true;
-    return false;
+static bool isExpectedOffscreenWarning(const std::string& line) {
+    // The offscreen QPA plugin emits this warning whenever a widget calls
+    // QDialog::show() or triggers propagateSizeHints() (e.g. resizing under
+    // the offscreen backend).  The handful of tests that show a real widget
+    // (e.g. HistoryDialogTest checkbox toggle, split dialog, HistoryCommitTest
+    // DB-failure path) cannot avoid triggering it.  This is purely environmental
+    // noise from the test platform — not an application defect.
+    //
+    // This suppression is intentionally narrow: it matches only this exact
+    // offscreen-plugin string.  Any other QWARN text will fail the run.
+    return line.find("This plugin does not support propagateSizeHints()") != std::string::npos;
 }
 
 struct TeeCtx {
@@ -88,7 +98,7 @@ static void* teeThread(void* arg) {
         size_t nl;
         while ((nl = residual.find('\n', pos)) != std::string::npos) {
             std::string line = residual.substr(pos, nl - pos);
-            if (line.find("QWARN") != std::string::npos && !isAllowlistedWarning(line))
+            if (line.find("QWARN") != std::string::npos && !isExpectedOffscreenWarning(line))
                 g_unexpectedWarnings.fetch_add(1);
             pos = nl + 1;
         }
@@ -97,7 +107,7 @@ static void* teeThread(void* arg) {
     // Scan any trailing partial line after EOF.
     if (!residual.empty() &&
         residual.find("QWARN") != std::string::npos &&
-        !isAllowlistedWarning(residual))
+        !isExpectedOffscreenWarning(residual))
         g_unexpectedWarnings.fetch_add(1);
     return nullptr;
 }
@@ -156,10 +166,14 @@ int main(int argc, char *argv[])
     runTest(new DatabaseTest, "DatabaseTest");
     runTest(new IntegrationTest, "IntegrationTest");
     runTest(new HistoryDialogTest, "HistoryDialogTest");
+    runTest(new HistoryEditSessionTest, "HistoryEditSessionTest");
+    runTest(new HistoryCommitTest, "HistoryCommitTest");
     runTest(new ShutdownCoordinatorTest, "ShutdownCoordinatorTest");
     runTest(new HealthMonitorTest, "HealthMonitorTest");
     runTest(new TimelineTest, "TimelineTest");
     runTest(new RenamesTest, "RenamesTest");
+    runTest(new PersistenceContractTest, "PersistenceContractTest");
+    runTest(new ContractMatrixTest, "ContractMatrixTest");
 
     qDebug() << "\n================ All Tests Complete ================";
 

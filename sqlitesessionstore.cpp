@@ -33,6 +33,7 @@
 #include "sqlitesessionstore.h"
 #include "apppaths.h"
 #include <QMutexLocker>
+#include <QSet>
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QVariant>
@@ -40,11 +41,14 @@
 #include <QFileInfo>
 #include <QStorageInfo>
 #include <QTextStream>
+#include <algorithm>
 #include <atomic>
 #include "logger.h"
 
 namespace {
 const char* kLastCleanShutdownKey = "last_clean_shutdown";
+constexpr qint64 kMinRecoverableOrphanDurationMs = 1000;
+constexpr qint64 kOrphanStaleAgeMs = 24LL * 60LL * 60LL * 1000LL;
 
 static QString toUtcIso(const QDateTime& dt)
 {
@@ -60,7 +64,8 @@ std::atomic<uint64_t> s_connection_seq{0};
 }
 
 SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent)
-    : QObject(parent), history_days_to_keep_(std::max(settings.getHistoryDays(), 0))
+    : QObject(parent), history_days_to_keep_(std::max(settings.getHistoryDays(), 0)),
+      db_was_fresh_(false)
 {
     // Mint a unique connection name using a monotonic counter.
     // See s_connection_seq declaration for rationale (avoids address-reuse collisions).
@@ -74,6 +79,9 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
         return;
     }
 
+    // Record whether this is a fresh DB before opening.
+    db_was_fresh_ = !QFile::exists(db.databaseName());
+
     // Open the connection and run one-time schema setup.
     if (!db.open()) {
         Logger::Log("[DB] Error opening database: " + db.lastError().text());
@@ -81,8 +89,8 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
     }
     // Reject read-only files immediately.  Without this check, db.open() can
     // succeed on a read-only SQLite file (opening in read-only mode), leaving
-    // the connection open but unable to write — identical to the ensureOpen()
-    // guard added in Step 6.
+    // the connection open but unable to write — the same guard ensureOpen()
+    // applies on reconnect.
     if (!QFileInfo(db.databaseName()).isWritable()) {
         Logger::Log("[DB] Warning: Database file is not writable.");
         db.close();
@@ -249,36 +257,113 @@ void SqliteSessionStore::checkSegmentIdUniqueness()
 #endif // QT_NO_DEBUG
 
 /**
- * Schema validation + startup housekeeping.  Call once at application startup.
+ * Schema validation + startup housekeeping.  Call once at application startup,
+ * before any recovery or data access.
  *
- * Safe to call more than once (all operations are idempotent), but intended to
- * run once: each call re-runs retention cleanup and backup pruning.
+ * Returns:
+ *   Created      — DB file did not previously exist; fresh schema was built.
+ *   Ready        — existing DB has the expected schema; safe to use.
+ *   Outdated     — column set or UNIQUE(segment_id) constraint does not match;
+ *                  caller must refuse to start.
+ *   Inaccessible — DB file could not be opened.
  *
- * Returns true if the database is ready for use (or history is disabled / file
- * doesn't exist yet).  Returns false if the schema is outdated or the connection
- * cannot be opened.
+ * idx_start_utc: if the partial index is absent it is (re)created rather than
+ * returning Outdated, because the index can be rebuilt without data loss and
+ * its absence does not indicate schema incompatibility.
  */
-bool SqliteSessionStore::checkSchemaOnStartup()
+SchemaStatus SqliteSessionStore::checkSchemaOnStartup()
 {
     QMutexLocker locker(&db_mutex_);
 
     if (history_days_to_keep_ == 0) {
-        return true;
+        return SchemaStatus::Ready;
     }
 
-    if (!QFile::exists(db.databaseName())) {
-        return true;
-    }
-
-    // The constructor already ran ensureSchema(); this call is idempotent
-    // (all DDL uses IF NOT EXISTS) and re-creates tables/indexes if somehow
-    // missing without any data loss.
     if (!ensureOpen()) {
-        return false;
+        return SchemaStatus::Inaccessible;
     }
 
-    if (!ensureSchema()) {
-        return false;
+    if (db_was_fresh_) {
+        // Fresh DB: ensureSchema() already ran in the constructor.
+        performRetentionCleanup();
+        pruneOldBackups();
+        return SchemaStatus::Created;
+    }
+
+    // Validate the durations table columns using PRAGMA table_info.
+    // The expected set must match what ensureSchema() creates.
+    {
+        static const QSet<QString> kExpectedColumns = {
+            "id", "segment_id", "type", "start_utc", "end_utc", "is_finalized"
+        };
+
+        QSqlQuery colQuery(db);
+        if (!colQuery.exec("PRAGMA table_info(durations)")) {
+            Logger::Log("[DB] checkSchemaOnStartup: PRAGMA table_info failed: " + colQuery.lastError().text());
+            return SchemaStatus::Inaccessible;
+        }
+
+        QSet<QString> foundColumns;
+        while (colQuery.next()) {
+            foundColumns.insert(colQuery.value(1).toString()); // column 1 = name
+        }
+
+        if (foundColumns != kExpectedColumns) {
+            Logger::Log(QString("[DB] checkSchemaOnStartup: column mismatch. "
+                                "Expected {%1}, found {%2}")
+                .arg(QStringList(kExpectedColumns.values()).join(", "))
+                .arg(QStringList(foundColumns.values()).join(", ")));
+            return SchemaStatus::Outdated;
+        }
+    }
+
+    // Validate UNIQUE(segment_id) constraint via PRAGMA index_list + index_info.
+    {
+        QSqlQuery idxList(db);
+        if (!idxList.exec("PRAGMA index_list(durations)")) {
+            Logger::Log("[DB] checkSchemaOnStartup: PRAGMA index_list failed: " + idxList.lastError().text());
+            return SchemaStatus::Inaccessible;
+        }
+
+        // Collect all unique indexes and check their covered columns.
+        bool foundUniqueSegmentId = false;
+        while (idxList.next()) {
+            // Columns: seq, name, unique, origin, partial
+            const QString idxName   = idxList.value(1).toString();
+            const int isUnique      = idxList.value(2).toInt();
+            if (!isUnique) {
+                continue;
+            }
+            // Check if this unique index covers exactly segment_id.
+            QSqlQuery idxInfo(db);
+            idxInfo.prepare("PRAGMA index_info(" + idxName + ")");
+            if (!idxInfo.exec()) {
+                continue;
+            }
+            QStringList coveredCols;
+            while (idxInfo.next()) {
+                coveredCols.append(idxInfo.value(2).toString()); // column 2 = name
+            }
+            if (coveredCols.size() == 1 && coveredCols[0] == "segment_id") {
+                foundUniqueSegmentId = true;
+                break;
+            }
+        }
+
+        if (!foundUniqueSegmentId) {
+            Logger::Log("[DB] checkSchemaOnStartup: missing UNIQUE(segment_id) constraint");
+            return SchemaStatus::Outdated;
+        }
+    }
+
+    // Recreate idx_start_utc if absent (the partial index is safe to rebuild;
+    // its absence does not indicate schema incompatibility).
+    {
+        QSqlQuery startUtcIndexQuery(db);
+        if (!startUtcIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_start_utc ON durations(start_utc) WHERE is_finalized = 1")) {
+            Logger::Log("[DB] Warning: Failed to recreate idx_start_utc: " + startUtcIndexQuery.lastError().text());
+            // Non-fatal: log and continue.
+        }
     }
 
     // Retention cleanup and backup pruning run once per startup, after schema is
@@ -286,7 +371,7 @@ bool SqliteSessionStore::checkSchemaOnStartup()
     performRetentionCleanup();
     pruneOldBackups();
 
-    return true;
+    return SchemaStatus::Ready;
 }
 
 /**
@@ -372,8 +457,8 @@ bool SqliteSessionStore::ensureSettingsTable()
  *   any other SqliteSessionStore operation from seeing the closed connection.
  *   QRecursiveMutex allows re-entrant calls within the same thread.
  *
- * TODO(S16): The current close-copy-reopen approach is correct for rollback-journal
- * mode (no -wal/-shm sidecars).  If WAL mode is ever enabled, switch to SQLite's
+ * The current close-copy-reopen approach is correct for rollback-journal mode
+ * (no -wal/-shm sidecars).  If WAL mode is ever enabled, switch to SQLite's
  * online backup API (sqlite3_backup_*) so the source DB stays open during the copy.
  */
 BackupResult SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
@@ -470,6 +555,9 @@ BackupResult SqliteSessionStore::createBackup(const std::deque<TimeDuration>& du
  */
 SessionStoreResult SqliteSessionStore::commitSession(const Timeline& session)
 {
+    if (history_days_to_keep_ == 0) {
+        return SessionStoreResult::disabled();
+    }
     const auto [normed, orphanIds] = session.normalizedWithRemovedIds();
     return updateDurationsById(normed.completed(), orphanIds);
 }
@@ -590,12 +678,12 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
     return commitSuccessful;
 }
 
-bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& session)
+SessionStoreResult SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& session)
 {
     QMutexLocker locker(&db_mutex_);
 
     if (history_days_to_keep_ == 0) {
-        return true;
+        return SessionStoreResult::disabled();
     }
 
     const std::deque<TimeDuration>& historyDurations = history.completed();
@@ -607,13 +695,13 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
 
     if (!ensureOpen()) {
         Logger::Log("[DB] Could not open DB to replace durations");
-        return false;
+        return SessionStoreResult::fatal("DB connection could not be opened");
     }
 
     const BackupResult backup = createBackup(allDurations, TransactionMode::Replace);
     if (backup == BackupResult::ReopenFailed) {
         Logger::Log("[DB] CRITICAL: DB connection lost after backup - aborting replace");
-        return false;
+        return SessionStoreResult::fatal("DB connection lost after backup");
     }
     if (backup != BackupResult::Success) {
         Logger::Log("[DB] Warning: Backup failed before REPLACE operation - proceeding without backup");
@@ -621,14 +709,14 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
 
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting transaction for replace: " + db.lastError().text());
-        return false;
+        return SessionStoreResult::transient("Failed to start replace transaction: " + db.lastError().text());
     }
 
     QSqlQuery clearQuery(db);
     if (!clearQuery.exec("DELETE FROM durations")) {
         db.rollback();
         Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
-        return false;
+        return SessionStoreResult::transient("Failed to clear durations: " + clearQuery.lastError().text());
     }
 
     QSqlQuery finalizedInsert(db);
@@ -637,7 +725,7 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
         "VALUES (:segment_id, :type, :start_utc, :end_utc, 1)"
     );
     if (!insertRows(finalizedInsert, historyDurations))
-        return false;
+        return SessionStoreResult::transient("Failed to insert history rows");
 
     QSqlQuery unfinalizedInsert(db);
     unfinalizedInsert.prepare(
@@ -645,20 +733,18 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
         "VALUES (:segment_id, :type, :start_utc, :end_utc, 0)"
     );
     if (!insertRows(unfinalizedInsert, currentSessionDurations))
-        return false;
+        return SessionStoreResult::transient("Failed to insert session rows");
 
-    const bool success = db.commit();
-    if (!success) {
+    if (!db.commit()) {
         Logger::Log("[DB] Error committing replace transaction: " + db.lastError().text());
+        return SessionStoreResult::transient("Failed to commit replace transaction: " + db.lastError().text());
     }
 
 #ifndef QT_NO_DEBUG
-    if (success) {
-        checkSegmentIdUniqueness();
-    }
+    checkSegmentIdUniqueness();
 #endif
 
-    return success;
+    return SessionStoreResult::success();
 }
 
 /**
@@ -679,14 +765,21 @@ LoadResult SqliteSessionStore::loadDurations()
 
     LoadResult result;
 
+    if (history_days_to_keep_ == 0) {
+        result.status = SessionStoreResult::Disabled;
+        return result;
+    }
+
     if (!ensureOpen()) {
         Logger::Log("[DB] Could not open DB to load Durations");
+        result.status = SessionStoreResult::FatalError;
         return result;
     }
 
     // Start read transaction for consistent snapshot
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting read transaction: " + db.lastError().text());
+        result.status = SessionStoreResult::TransientError;
         return result;
     }
 
@@ -696,6 +789,7 @@ LoadResult SqliteSessionStore::loadDurations()
     if (!query.exec()) {
         db.rollback();
         Logger::Log("[DB] Error executing load query: " + query.lastError().text());
+        result.status = SessionStoreResult::TransientError;
         return result;
     }
 
@@ -732,7 +826,7 @@ LoadResult SqliteSessionStore::loadDurations()
             continue;
         }
 
-        // Create TimeDuration — cross-midnight rows are accepted via fromTrusted() so
+        // Create TimeDuration — cross-midnight rows are accepted via fromPersistedRow() so
         // that createPages() can bucket them onto both the start-date and end-date pages.
         if (startDateTime.msecsTo(endDateTime) <= 0) {
             Logger::Log(QString("[DB] Dropped zero/negative-duration row at load: %1 → %2")
@@ -741,7 +835,7 @@ LoadResult SqliteSessionStore::loadDurations()
             result.skipped++;
             continue;
         }
-        result.durations.emplace_back(TimeDuration::fromTrusted(type, startDateTime, endDateTime, segmentId));
+        result.durations.emplace_back(TimeDuration::fromPersistedRow(type, startDateTime, endDateTime, segmentId));
     }
 
     // Rollback is idiomatic for read-only transactions: no writes were made,
@@ -823,9 +917,8 @@ SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, const Q
         return SessionStoreResult::callerBug("saveCheckpoint called with empty segment_id");
     }
 
-    // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
-        return SessionStoreResult::success();
+        return SessionStoreResult::disabled();
     }
 
     if (!ensureOpen()) {
@@ -845,7 +938,7 @@ SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, const Q
     QSqlQuery updateQuery(db);
     updateQuery.prepare(
         "UPDATE durations SET end_utc = :end_utc, is_finalized = 0 "
-        "WHERE segment_id = :segment_id"
+        "WHERE segment_id = :segment_id AND is_finalized = 0"
     );
     updateQuery.bindValue(":end_utc", endUtcStr);
     updateQuery.bindValue(":segment_id", segmentId.toString());
@@ -874,6 +967,22 @@ SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, const Q
 
         if (!insertQuery.exec()) {
             db.rollback();
+            // Primary result code 19 = SQLITE_CONSTRAINT. Assumes extended result
+            // codes stay disabled on this connection (they are never enabled here);
+            // with them on, a UNIQUE violation would report 2067 instead.
+            // UNIQUE(segment_id) is the only constraint that can fire on this INSERT
+            // path (NOT NULL columns are all bound and the empty-segment_id case is
+            // rejected at function entry), so 19 here means a finalized row already
+            // owns this segment_id. Demoting it would corrupt history — report a
+            // caller bug instead.
+            static const QString kSqliteConstraint = "19";
+            if (insertQuery.lastError().nativeErrorCode() == kSqliteConstraint) {
+                Logger::Log("[DB] saveCheckpoint: segment_id belongs to a finalized row — caller bug: "
+                            + segmentId.toString());
+                return SessionStoreResult::callerBug(
+                    "saveCheckpoint: segment_id " + segmentId.toString()
+                    + " already belongs to a finalized row");
+            }
             Logger::Log("[DB] Error inserting checkpoint by segment_id: " + insertQuery.lastError().text());
             return SessionStoreResult::transient("Failed to insert checkpoint: " + insertQuery.lastError().text());
         }
@@ -911,9 +1020,8 @@ SessionStoreResult SqliteSessionStore::updateDurationsById(const std::deque<Time
         return SessionStoreResult::success();
     }
 
-    // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
-        return SessionStoreResult::success();
+        return SessionStoreResult::disabled();
     }
 
     if (!ensureOpen()) {
@@ -1026,28 +1134,28 @@ SessionStoreResult SqliteSessionStore::updateDurationsById(const std::deque<Time
  * Without the checkpoint, the most recent writes live only in the WAL
  * and a power failure could leave them unrecoverable from the main file.
  */
-void SqliteSessionStore::flushToDisc()
+SessionStoreResult SqliteSessionStore::flushToDisc()
 {
     QMutexLocker locker(&db_mutex_);
 
     if (history_days_to_keep_ == 0) {
-        return;
+        return SessionStoreResult::disabled();
     }
 
     if (!ensureOpen()) {
         Logger::Log("[DB] flushToDisc: could not open DB");
-        return;
+        return SessionStoreResult::transient("DB connection could not be opened");
     }
 
     QSqlQuery pragma(db);
     if (!pragma.exec("PRAGMA synchronous=FULL")) {
         Logger::Log("[DB] flushToDisc: set synchronous=FULL failed: " + pragma.lastError().text());
-        return;
+        return SessionStoreResult::transient("Failed to set synchronous=FULL: " + pragma.lastError().text());
     }
 
     if (!db.transaction()) {
         Logger::Log("[DB] flushToDisc: could not begin transaction");
-        return;
+        return SessionStoreResult::transient("Failed to start flush transaction: " + db.lastError().text());
     }
 
     const QString ts = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
@@ -1058,18 +1166,19 @@ void SqliteSessionStore::flushToDisc()
     if (!query.exec()) {
         Logger::Log("[DB] flushToDisc: write failed: " + query.lastError().text());
         db.rollback();
-        return;
+        return SessionStoreResult::transient("Flush write failed: " + query.lastError().text());
     }
     if (!db.commit()) {
         Logger::Log("[DB] flushToDisc: commit failed: " + db.lastError().text());
         db.rollback();
-        return;
+        return SessionStoreResult::transient("Flush commit failed: " + db.lastError().text());
     }
 
     Logger::Log("[DB] flushToDisc: durable heartbeat committed");
+    return SessionStoreResult::success();
 }
 
-std::deque<OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
+std::deque<SqliteSessionStore::OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1194,8 +1303,8 @@ bool SqliteSessionStore::finalizeIfNoOverlap(qint64 rowId, const QDateTime& star
     return true;
 }
 
-ReconcileResult SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
-                                                                   const std::vector<long long>& outrightDropIds)
+SqliteSessionStore::ReconcileResult SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
+                                                                                       const std::vector<long long>& outrightDropIds)
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1258,20 +1367,20 @@ ReconcileResult SqliteSessionStore::reconcileUnfinalizedCheckpoints(const std::v
     return result;
 }
 
-bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
+SessionStoreResult SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
 {
     QMutexLocker locker(&db_mutex_);
 
     if (history_days_to_keep_ == 0) {
-        return true;
+        return SessionStoreResult::disabled();
     }
 
     if (!ensureOpen()) {
-        return false;
+        return SessionStoreResult::transient("DB connection could not be opened");
     }
 
     if (!db.transaction()) {
-        return false;
+        return SessionStoreResult::transient("Failed to start marker transaction: " + db.lastError().text());
     }
 
     const QString markerValue = toUtcIso(timestamp);
@@ -1282,18 +1391,18 @@ bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
 
     if (!query.exec()) {
         db.rollback();
-        return false;
+        return SessionStoreResult::transient("Marker write failed: " + query.lastError().text());
     }
 
-    const bool committed = db.commit();
-    if (!committed) {
+    if (!db.commit()) {
         db.rollback();
+        return SessionStoreResult::transient("Marker commit failed: " + db.lastError().text());
     }
 
-    return committed;
+    return SessionStoreResult::success();
 }
 
-std::optional<MarkerResult> SqliteSessionStore::consumeLastCleanShutdownMarker()
+std::optional<SqliteSessionStore::MarkerResult> SqliteSessionStore::consumeLastCleanShutdownMarker()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1345,4 +1454,105 @@ std::optional<MarkerResult> SqliteSessionStore::consumeLastCleanShutdownMarker()
         return MarkerResult { *parsedTs, MarkerResult::Status::Found };
     }
     return MarkerResult { {}, MarkerResult::Status::NotFound };
+}
+
+/**
+ * Startup checkpoint recovery.
+ *
+ * Consumes the last-clean-shutdown marker, loads unfinalized checkpoint rows,
+ * applies the too-short (<1 s) / stale (>24 h) / overlap policies, finalizes
+ * qualifying rows, and decides whether the user needs to be notified.
+ *
+ * All internal mechanics (row ids, finalize/drop lists, marker timestamps) stay
+ * inside this method.  Timer receives only domain facts via StartupRecoveryResult.
+ */
+StartupRecoveryResult SqliteSessionStore::recoverStartupCheckpoints(const QDateTime& now)
+{
+    StartupRecoveryResult result;
+
+    // Consume the marker first.  If the read fails, do not reconcile — DB state
+    // is unknown and finalising rows could conflict with in-progress data.
+    const std::optional<MarkerResult> markerResult = consumeLastCleanShutdownMarker();
+    if (markerResult.has_value() && markerResult->status == MarkerResult::Status::Error) {
+        Logger::Log("[DB] recoverStartupCheckpoints: marker read failed — skipping orphan reconciliation");
+        result.ok = false;
+        return result;
+    }
+    // When markerResult is nullopt (history disabled), loadUnfinalizedCheckpoints()
+    // also returns empty (ensureOpen returns false), so reconciliation is a safe no-op.
+
+    const std::deque<OrphanCheckpoint> orphans = loadUnfinalizedCheckpoints();
+    if (orphans.empty()) {
+        return result;
+    }
+
+    std::vector<OrphanCheckpoint> toFinalize;
+    std::vector<long long> dropIds;
+
+    for (const auto& orphan : orphans) {
+        const bool tooShort = orphan.duration < kMinRecoverableOrphanDurationMs;
+        const bool stale = orphan.endTime.isValid() && (orphan.endTime.msecsTo(now) > kOrphanStaleAgeMs);
+
+        if (tooShort || stale) {
+            dropIds.push_back(orphan.id);
+        } else {
+            toFinalize.push_back(orphan);
+        }
+    }
+
+    ReconcileResult reconcile = reconcileUnfinalizedCheckpoints(toFinalize, dropIds);
+    if (!reconcile.ok) {
+        Logger::Log("[DB] recoverStartupCheckpoints: reconciliation transaction failed");
+        result.ok = false;
+        return result;
+    }
+
+    result.finalized_count = static_cast<int>(reconcile.finalized.size());
+    result.dropped_count   = static_cast<int>(dropIds.size()) + static_cast<int>(reconcile.dropped.size());
+
+    // Count seconds only for rows the store actually finalized.
+    for (const auto& orphan : toFinalize) {
+        if (std::find(reconcile.finalized.begin(), reconcile.finalized.end(), orphan.id)
+                != reconcile.finalized.end()) {
+            result.recovered_seconds += orphan.duration / 1000;
+        }
+    }
+
+    // Decide whether to notify the user.
+    // If a valid clean-shutdown marker exists and its timestamp covers (is >= )
+    // the oldest finalized orphan's end time, the shutdown was clean — no notification.
+    if (!reconcile.finalized.empty()) {
+        bool showNotification = true;
+
+        const bool hasValidMarker = markerResult.has_value()
+            && markerResult->status == MarkerResult::Status::Found
+            && markerResult->timestamp.isValid();
+        if (hasValidMarker) {
+            const QDateTime markerUtc = markerResult->timestamp.toUTC();
+            QDateTime oldestFinalizedOrphanEndUtc;
+            for (const auto& orphan : orphans) {
+                if (std::find(reconcile.finalized.begin(), reconcile.finalized.end(), orphan.id)
+                        == reconcile.finalized.end()) {
+                    continue;
+                }
+                const QDateTime orphanEndUtc = orphan.endTime.toUTC();
+                if (!oldestFinalizedOrphanEndUtc.isValid() || orphanEndUtc < oldestFinalizedOrphanEndUtc) {
+                    oldestFinalizedOrphanEndUtc = orphanEndUtc;
+                }
+            }
+            if (oldestFinalizedOrphanEndUtc.isValid() && markerUtc >= oldestFinalizedOrphanEndUtc) {
+                showNotification = false;
+            }
+        }
+
+        result.notify_user = showNotification;
+    }
+
+    Logger::Log(QString("[DB] Startup checkpoint recovery: finalized=%1, dropped=%2, overlap_rejected=%3, recovered_seconds=%4")
+        .arg(reconcile.finalized.size())
+        .arg(dropIds.size())
+        .arg(reconcile.dropped.size())
+        .arg(result.recovered_seconds));
+
+    return result;
 }

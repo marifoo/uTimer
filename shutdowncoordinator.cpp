@@ -19,28 +19,35 @@ void ShutdownCoordinator::pumpEvents(int budgetMs)
         QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
 }
 
-void ShutdownCoordinator::run(bool forceDirectPath)
+void ShutdownCoordinator::run(ShutdownMode mode)
 {
     if (shutdown_completed_) {
         Logger::Log("[TIMER] Shutdown already completed, skipping");
         return;
     }
 
-    Logger::Log(QString("[TIMER] Shutdown requested (force_direct=%1)").arg(forceDirectPath));
+    Logger::Log(QString("[TIMER] Shutdown requested (mode=%1)")
+                .arg(mode == ShutdownMode::Direct ? "Direct" : "DrainEvents"));
 
     auto result = timetracker_.shutdown();
 
-    if (!forceDirectPath) {
+    if (mode == ShutdownMode::DrainEvents) {
         // Normal shutdown: pump the event loop so connected signals
         // (GUI sync, checkpoint flush) can fire before we proceed.
         pumpEvents(150);
     }
 
     Logger::Log("[DB] Flushing database to disk before shutdown");
-    db_.flushToDisc();
+    const SessionStoreResult flushResult = db_.flushToDisc();
+    if (!flushResult.ok() && flushResult.category != SessionStoreResult::Disabled) {
+        Logger::Log("[DB] Warning: flushToDisc failed during shutdown: " + flushResult.message);
+    }
 
     if (result.canCleanMark && !result.stopCalled) {
-        db_.setLastCleanShutdownMarker(QDateTime::currentDateTime());
+        const SessionStoreResult markerResult = db_.setLastCleanShutdownMarker(QDateTime::currentDateTime());
+        if (!markerResult.ok() && markerResult.category != SessionStoreResult::Disabled) {
+            Logger::Log("[DB] Warning: setLastCleanShutdownMarker failed during shutdown: " + markerResult.message);
+        }
     }
 
     if (!result.stopped) {

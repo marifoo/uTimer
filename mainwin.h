@@ -29,7 +29,7 @@ private:
 	void toggleAlwaysOnTopFlag();
 	void setupIcon();
 	void setupCentralWidget(Settings &settings, Timer &timetracker);
-	void shutdown(bool force_direct = false);
+	void shutdown(ShutdownMode mode);
 
 protected:
 	bool nativeEvent(const QByteArray &eventType, void *message, long *result) override;
