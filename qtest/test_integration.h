@@ -59,6 +59,9 @@ private slots:
     void test_hasEntriesForDate_timezone();
     void test_midnight_boundary_timezone_data();
     void test_midnight_boundary_timezone();
+
+    // Item A: toggle ongoing type then crash — refreshed end_utc survives recovery.
+    void test_A_toggle_ongoing_to_pause_crash_recovery_uses_refreshed_end_utc();
 };
 
 #endif // TEST_INTEGRATION_H

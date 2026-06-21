@@ -1070,9 +1070,8 @@ void HistoryDialogTest::test_saveChanges_noop_save_unchanged()
 void HistoryDialogTest::test_H3_ongoing_type_edit_preserved_when_engine_stops()
 {
     // Invariant: engine is still running when saveChanges() is called.
-    // Without the ongoingRowModified_ guard, saveChanges() would refresh the
-    // ongoing end-time from the engine and overwrite the user's Pause edit back
-    // to Activity (the engine's type). With the guard, the user's edit wins.
+    // refreshOngoing() must advance the end-time from the engine but preserve
+    // any type edit the user made to the pending ongoing segment.
     resetDatabaseFile();
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
@@ -1087,14 +1086,12 @@ void HistoryDialogTest::test_H3_ongoing_type_edit_preserved_when_engine_stops()
     QVERIFY(dialog.editSession_dbg().pendingTimelines()[0].ongoing().has_value());
     QCOMPARE(dialog.editSession_dbg().pendingTimelines()[0].ongoing()->type, DurationType::Activity);
 
-    // User edits ongoing type to Pause
+    // User edits ongoing type to Pause (same as the checkbox lambda in historydialog.cpp).
     auto ongoing = dialog.editSession_dbg().pendingTimelines()[0].ongoing().value();
     ongoing.type = DurationType::Pause;
     dialog.editSession_dbg().pendingTimelines()[0] = Timeline(dialog.editSession_dbg().pendingTimelines()[0].completed(), ongoing);
-    dialog.editSession_dbg().markOngoingModified();
 
-    // Engine is still running (Activity mode) — saveChanges() would overwrite type to Activity
-    // without the ongoingRowModified_ guard.
+    // Engine is still running (Activity mode).
     QVERIFY(tracker.isActive());
 
     dialog.done(QDialog::Accepted);

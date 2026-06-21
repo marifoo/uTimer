@@ -459,7 +459,6 @@ void HistoryDialog::updateTable(uint idx)
             ongoing.type = newType;
             pendingTimelines[capturedPageIdx] =
                 Timeline(pendingTimelines[capturedPageIdx].completed(), ongoing);
-            session_.markOngoingModified();
             const QString ts = newType == DurationType::Activity ? "Activity  " : "Pause  ";
             if (table_->item(displayRow, 0)) {
                 table_->item(displayRow, 0)->setText(ts);

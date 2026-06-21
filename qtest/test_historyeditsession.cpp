@@ -416,8 +416,10 @@ void HistoryEditSessionTest::test_refresh_ongoing_updates_end_time()
     tracker.useTimerViaButton(Button::Stop);
 }
 
-void HistoryEditSessionTest::test_refresh_ongoing_skipped_when_user_modified()
+void HistoryEditSessionTest::test_refresh_ongoing_advances_end_time_and_preserves_user_type_edit()
 {
+    // After the user edits the ongoing type (e.g. Activity → Pause), refreshOngoing()
+    // must advance the end time from the engine while keeping the user's type edit.
     QTemporaryDir tempDir;
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
@@ -431,17 +433,30 @@ void HistoryEditSessionTest::test_refresh_ongoing_skipped_when_user_modified()
     session.buildFromTimer(tracker);
 
     QVERIFY(session.pendingTimelines()[0].ongoing().has_value());
+    QCOMPARE(session.pendingTimelines()[0].ongoing()->type, DurationType::Activity);
     const QDateTime snapshotEnd = session.pendingTimelines()[0].ongoing()->endTime;
 
-    // Mark the ongoing row as user-modified.
-    session.markOngoingModified();
+    // Simulate the user toggling the ongoing type to Pause (as historydialog.cpp does).
+    auto ongoing = session.pendingTimelines()[0].ongoing().value();
+    ongoing.type = DurationType::Pause;
+    session.pendingTimelines()[0] = Timeline(session.pendingTimelines()[0].completed(), ongoing);
 
     QTest::qWait(100);
 
-    // refreshOngoing() must be a no-op when user has edited the ongoing row.
+    const QDateTime before = QDateTime::currentDateTime();
     session.refreshOngoing(tracker);
+    const QDateTime after = QDateTime::currentDateTime();
 
-    QCOMPARE(session.pendingTimelines()[0].ongoing()->endTime, snapshotEnd);
+    // Type edit must be preserved.
+    QCOMPARE(session.pendingTimelines()[0].ongoing()->type, DurationType::Pause);
+    // End time must have advanced beyond the dialog-open snapshot.
+    QVERIFY2(session.pendingTimelines()[0].ongoing()->endTime > snapshotEnd,
+             "end-time must advance past the dialog-open snapshot");
+    // End time must lie within [before, after] (wall-clock window around refresh).
+    QVERIFY2(session.pendingTimelines()[0].ongoing()->endTime >= before,
+             "end-time must not be earlier than the refresh call");
+    QVERIFY2(session.pendingTimelines()[0].ongoing()->endTime <= after,
+             "end-time must not be later than the refresh call");
 
     tracker.useTimerViaButton(Button::Stop);
 }
@@ -472,6 +487,121 @@ void HistoryEditSessionTest::test_refresh_ongoing_clears_when_engine_has_no_ongo
     session.refreshOngoing(tracker);
 
     QVERIFY(!session.pendingTimelines()[0].ongoing().has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Ongoing type toggle + refresh: end time advances, type preserved in payload
+// ---------------------------------------------------------------------------
+
+void HistoryEditSessionTest::test_toggle_activity_to_pause_payload_end_utc_advances()
+{
+    // Arrange: running Activity session.
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(30);
+
+    HistoryEditSession session;
+    session.buildFromTimer(tracker);
+
+    QVERIFY(session.pendingTimelines()[0].ongoing().has_value());
+    QCOMPARE(session.pendingTimelines()[0].ongoing()->type, DurationType::Activity);
+    const QDateTime dialogOpenEnd = session.pendingTimelines()[0].ongoing()->endTime;
+
+    // Act: user toggles ongoing type to Pause (as historydialog.cpp does).
+    auto ongoing = session.pendingTimelines()[0].ongoing().value();
+    ongoing.type = DurationType::Pause;
+    session.pendingTimelines()[0] = Timeline(session.pendingTimelines()[0].completed(), ongoing);
+
+    // Advance clock so the engine snapshot is later than dialogOpenEnd.
+    QTest::qWait(100);
+
+    const QDateTime before = QDateTime::currentDateTime();
+    session.refreshOngoing(tracker);
+    const QDateTime after = QDateTime::currentDateTime();
+
+    const auto payload = session.buildSavePayload();
+
+    // The ongoing is placed in memoryTimeline.ongoing() and also as the last
+    // element of sessionTimeline.completed() (for DB persistence as unfinalized).
+    QVERIFY(payload.memoryTimeline.ongoing().has_value());
+    // Type in payload must be Pause (user's edit preserved).
+    QCOMPARE(payload.memoryTimeline.ongoing()->type, DurationType::Pause);
+
+    // end_utc must lie in [before, after] — definitely later than dialog-open snapshot.
+    const QDateTime payloadEnd = payload.memoryTimeline.ongoing()->endTime;
+    QVERIFY2(payloadEnd > dialogOpenEnd,
+             "payload end_utc must be later than the dialog-open snapshot");
+    QVERIFY2(payloadEnd >= before, "payload end_utc must not precede the refresh call");
+    QVERIFY2(payloadEnd <= after,  "payload end_utc must not exceed the refresh call");
+
+    // sessionTimeline.completed() must also contain the ongoing with the Pause type.
+    const auto& sessionComp = payload.sessionTimeline.completed();
+    QVERIFY(!sessionComp.empty());
+    QCOMPARE(sessionComp.back().type, DurationType::Pause);
+    QVERIFY2(sessionComp.back().endTime > dialogOpenEnd,
+             "session bucket end_utc must be later than the dialog-open snapshot");
+
+    tracker.useTimerViaButton(Button::Stop);
+}
+
+void HistoryEditSessionTest::test_toggle_pause_to_activity_payload_end_utc_advances()
+{
+    // Arrange: running Pause session (timer paused after Start).
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(20);
+    tracker.useTimerViaButton(Button::Pause);
+    QTest::qWait(20);
+
+    HistoryEditSession session;
+    session.buildFromTimer(tracker);
+
+    QVERIFY(session.pendingTimelines()[0].ongoing().has_value());
+    QCOMPARE(session.pendingTimelines()[0].ongoing()->type, DurationType::Pause);
+    const QDateTime dialogOpenEnd = session.pendingTimelines()[0].ongoing()->endTime;
+
+    // Act: user toggles ongoing type back to Activity.
+    auto ongoing = session.pendingTimelines()[0].ongoing().value();
+    ongoing.type = DurationType::Activity;
+    session.pendingTimelines()[0] = Timeline(session.pendingTimelines()[0].completed(), ongoing);
+
+    QTest::qWait(100);
+
+    const QDateTime before = QDateTime::currentDateTime();
+    session.refreshOngoing(tracker);
+    const QDateTime after = QDateTime::currentDateTime();
+
+    const auto payload = session.buildSavePayload();
+
+    // Type must be Activity (user's edit preserved).
+    QVERIFY(payload.memoryTimeline.ongoing().has_value());
+    QCOMPARE(payload.memoryTimeline.ongoing()->type, DurationType::Activity);
+
+    // end_utc must lie in [before, after].
+    const QDateTime payloadEnd = payload.memoryTimeline.ongoing()->endTime;
+    QVERIFY2(payloadEnd > dialogOpenEnd,
+             "payload end_utc must be later than the dialog-open snapshot");
+    QVERIFY2(payloadEnd >= before, "payload end_utc must not precede the refresh call");
+    QVERIFY2(payloadEnd <= after,  "payload end_utc must not exceed the refresh call");
+
+    // sessionTimeline.completed() must also contain the ongoing with the Activity type.
+    const auto& sessionComp = payload.sessionTimeline.completed();
+    QVERIFY(!sessionComp.empty());
+    QCOMPARE(sessionComp.back().type, DurationType::Activity);
+    QVERIFY2(sessionComp.back().endTime > dialogOpenEnd,
+             "session bucket end_utc must be later than the dialog-open snapshot");
+
+    tracker.useTimerViaButton(Button::Stop);
 }
 
 // ---------------------------------------------------------------------------
