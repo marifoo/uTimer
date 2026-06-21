@@ -153,7 +153,7 @@ void HistoryEditSession::buildFromTimer(Timer& timer)
 
 void HistoryEditSession::refreshOngoing(Timer& timer)
 {
-    if (ongoingRowModified_ || pendingTimelines_.empty() || !pages_[0].isCurrent)
+    if (pendingTimelines_.empty() || !pages_[0].isCurrent)
         return;
 
     const auto fresh = timer.getOngoingDuration();
@@ -162,7 +162,12 @@ void HistoryEditSession::refreshOngoing(Timer& timer)
         fresh.has_value() && cur.has_value() &&
         fresh->segment_id == cur->segment_id;
     if (stillSameOngoing) {
-        pendingTimelines_[0] = Timeline(pendingTimelines_[0].completed(), fresh);
+        // Advance the end time from the engine snapshot while preserving any
+        // type edit the user may have made to the pending ongoing segment.
+        TimeDuration updated = cur.value();
+        updated.endTime = fresh->endTime;
+        updated.duration = updated.startTime.msecsTo(updated.endTime);
+        pendingTimelines_[0] = Timeline(pendingTimelines_[0].completed(), updated);
     } else if (!fresh.has_value() && cur.has_value()) {
         // Engine has no valid ongoing (e.g. cross-midnight after a deferred
         // midnight stop). Clear it so commit() does not anchor a stale
@@ -255,11 +260,6 @@ void HistoryEditSession::setPageTimeline(size_t pageIdx, const Timeline& tl)
 {
     if (pageIdx < pendingTimelines_.size())
         pendingTimelines_[pageIdx] = tl;
-}
-
-void HistoryEditSession::markOngoingModified()
-{
-    ongoingRowModified_ = true;
 }
 
 void HistoryEditSession::registerSplitChild(const QString& childSegmentId, bool wasMemory)

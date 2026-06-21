@@ -945,6 +945,13 @@ Timer::EditCommitResult Timer::commitEditedTimeline(const Timeline& edited)
         }
 
         checkpointOk = maybeReanchorCheckpoint(seg);
+    } else if (mode_ != Mode::None) {
+        // The edited timeline has no ongoing segment: the engine must stop.
+        // Clear the anchor so no stale segment_id remains after the commit.
+        session_.clearSegment();
+        checkpointTimer_.stop();
+        mode_ = Mode::None;
+        emit stopped(StopReason::EditApplied);
     }
 
 #ifndef QT_NO_DEBUG

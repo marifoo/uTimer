@@ -1910,3 +1910,61 @@ void TimerTest::test_disabled_history_commitEditedTimeline_succeeds()
 
     tracker.useTimerViaButton(Button::Stop);
 }
+
+// Item B: commitEditedTimeline must clear the segment anchor and stop the engine
+// when the edited timeline has no ongoing segment and mode_ != None.
+void TimerTest::test_commitEditedTimeline_clears_anchor_when_no_ongoing()
+{
+    // Arrange: timer running in Activity mode with a valid segment anchor.
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    QVERIFY(tracker.isActive());
+    QVERIFY(!tracker.sessionState_dbg().segment_id.isEmpty());
+    QVERIFY(tracker.isCheckpointTimerActive_dbg());
+
+    // Build an edited timeline with completed segments but NO ongoing segment.
+    QDateTime now = QDateTime::currentDateTime();
+    std::deque<TimeDuration> completed;
+    auto seg = TimeDuration::create(DurationType::Activity, now.addSecs(-60), now);
+    QVERIFY(seg.has_value());
+    completed.push_back(seg.value());
+    Timeline editedTimeline(completed, std::nullopt);
+
+    // Set up a spy to capture the stopped() signal.
+    QSignalSpy stoppedSpy(&tracker, &Timer::stopped);
+
+    // Act: commit a timeline with no ongoing segment while mode_ != None.
+    const auto commitResult = tracker.commitEditedTimeline(editedTimeline);
+
+    // Assert: commit succeeded.
+    QVERIFY(commitResult.ok);
+
+    // Segment anchor is cleared: no stale segment_id or start time.
+    QVERIFY2(tracker.sessionState_dbg().segment_id.isEmpty(),
+             "segment_id must be cleared after commit with no ongoing segment");
+    QVERIFY2(!tracker.sessionState_dbg().segment_start_time.isValid(),
+             "segment_start_time must be cleared after commit with no ongoing segment");
+
+    // Mode is None.
+    QVERIFY2(tracker.isStopped(),
+             "mode_ must be None after commit with no ongoing segment");
+
+    // Checkpoint timer is not running.
+    QVERIFY2(!tracker.isCheckpointTimerActive_dbg(),
+             "checkpoint timer must be stopped after commit with no ongoing segment");
+
+    // getOngoingDuration() returns nullopt.
+    QVERIFY2(!tracker.getOngoingDuration().has_value(),
+             "getOngoingDuration() must return nullopt after anchor is cleared");
+
+    // stopped(EditApplied) was emitted exactly once.
+    QCOMPARE(stoppedSpy.count(), 1);
+    QCOMPARE(stoppedSpy.first().first().value<Timer::StopReason>(),
+             Timer::StopReason::EditApplied);
+}

@@ -129,9 +129,21 @@ bool HistoryDialog::saveChanges()
 
     // Step 3: Confirm if normalization merged overlapping segments.
     if (payload.needsMergeConfirmation) {
+#ifndef QT_NO_DEBUG
+        QMessageBox::StandardButton answer = QMessageBox::Yes;
+        if (debugOverlapAnswer_.has_value()) {
+            answer = *debugOverlapAnswer_;
+            debugOverlapAnswer_ = std::nullopt;
+        } else {
+            answer = QMessageBox::question(this, "Overlapping Segments",
+                "Overlapping segments were detected and will be merged. Continue?",
+                QMessageBox::Yes | QMessageBox::No);
+        }
+#else
         const auto answer = QMessageBox::question(this, "Overlapping Segments",
             "Overlapping segments were detected and will be merged. Continue?",
             QMessageBox::Yes | QMessageBox::No);
+#endif
         if (answer != QMessageBox::Yes) {
             return false;
         }
@@ -150,8 +162,15 @@ bool HistoryDialog::saveChanges()
         const SessionStoreResult dbResult = timetracker_.replaceAll(historyTimeline, sessionTimeline);
         if (!dbResult.ok() && dbResult.category != SessionStoreResult::Disabled) {
             Logger::Log("[HISTORY] CRITICAL: Failed to save durations to DB: " + dbResult.message);
+#ifndef QT_NO_DEBUG
+            if (!debugSkipCritical_) {
+                QMessageBox::critical(this, "Database Error",
+                    "Failed to save changes to the database. Your changes to historical entries may be lost.");
+            }
+#else
             QMessageBox::critical(this, "Database Error",
                 "Failed to save changes to the database. Your changes to historical entries may be lost.");
+#endif
             return false;
         }
         Logger::Log("[HISTORY] Successfully saved historical durations to DB");
@@ -459,7 +478,6 @@ void HistoryDialog::updateTable(uint idx)
             ongoing.type = newType;
             pendingTimelines[capturedPageIdx] =
                 Timeline(pendingTimelines[capturedPageIdx].completed(), ongoing);
-            session_.markOngoingModified();
             const QString ts = newType == DurationType::Activity ? "Activity  " : "Pause  ";
             if (table_->item(displayRow, 0)) {
                 table_->item(displayRow, 0)->setText(ts);
@@ -544,6 +562,11 @@ void HistoryDialog::showContextMenu(const QPoint& pos)
  * 3. Validates the result to ensure no duration is lost or created (sum check).
  * 4. Atomically replaces the original entry with the two new entries in the deque.
  */
+void HistoryDialog::presetSplitDialog(SplitDialog& dlg, const TimeDuration& duration) const
+{
+    dlg.setFirstSegmentType(duration.type);
+}
+
 void HistoryDialog::onSplitRow()
 {
     if (contextMenuRow_ < 0) return;
@@ -588,7 +611,7 @@ void HistoryDialog::onSplitRow()
 
     // Show split dialog; preset type based on source row.
     SplitDialog dlg(start, end, this);
-    dlg.setFirstSegmentType(duration.type);
+    presetSplitDialog(dlg, duration);
     if (dlg.exec() == QDialog::Accepted) {
         QDateTime splitTime = dlg.getSplitTime();
         qint64 firstDuration = start.msecsTo(splitTime);
@@ -629,3 +652,55 @@ void HistoryDialog::onSplitRow()
         updateTable(idx);
     }
 }
+
+#ifndef QT_NO_DEBUG
+/**
+ * Applies a split without showing SplitDialog, for use in tests that run under
+ * the offscreen QPA plugin (where exec() triggers propagateSizeHints() warnings).
+ * Splits at the midpoint of the row, same logic as onSplitRow() after dialog acceptance.
+ */
+void HistoryDialog::applySplit_dbg(int row, int page, DurationType firstType, DurationType secondType)
+{
+    if (page < 0) return;
+    uint idx = static_cast<uint>(page);
+    auto& pendingTimelines = session_.pendingTimelines();
+    if (idx >= pendingTimelines.size()
+        || row < 0
+        || row >= static_cast<int>(pendingTimelines[idx].completed().size()))
+        return;
+
+    const auto& completed = pendingTimelines[idx].completed();
+    const TimeDuration& duration = completed[row];
+    const QDateTime start = duration.startTime;
+    const QDateTime end = duration.endTime;
+    // Split at midpoint (same default as SplitDialog).
+    const QDateTime splitTime = start.addSecs(start.secsTo(end) / 2);
+
+    const QString origId = completed[row].segment_id.toString();
+    const bool wasMemory = session_.originIsMemory().value(origId, true);
+    const size_t prevSize = completed.size();
+
+    pendingTimelines[idx] = pendingTimelines[idx].withSplit(
+        static_cast<size_t>(row), splitTime, firstType, secondType);
+
+    const auto& newComp = pendingTimelines[idx].completed();
+    if (newComp.size() > prevSize && row + 1 < static_cast<int>(newComp.size()))
+        session_.registerSplitChild(newComp[row + 1].segment_id.toString(), wasMemory);
+}
+
+/**
+ * Runs onSplitRow()'s real preset routine (presetSplitDialog) on a SplitDialog for the
+ * source row and reads the value back, without exec()/show() — so it covers the
+ * production preset wiring without realizing a window (which emits offscreen QPA warnings).
+ */
+DurationType HistoryDialog::splitDialogPresetFirstType_dbg(int row, int page)
+{
+    uint idx = static_cast<uint>(page);
+    const auto& completed = session_.pendingTimelines()[idx].completed();
+    const TimeDuration& duration = completed[row];
+
+    SplitDialog dlg(duration.startTime, duration.endTime, this);
+    presetSplitDialog(dlg, duration);
+    return dlg.getFirstSegmentType();
+}
+#endif // !QT_NO_DEBUG

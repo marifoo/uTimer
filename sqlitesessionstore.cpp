@@ -82,7 +82,7 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
     // Record whether this is a fresh DB before opening.
     db_was_fresh_ = !QFile::exists(db.databaseName());
 
-    // Open the connection and run one-time schema setup.
+    // Open the connection.
     if (!db.open()) {
         Logger::Log("[DB] Error opening database: " + db.lastError().text());
         return;
@@ -96,8 +96,21 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
         db.close();
         return;
     }
-    if (!ensureSchema()) {
-        db.close();
+
+    if (db_was_fresh_) {
+        // Fresh DB: build the full schema now.  checkSchemaOnStartup() will
+        // see db_was_fresh_ == true and skip validation, returning Created.
+        if (!ensureSchema()) {
+            db.close();
+        }
+    } else {
+        // Existing DB: no DDL until checkSchemaOnStartup() validates the schema.
+        // Set PRAGMA synchronous=NORMAL so writes on this connection behave
+        // correctly even before the schema is confirmed.
+        QSqlQuery syncQuery(db);
+        if (!syncQuery.exec("PRAGMA synchronous=NORMAL")) {
+            Logger::Log("[DB] Warning: Failed to set synchronous=NORMAL: " + syncQuery.lastError().text());
+        }
     }
 }
 
@@ -353,6 +366,22 @@ SchemaStatus SqliteSessionStore::checkSchemaOnStartup()
         if (!foundUniqueSegmentId) {
             Logger::Log("[DB] checkSchemaOnStartup: missing UNIQUE(segment_id) constraint");
             return SchemaStatus::Outdated;
+        }
+    }
+
+    // Additive DDL that is safe to (re)create on any validated existing DB.
+    // These objects are absent when upgrading from older app versions that
+    // pre-date app_settings / idx_segment_id.  Running them here (after
+    // validation passes) ensures no DDL touches an incompatible DB.
+    if (!ensureSettingsTable()) {
+        Logger::Log("[DB] Warning: Failed to ensure app_settings table on existing DB");
+        // Non-fatal: log and continue; the durations table is the critical one.
+    }
+
+    {
+        QSqlQuery segmentIndexQuery(db);
+        if (!segmentIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_segment_id ON durations(segment_id)")) {
+            Logger::Log("[DB] Warning: Failed to create segment_id index: " + segmentIndexQuery.lastError().text());
         }
     }
 
@@ -1310,6 +1339,13 @@ SqliteSessionStore::ReconcileResult SqliteSessionStore::reconcileUnfinalizedChec
 
     ReconcileResult result;
 
+#ifndef QT_NO_DEBUG
+    if (force_reconcile_failure_dbg_) {
+        result.ok = false;
+        return result;
+    }
+#endif
+
     if (history_days_to_keep_ == 0) {
         result.ok = false;
         return result;
@@ -1402,7 +1438,7 @@ SessionStoreResult SqliteSessionStore::setLastCleanShutdownMarker(const QDateTim
     return SessionStoreResult::success();
 }
 
-std::optional<SqliteSessionStore::MarkerResult> SqliteSessionStore::consumeLastCleanShutdownMarker()
+std::optional<SqliteSessionStore::MarkerResult> SqliteSessionStore::readLastCleanShutdownMarker()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1414,16 +1450,11 @@ std::optional<SqliteSessionStore::MarkerResult> SqliteSessionStore::consumeLastC
         return MarkerResult { {}, MarkerResult::Status::Error };
     }
 
-    if (!db.transaction()) {
-        return MarkerResult { {}, MarkerResult::Status::Error };
-    }
-
     std::optional<QDateTime> parsedTs;
     QSqlQuery readQuery(db);
     readQuery.prepare("SELECT value FROM app_settings WHERE key = :key");
     readQuery.bindValue(":key", QString::fromLatin1(kLastCleanShutdownKey));
     if (!readQuery.exec()) {
-        db.rollback();
         return MarkerResult { {}, MarkerResult::Status::Error };
     }
     if (readQuery.next()) {
@@ -1437,23 +1468,38 @@ std::optional<SqliteSessionStore::MarkerResult> SqliteSessionStore::consumeLastC
         }
     }
 
+    if (parsedTs.has_value()) {
+        return MarkerResult { *parsedTs, MarkerResult::Status::Found };
+    }
+    return MarkerResult { {}, MarkerResult::Status::NotFound };
+}
+
+bool SqliteSessionStore::deleteLastCleanShutdownMarker()
+{
+    QMutexLocker locker(&db_mutex_);
+
+    if (!ensureOpen()) {
+        return false;
+    }
+
+    if (!db.transaction()) {
+        return false;
+    }
+
     QSqlQuery deleteQuery(db);
     deleteQuery.prepare("DELETE FROM app_settings WHERE key = :key");
     deleteQuery.bindValue(":key", QString::fromLatin1(kLastCleanShutdownKey));
     if (!deleteQuery.exec()) {
         db.rollback();
-        return MarkerResult { {}, MarkerResult::Status::Error };
+        return false;
     }
 
     if (!db.commit()) {
         db.rollback();
-        return MarkerResult { {}, MarkerResult::Status::Error };
+        return false;
     }
 
-    if (parsedTs.has_value()) {
-        return MarkerResult { *parsedTs, MarkerResult::Status::Found };
-    }
-    return MarkerResult { {}, MarkerResult::Status::NotFound };
+    return true;
 }
 
 /**
@@ -1470,9 +1516,11 @@ StartupRecoveryResult SqliteSessionStore::recoverStartupCheckpoints(const QDateT
 {
     StartupRecoveryResult result;
 
-    // Consume the marker first.  If the read fails, do not reconcile — DB state
-    // is unknown and finalising rows could conflict with in-progress data.
-    const std::optional<MarkerResult> markerResult = consumeLastCleanShutdownMarker();
+    // Read the marker first (without deleting it).  If the read fails, do not
+    // reconcile — DB state is unknown and finalising rows could conflict with
+    // in-progress data.  The marker is only deleted after reconciliation succeeds
+    // so that ok==false never leaves the store in a mutated state.
+    const std::optional<MarkerResult> markerResult = readLastCleanShutdownMarker();
     if (markerResult.has_value() && markerResult->status == MarkerResult::Status::Error) {
         Logger::Log("[DB] recoverStartupCheckpoints: marker read failed — skipping orphan reconciliation");
         result.ok = false;
@@ -1483,6 +1531,10 @@ StartupRecoveryResult SqliteSessionStore::recoverStartupCheckpoints(const QDateT
 
     const std::deque<OrphanCheckpoint> orphans = loadUnfinalizedCheckpoints();
     if (orphans.empty()) {
+        // No orphans: delete the marker (clean state) and return.
+        if (markerResult.has_value()) {
+            deleteLastCleanShutdownMarker();
+        }
         return result;
     }
 
@@ -1505,6 +1557,11 @@ StartupRecoveryResult SqliteSessionStore::recoverStartupCheckpoints(const QDateT
         Logger::Log("[DB] recoverStartupCheckpoints: reconciliation transaction failed");
         result.ok = false;
         return result;
+    }
+
+    // Reconciliation succeeded: now it is safe to consume the marker.
+    if (markerResult.has_value()) {
+        deleteLastCleanShutdownMarker();
     }
 
     result.finalized_count = static_cast<int>(reconcile.finalized.size());

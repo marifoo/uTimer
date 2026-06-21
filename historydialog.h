@@ -3,6 +3,7 @@
 
 #include <QDialog>
 #include <QDate>
+#include <QMessageBox>
 #include <optional>
 #include "types.h"
 #include "timer.h"
@@ -66,6 +67,8 @@ private:
     void addReadOnlyRow(QTableWidget* table, int row, const TimeDuration& d, const QString& suffix);
     void showContextMenu(const QPoint& pos);
     QString buildLoadReconciliationMessage() const;
+    /// Presets a SplitDialog's first segment type from the source row before it is shown.
+    void presetSplitDialog(SplitDialog& dlg, const TimeDuration& duration) const;
 
 private slots:
     void onOlder();
@@ -92,6 +95,23 @@ public:
     void onSplitRow_dbg() { onSplitRow(); }
     /// Updates the page totals label for the given page index.
     void updateTotalsLabel_dbg(uint idx) { updateTotalsLabel(idx); }
+
+    /// Applies a split without showing SplitDialog (avoids offscreen QPA warnings in tests).
+    /// Splits row `row` on page `page` into `firstType` / `secondType` at the midpoint.
+    void applySplit_dbg(int row, int page, DurationType firstType, DurationType secondType);
+
+    /// Performs onSplitRow()'s preset step (construct SplitDialog, preset its first
+    /// segment type from the source row) and returns the dialog's resulting first
+    /// segment type, without exec()/show() — so it covers the production preset wiring
+    /// without realizing a window (which emits offscreen QPA warnings).
+    DurationType splitDialogPresetFirstType_dbg(int row, int page);
+
+    /// If set, saveChanges() uses this answer instead of showing QMessageBox::question()
+    /// for the overlap confirmation.  Reset to nullopt after each saveChanges() call.
+    std::optional<QMessageBox::StandardButton> debugOverlapAnswer_;
+
+    /// If true, saveChanges() skips QMessageBox::critical() on DB failure (still returns false).
+    bool debugSkipCritical_ = false;
 #endif
 
     /**

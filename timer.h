@@ -100,7 +100,7 @@ public:
         MidnightScheduled,  ///< DayBoundaryWatcher scheduled timer fired at 23:59:59.500.
         MidnightWatchdog,   ///< Watchdog detected a cross-midnight ongoing segment.
         Shutdown,           ///< Application shutdown (destructor or ShutdownCoordinator).
-        EditApplied,        ///< Reserved for future use (history edit that stops the engine).
+        EditApplied,        ///< History edit committed with no ongoing segment: tracking stopped.
     };
 
     /// Cause of a pause/resume transition. Carried by modeChanged() so MainWin
@@ -294,6 +294,13 @@ public:
      *   - re-anchoring checkpoint tracking (segment id, start time, DB row),
      *   - deciding whether checkpoint writes are allowed (suspended while
      *     dialog_open_ or is_locked_).
+     *
+     * Observer behavior:
+     *   - ongoing present, type differs from current mode_: emits started(true)
+     *     or paused() so the UI reflects the new mode.
+     *   - ongoing absent, mode_ was not None: emits stopped(EditApplied) so
+     *     the tray/UI learns that tracking ended due to the edit.
+     *   - no mode change: no signal emitted.
      *
      * Returns EditCommitResult::failure if the checkpoint write fails;
      * success otherwise.

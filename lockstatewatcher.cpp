@@ -166,9 +166,16 @@ LockEvent LockStateWatcher::determineLockEvent(LockQueryResult query_result)
  * The lock_timer_ is invalidated after emitting LongOngoingLock to prevent
  * repeated emissions during the same lock session.
  */
+bool LockStateWatcher::shouldEmitLongLock(LockQueryResult latest, qint64 elapsedMs) const
+{
+	return latest != LockQueryResult::Unknown
+	       && elapsedMs >= settings_.getBackpauseMsec();
+}
+
 void LockStateWatcher::update()
 {
-	const LockEvent lock_event = determineLockEvent(isSessionLocked());
+	const LockQueryResult q = isSessionLocked();
+	const LockEvent lock_event = determineLockEvent(q);
 
 	if (lock_event == LockEvent::Lock) {
 		Logger::Log("[LOCK] >> Lock determined");
@@ -183,7 +190,7 @@ void LockStateWatcher::update()
 		emit desktopLockEvent(LockEvent::Unlock);
 	}
 
-	if (lock_timer_.isValid() && (lock_timer_.elapsed() >= settings_.getBackpauseMsec())) {
+	if (lock_timer_.isValid() && shouldEmitLongLock(q, lock_timer_.elapsed())) {
 		Logger::Log("[LOCK] Current Lock Duration = " + QString::number(lock_timer_.elapsed()) + "ms");
 		lock_timer_.invalidate();
 		Logger::Log("[LOCK] Ongoing Lock is long enough to be counted as a Pause");

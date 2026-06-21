@@ -1,9 +1,6 @@
 #include "test_history_commit.h"
 #include <QtTest>
-#include <QTimer>
 #include <QMessageBox>
-#include <QAbstractButton>
-#include <QApplication>
 
 #include "../historydialog.h"
 
@@ -67,17 +64,10 @@ void HistoryCommitTest::test_accept_stays_open_on_db_failure()
         QSqlQuery lockQuery(lockDb);
         QVERIFY(lockQuery.exec("BEGIN EXCLUSIVE TRANSACTION"));
 
-        // Auto-dismiss the "Database Error" critical dialog.
-        QTimer::singleShot(0, []() {
-            for (QWidget* w : QApplication::topLevelWidgets()) {
-                auto* mb = qobject_cast<QMessageBox*>(w);
-                if (mb && mb->windowTitle() == "Database Error") {
-                    mb->accept();
-                    return;
-                }
-            }
-        });
-
+        // Skip QMessageBox::critical() to avoid offscreen QPA propagateSizeHints() warnings.
+        // The DB-failure path is still fully exercised: replaceAll fails, debugSkipCritical_
+        // suppresses only the dialog, and accept() is expected to NOT close the dialog.
+        dialog.debugSkipCritical_ = true;
         dialog.accept();
 
         QVERIFY(lockQuery.exec("ROLLBACK"));
@@ -120,17 +110,9 @@ void HistoryCommitTest::test_accept_stays_open_on_merge_decline()
 
     HistoryDialog dialog(tracker, settings);
 
-    // User clicks "No" on the merge confirmation.
-    QTimer::singleShot(0, []() {
-        for (QWidget* w : QApplication::topLevelWidgets()) {
-            auto* mb = qobject_cast<QMessageBox*>(w);
-            if (mb && mb->windowTitle() == "Overlapping Segments") {
-                mb->button(QMessageBox::No)->click();
-                return;
-            }
-        }
-    });
-
+    // Bypass QMessageBox::question() to avoid offscreen QPA propagateSizeHints() warnings.
+    // Supplies "No" — same as user declining the merge — so accept() should not close the dialog.
+    dialog.debugOverlapAnswer_ = QMessageBox::No;
     dialog.accept();
 
     // Dialog must remain open (result still not Accepted).

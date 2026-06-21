@@ -114,6 +114,12 @@ private slots:
 
     // saveCheckpoint demotion guard: must not overwrite finalized rows
     void test_saveCheckpoint_does_not_demote_finalized_row();
+
+    // Item C: validate schema before any additive DDL
+    void test_outdated_schema_no_additive_ddl_on_incompatible_db();
+
+    // Item D: marker must survive reconciliation failure
+    void test_recoverStartupCheckpoints_marker_intact_on_reconcile_failure();
 };
 
 #endif // TEST_DATABASE_H

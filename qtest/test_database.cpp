@@ -2228,3 +2228,154 @@ void DatabaseTest::test_saveCheckpoint_does_not_demote_finalized_row()
     QCOMPARE(verifyQuery.value(1).toString(), end.toUTC().toString(Qt::ISODateWithMs));
     manager.lazyClose_dbg();
 }
+
+// ============================================================================
+// Item C: validate schema before any additive DDL
+// ============================================================================
+
+/**
+ * An incompatible existing DB (legacy columns, no app_settings, no indexes)
+ * must cause checkSchemaOnStartup() to return Outdated without creating
+ * app_settings, idx_segment_id, or idx_start_utc.
+ */
+void DatabaseTest::test_outdated_schema_no_additive_ddl_on_incompatible_db()
+{
+    // Arrange: seed a legacy durations table (wrong columns → Outdated).
+    // Do NOT create app_settings or any indexes.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+
+    const QString seedConn = "item_c_seed";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", seedConn);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        // Legacy schema: wrong column names, no UNIQUE, no app_settings, no indexes.
+        QVERIFY(q.exec(
+            "CREATE TABLE durations ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "segment_id TEXT NOT NULL,"
+            "type INTEGER NOT NULL,"
+            "start_date TEXT NOT NULL,"
+            "end_date TEXT NOT NULL,"
+            "is_finalized INTEGER NOT NULL DEFAULT 0"
+            ")"
+        ));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(seedConn);
+
+    // Act: construct the store and call checkSchemaOnStartup().
+    SqliteSessionStore manager(settings);
+    SchemaStatus status = manager.checkSchemaOnStartup();
+
+    // Assert: schema is Outdated.
+    QCOMPARE(status, SchemaStatus::Outdated);
+
+    // Assert: no additive objects were created by the constructor or
+    // checkSchemaOnStartup() before the Outdated verdict was returned.
+    const QString verifyConn = "item_c_verify";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", verifyConn);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+
+        // app_settings must NOT exist.
+        QVERIFY(q.exec(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='table' AND name='app_settings'"
+        ));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 0);
+
+        // idx_segment_id must NOT exist.
+        QVERIFY(q.exec(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='index' AND name='idx_segment_id'"
+        ));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 0);
+
+        // idx_start_utc must NOT exist.
+        QVERIFY(q.exec(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='index' AND name='idx_start_utc'"
+        ));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 0);
+
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(verifyConn);
+}
+
+// ============================================================================
+// Item D: marker must survive a reconciliation failure
+// ============================================================================
+
+/**
+ * When recoverStartupCheckpoints() returns ok==false due to a reconciliation
+ * failure, the last_clean_shutdown marker must still be present in app_settings
+ * (no rows were mutated).
+ *
+ * Failure injection: setForceReconcileFailure_dbg(true) makes
+ * reconcileUnfinalizedCheckpoints() return ok=false immediately, simulating a
+ * DB error during the reconcile step — before any rows are touched.
+ */
+void DatabaseTest::test_recoverStartupCheckpoints_marker_intact_on_reconcile_failure()
+{
+    // Arrange: fresh DB with one unfinalized orphan and a clean-shutdown marker.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    QVERIFY(manager.ensureOpen_dbg());
+
+    // Seed a valid unfinalized orphan (duration > 1 s, not stale).
+    const QDateTime startUtc = QDateTime(QDate(2025, 6, 1), QTime(10, 0, 0), Qt::UTC);
+    const QDateTime endUtc   = QDateTime(QDate(2025, 6, 1), QTime(10, 5, 0), Qt::UTC);
+    const qint64 orphanId = seedOrphanRow(manager, startUtc, endUtc);
+    QVERIFY(orphanId > 0);
+
+    // Seed the clean-shutdown marker directly.
+    QSqlQuery q(manager.rawDb_dbg());
+    QVERIFY(q.exec(
+        "INSERT OR REPLACE INTO app_settings (key, value) "
+        "VALUES ('last_clean_shutdown', '2025-06-01T10:05:00.000Z')"
+    ));
+
+    manager.lazyClose_dbg();
+
+    // Act: force reconciliation to fail, then recover.
+    manager.setForceReconcileFailure_dbg(true);
+    const QDateTime now = QDateTime(QDate(2025, 6, 1), QTime(10, 10, 0), Qt::UTC);
+    StartupRecoveryResult res = manager.recoverStartupCheckpoints(now);
+
+    // Assert: recovery reports failure.
+    QVERIFY(!res.ok);
+
+    // Assert: marker is still present (no rows were mutated).
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery checkMarker(manager.rawDb_dbg());
+    QVERIFY(checkMarker.exec(
+        "SELECT COUNT(*) FROM app_settings WHERE key = 'last_clean_shutdown'"
+    ));
+    QVERIFY(checkMarker.next());
+    QCOMPARE(checkMarker.value(0).toInt(), 1);
+
+    // Also verify the orphan row is still unfinalized.
+    QSqlQuery checkOrphan(manager.rawDb_dbg());
+    checkOrphan.prepare("SELECT is_finalized FROM durations WHERE id = :id");
+    checkOrphan.bindValue(":id", orphanId);
+    QVERIFY(checkOrphan.exec());
+    QVERIFY(checkOrphan.next());
+    QCOMPARE(checkOrphan.value(0).toInt(), 0);
+
+    manager.lazyClose_dbg();
+}

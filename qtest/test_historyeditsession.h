@@ -49,8 +49,12 @@ private slots:
 
     // 5.1 — ongoing refresh/clear behaviour
     void test_refresh_ongoing_updates_end_time();
-    void test_refresh_ongoing_skipped_when_user_modified();
+    void test_refresh_ongoing_advances_end_time_and_preserves_user_type_edit();
     void test_refresh_ongoing_clears_when_engine_has_no_ongoing();
+
+    // 5.1 — ongoing type toggle + refresh: end time advances, type preserved in payload
+    void test_toggle_activity_to_pause_payload_end_utc_advances();
+    void test_toggle_pause_to_activity_payload_end_utc_advances();
 
     // 5.1 — payload correctness (history / session / memory timelines)
     void test_payload_history_vs_session_buckets();

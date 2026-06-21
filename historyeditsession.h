@@ -18,7 +18,6 @@ class Timer;
  *   - The page list (pendingTimelines_ + display-only cross-midnight rows per page)
  *   - Origin tracking (which segments came from in-memory session vs DB)
  *   - Cross-midnight rows preserved unchanged through save
- *   - The ongoingRowModified_ flag (did the user edit the ongoing segment's type?)
  *
  * No widget dependency. Can be constructed and exercised in tests without a QPA platform.
  *
@@ -63,8 +62,9 @@ public:
     /// from the Timer's current state and its DB history.
     void buildFromTimer(Timer& timer);
 
-    /// Refreshes the ongoing segment's end-time from the engine, unless the user
-    /// has already edited it (ongoingRowModified_ == true). Call just before save.
+    /// Refreshes the ongoing segment's end-time from the engine. If the user has
+    /// edited the type, the type edit is preserved while the end-time advances.
+    /// Call just before save.
     void refreshOngoing(Timer& timer);
 
     /// Builds the three timeline buckets ready for persistence and Timer commit.
@@ -76,9 +76,6 @@ public:
     /// Replaces the Timeline for page[pageIdx] (used by type-toggle checkboxes).
     void setPageTimeline(size_t pageIdx, const Timeline& tl);
 
-    /// Marks the ongoing row as user-modified (suppresses end-time refresh on save).
-    void markOngoingModified();
-
     /// Registers the second half's segment_id with the same origin as the first
     /// half after a split. Called by HistoryDialog::onSplitRow().
     void registerSplitChild(const QString& childSegmentId, bool wasMemory);
@@ -89,7 +86,6 @@ public:
     std::vector<Timeline>& pendingTimelines() { return pendingTimelines_; }
     const QHash<QString, bool>& originIsMemory() const { return originIsMemory_; }
     const std::deque<TimeDuration>& crossMidnightRows() const { return crossMidnightRows_; }
-    bool ongoingRowModified() const { return ongoingRowModified_; }
     size_t pageCount() const { return pages_.size(); }
 
 private:
@@ -97,7 +93,6 @@ private:
     std::vector<Timeline> pendingTimelines_;
     QHash<QString, bool> originIsMemory_; ///< segment_id.toString() → true if memory row
     std::deque<TimeDuration> crossMidnightRows_; ///< cross-midnight rows preserved as-is through save
-    bool ongoingRowModified_ = false;
 };
 
 #endif // HISTORYEDITSESSION_H
