@@ -19,18 +19,19 @@ void ShutdownCoordinator::pumpEvents(int budgetMs)
         QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
 }
 
-void ShutdownCoordinator::run(bool forceDirectPath)
+void ShutdownCoordinator::run(ShutdownMode mode)
 {
     if (shutdown_completed_) {
         Logger::Log("[TIMER] Shutdown already completed, skipping");
         return;
     }
 
-    Logger::Log(QString("[TIMER] Shutdown requested (force_direct=%1)").arg(forceDirectPath));
+    Logger::Log(QString("[TIMER] Shutdown requested (mode=%1)")
+                .arg(mode == ShutdownMode::Direct ? "Direct" : "DrainEvents"));
 
     auto result = timetracker_.shutdown();
 
-    if (!forceDirectPath) {
+    if (mode == ShutdownMode::DrainEvents) {
         // Normal shutdown: pump the event loop so connected signals
         // (GUI sync, checkpoint flush) can fire before we proceed.
         pumpEvents(150);

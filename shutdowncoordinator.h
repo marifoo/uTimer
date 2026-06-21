@@ -4,12 +4,19 @@
 class Timer;
 class SessionStore;
 
+/// Controls which shutdown path ShutdownCoordinator::run() takes.
+/// DrainEvents: pump the Qt event loop for 150 ms so queued signals
+///              (GUI sync, checkpoint flush) can fire before cleanup.
+/// Direct:      skip the event-loop pump — required when the OS event loop
+///              is restricted (Windows WM_QUERYENDSESSION / WM_ENDSESSION).
+enum class ShutdownMode { DrainEvents, Direct };
+
 class ShutdownCoordinator
 {
 public:
     ShutdownCoordinator(Timer& timetracker, SessionStore& db);
 
-    void run(bool forceDirectPath = false);
+    void run(ShutdownMode mode = ShutdownMode::DrainEvents);
 
 private:
     void pumpEvents(int budgetMs);

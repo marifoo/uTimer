@@ -24,7 +24,7 @@ void ShutdownCoordinatorTest::test_G_happy_path_stop_flush_marker()
 
     fakeDb.callLog.clear();
 
-    coordinator.run(false);
+    coordinator.run(ShutdownMode::DrainEvents);
 
     QVERIFY(!tracker.getOngoingDuration().has_value());
     QVERIFY(fakeDb.callLog.contains("flushToDisc"));
@@ -53,11 +53,11 @@ void ShutdownCoordinatorTest::test_H_idempotent_second_run_is_noop()
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
 
-    coordinator.run(false);
+    coordinator.run(ShutdownMode::DrainEvents);
 
     fakeDb.callLog.clear();
 
-    coordinator.run(false);
+    coordinator.run(ShutdownMode::DrainEvents);
 
     QVERIFY(!fakeDb.callLog.contains("flushToDisc"));
     QVERIFY(!fakeDb.callLog.contains("setLastCleanShutdownMarker"));
@@ -80,8 +80,8 @@ void ShutdownCoordinatorTest::test_J_pump_drains_queued_events()
     bool slotRan = false;
     QTimer::singleShot(0, [&slotRan]() { slotRan = true; });
 
-    // run(false) calls pumpEvents(150) before flushToDisc.
-    coordinator.run(false);
+    // run(DrainEvents) calls pumpEvents(150) before flushToDisc.
+    coordinator.run(ShutdownMode::DrainEvents);
 
     QVERIFY2(slotRan, "pumpEvents must drain queued events");
 }
@@ -105,11 +105,11 @@ void ShutdownCoordinatorTest::test_I_force_direct_skips_retry_loop()
 
     fakeDb.callLog.clear();
 
-    // The force-direct path must not block for 150 ms (no processEvents pump).
-    // We measure elapsed time: run(true) with FakeDb completes well under 50 ms.
+    // The Direct path must not block for 150 ms (no processEvents pump).
+    // We measure elapsed time: run(Direct) with FakeDb completes well under 50 ms.
     QElapsedTimer elapsed;
     elapsed.start();
-    coordinator.run(true);
+    coordinator.run(ShutdownMode::Direct);
     qint64 elapsedMs = elapsed.elapsed();
 
     QVERIFY2(elapsedMs < 100, qPrintable(QString("force-direct took %1 ms; expected < 100 ms").arg(elapsedMs)));
