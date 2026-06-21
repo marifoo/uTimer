@@ -89,8 +89,8 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
     }
     // Reject read-only files immediately.  Without this check, db.open() can
     // succeed on a read-only SQLite file (opening in read-only mode), leaving
-    // the connection open but unable to write — identical to the ensureOpen()
-    // guard added in Step 6.
+    // the connection open but unable to write — the same guard ensureOpen()
+    // applies on reconnect.
     if (!QFileInfo(db.databaseName()).isWritable()) {
         Logger::Log("[DB] Warning: Database file is not writable.");
         db.close();
@@ -457,8 +457,8 @@ bool SqliteSessionStore::ensureSettingsTable()
  *   any other SqliteSessionStore operation from seeing the closed connection.
  *   QRecursiveMutex allows re-entrant calls within the same thread.
  *
- * TODO(S16): The current close-copy-reopen approach is correct for rollback-journal
- * mode (no -wal/-shm sidecars).  If WAL mode is ever enabled, switch to SQLite's
+ * The current close-copy-reopen approach is correct for rollback-journal mode
+ * (no -wal/-shm sidecars).  If WAL mode is ever enabled, switch to SQLite's
  * online backup API (sqlite3_backup_*) so the source DB stays open during the copy.
  */
 BackupResult SqliteSessionStore::createBackup(const std::deque<TimeDuration>& durations, TransactionMode mode)
@@ -826,7 +826,7 @@ LoadResult SqliteSessionStore::loadDurations()
             continue;
         }
 
-        // Create TimeDuration — cross-midnight rows are accepted via fromTrusted() so
+        // Create TimeDuration — cross-midnight rows are accepted via fromPersistedRow() so
         // that createPages() can bucket them onto both the start-date and end-date pages.
         if (startDateTime.msecsTo(endDateTime) <= 0) {
             Logger::Log(QString("[DB] Dropped zero/negative-duration row at load: %1 → %2")
@@ -835,7 +835,7 @@ LoadResult SqliteSessionStore::loadDurations()
             result.skipped++;
             continue;
         }
-        result.durations.emplace_back(TimeDuration::fromTrusted(type, startDateTime, endDateTime, segmentId));
+        result.durations.emplace_back(TimeDuration::fromPersistedRow(type, startDateTime, endDateTime, segmentId));
     }
 
     // Rollback is idiomatic for read-only transactions: no writes were made,

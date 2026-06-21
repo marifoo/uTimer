@@ -15,7 +15,7 @@ TimeDuration mk(DurationType type, qint64 startMs, qint64 endMs)
 {
     QDateTime start = QDateTime::fromMSecsSinceEpoch(startMs, Qt::UTC);
     QDateTime end = QDateTime::fromMSecsSinceEpoch(endMs, Qt::UTC);
-    return TimeDuration(type, start, end);
+    return TimeDuration::fromPersistedRow(type, start, end);
 }
 
 QString createSettingsFile(const QString& dirPath, int historyDays)

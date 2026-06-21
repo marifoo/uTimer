@@ -59,7 +59,7 @@ std::deque<TimeDuration> oneRow() {
     const QDateTime t0(today, QTime(10, 0, 0), Qt::UTC);
     const QDateTime t1(today, QTime(10, 30, 0), Qt::UTC);
     std::deque<TimeDuration> rows;
-    rows.emplace_back(DurationType::Activity, t0, t1);
+    rows.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, t0, t1));
     return rows;
 }
 
@@ -111,10 +111,10 @@ void ContractMatrixTest::test_replaceAll_success()
 
     std::deque<TimeDuration> newRows;
     const QDate today = QDate::currentDate();
-    newRows.emplace_back(DurationType::Pause, QDateTime(today, QTime(11,0,0), Qt::UTC),
-                                              QDateTime(today, QTime(11,30,0), Qt::UTC));
-    newRows.emplace_back(DurationType::Pause, QDateTime(today, QTime(12,0,0), Qt::UTC),
-                                              QDateTime(today, QTime(12,30,0), Qt::UTC));
+    newRows.push_back(TimeDuration::fromPersistedRow(DurationType::Pause, QDateTime(today, QTime(11,0,0), Qt::UTC),
+                                                    QDateTime(today, QTime(11,30,0), Qt::UTC)));
+    newRows.push_back(TimeDuration::fromPersistedRow(DurationType::Pause, QDateTime(today, QTime(12,0,0), Qt::UTC),
+                                                    QDateTime(today, QTime(12,30,0), Qt::UTC)));
 
     const SessionStoreResult r = db.replaceAll(Timeline(newRows, std::nullopt), Timeline({}, std::nullopt));
     QCOMPARE(r.category, SessionStoreResult::Success);
@@ -285,7 +285,7 @@ void ContractMatrixTest::test_saveCheckpoint_callerBug_finalized_segmentId()
 
     // Finalize the row via commitSession.
     std::deque<TimeDuration> rows;
-    rows.emplace_back(DurationType::Activity, t0, t1, id);
+    rows.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, t0, t1, id));
     QVERIFY(db.commitSession(Timeline(rows, std::nullopt)).ok());
 
     // Now try to checkpoint with the same segment_id → CallerBug.

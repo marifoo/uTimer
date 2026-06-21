@@ -54,7 +54,7 @@ void HistoryEditSessionTest::test_build_today_page_only_from_memory()
 
     const QDateTime start = todayUTC(10, 0);
     const QDateTime end   = todayUTC(10, 30);
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, start, end));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, start, end));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -79,14 +79,14 @@ void HistoryEditSessionTest::test_build_today_page_memory_plus_db()
     const QDateTime dbStart = todayUTC(8, 0);
     const QDateTime dbEnd   = todayUTC(8, 30);
     fakeDb.loadDurationsResult.durations.push_back(
-        TimeDuration(DurationType::Pause, dbStart, dbEnd));
+        TimeDuration::fromPersistedRow(DurationType::Pause, dbStart, dbEnd));
 
     Timer tracker(settings, fakeDb);
 
     // Memory row (different time, different segment_id)
     const QDateTime memStart = todayUTC(9, 0);
     const QDateTime memEnd   = todayUTC(9, 30);
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -109,7 +109,7 @@ void HistoryEditSessionTest::test_build_historical_page_separate_from_today()
     const QDateTime histStart = yesterdayUTC(10, 0);
     const QDateTime histEnd   = yesterdayUTC(10, 30);
     fakeDb.loadDurationsResult.durations.push_back(
-        TimeDuration(DurationType::Activity, histStart, histEnd));
+        TimeDuration::fromPersistedRow(DurationType::Activity, histStart, histEnd));
 
     Timer tracker(settings, fakeDb);
 
@@ -137,11 +137,11 @@ void HistoryEditSessionTest::test_build_deduplicates_db_row_matching_memory_segm
 
     // Memory row with sharedId
     Timer tracker(settings, fakeDb);
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, start, end, sharedId));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, start, end, sharedId));
 
     // DB row with the same segment_id — should be deduped out.
     fakeDb.loadDurationsResult.durations.push_back(
-        TimeDuration(DurationType::Activity, start.addMSecs(-2), end, sharedId));
+        TimeDuration::fromPersistedRow(DurationType::Activity, start.addMSecs(-2), end, sharedId));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -165,7 +165,7 @@ void HistoryEditSessionTest::test_origin_memory_rows_marked_true()
 
     const QDateTime start = todayUTC(10, 0);
     const QDateTime end   = todayUTC(10, 30);
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, start, end));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, start, end));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -184,7 +184,7 @@ void HistoryEditSessionTest::test_origin_db_rows_marked_false()
     const QDateTime dbStart = yesterdayUTC(10, 0);
     const QDateTime dbEnd   = yesterdayUTC(10, 30);
     fakeDb.loadDurationsResult.durations.push_back(
-        TimeDuration(DurationType::Activity, dbStart, dbEnd));
+        TimeDuration::fromPersistedRow(DurationType::Activity, dbStart, dbEnd));
 
     Timer tracker(settings, fakeDb);
 
@@ -209,7 +209,7 @@ void HistoryEditSessionTest::test_split_registers_child_with_same_origin()
 
     const QDateTime start = todayUTC(10, 0);
     const QDateTime end   = todayUTC(10, 0, 8); // 8-second segment
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, start, end));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, start, end));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -241,7 +241,7 @@ void HistoryEditSessionTest::test_split_history_row_child_is_false_origin()
     const QDateTime histStart = yesterdayUTC(10, 0);
     const QDateTime histEnd   = yesterdayUTC(10, 0, 8);
     fakeDb.loadDurationsResult.durations.push_back(
-        TimeDuration(DurationType::Activity, histStart, histEnd));
+        TimeDuration::fromPersistedRow(DurationType::Activity, histStart, histEnd));
 
     Timer tracker(settings, fakeDb);
 
@@ -279,7 +279,7 @@ void HistoryEditSessionTest::test_type_toggle_updates_pending_timeline()
 
     const QDateTime start = todayUTC(10, 0);
     const QDateTime end   = todayUTC(10, 30);
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, start, end));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, start, end));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -305,13 +305,13 @@ void HistoryEditSessionTest::test_no_merge_needed_for_non_overlapping()
     const QDateTime dbStart = todayUTC(8, 0);
     const QDateTime dbEnd   = todayUTC(8, 30);
     fakeDb.loadDurationsResult.durations.push_back(
-        TimeDuration(DurationType::Pause, dbStart, dbEnd));
+        TimeDuration::fromPersistedRow(DurationType::Pause, dbStart, dbEnd));
 
     Timer tracker(settings, fakeDb);
 
     const QDateTime memStart = todayUTC(9, 0);
     const QDateTime memEnd   = todayUTC(9, 30);
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -331,13 +331,13 @@ void HistoryEditSessionTest::test_merge_needed_for_overlapping_rows()
     const QDateTime dbStart = todayUTC(10, 0);
     const QDateTime dbEnd   = todayUTC(10, 30);
     fakeDb.loadDurationsResult.durations.push_back(
-        TimeDuration(DurationType::Activity, dbStart, dbEnd));
+        TimeDuration::fromPersistedRow(DurationType::Activity, dbStart, dbEnd));
 
     Timer tracker(settings, fakeDb);
 
     const QDateTime memStart = todayUTC(10, 15);
     const QDateTime memEnd   = todayUTC(10, 45);
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -364,7 +364,7 @@ void HistoryEditSessionTest::test_cross_midnight_preserved_in_payload()
     const QDateTime cmStart(yesterday, QTime(23, 50, 0), Qt::LocalTime);
     const QDateTime cmEnd(QDate::currentDate(), QTime(0, 10, 0), Qt::LocalTime);
     fakeDb.loadDurationsResult.durations.push_back(
-        TimeDuration::fromTrusted(DurationType::Activity, cmStart, cmEnd));
+        TimeDuration::fromPersistedRow(DurationType::Activity, cmStart, cmEnd));
 
     Timer tracker(settings, fakeDb);
 
@@ -490,13 +490,13 @@ void HistoryEditSessionTest::test_payload_history_vs_session_buckets()
     const QDateTime histStart = yesterdayUTC(10, 0);
     const QDateTime histEnd   = yesterdayUTC(10, 30);
     fakeDb.loadDurationsResult.durations.push_back(
-        TimeDuration(DurationType::Activity, histStart, histEnd));
+        TimeDuration::fromPersistedRow(DurationType::Activity, histStart, histEnd));
 
     Timer tracker(settings, fakeDb);
 
     const QDateTime memStart = todayUTC(9, 0);
     const QDateTime memEnd   = todayUTC(9, 30);
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -524,14 +524,14 @@ void HistoryEditSessionTest::test_payload_memory_timeline_for_commit()
     const QDateTime dbStart = todayUTC(8, 0);
     const QDateTime dbEnd   = todayUTC(8, 30);
     fakeDb.loadDurationsResult.durations.push_back(
-        TimeDuration(DurationType::Pause, dbStart, dbEnd));
+        TimeDuration::fromPersistedRow(DurationType::Pause, dbStart, dbEnd));
 
     Timer tracker(settings, fakeDb);
 
     // Memory row today.
     const QDateTime memStart = todayUTC(9, 0);
     const QDateTime memEnd   = todayUTC(9, 30);
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -559,14 +559,14 @@ void HistoryEditSessionTest::test_payload_memory_absorbs_merged_memory_row()
     const QDateTime dbStart = todayUTC(10, 0);
     const QDateTime dbEnd   = todayUTC(10, 30);
     fakeDb.loadDurationsResult.durations.push_back(
-        TimeDuration(DurationType::Activity, dbStart, dbEnd));
+        TimeDuration::fromPersistedRow(DurationType::Activity, dbStart, dbEnd));
 
     Timer tracker(settings, fakeDb);
 
     // Memory Activity row 10:15–10:45 (overlaps DB row)
     const QDateTime memStart = todayUTC(10, 15);
     const QDateTime memEnd   = todayUTC(10, 45);
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);

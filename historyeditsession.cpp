@@ -244,7 +244,7 @@ HistoryEditSession::SavePayload HistoryEditSession::buildSavePayload() const
         currentSessionDurations.push_back(ongoingDurationForSave.value());
 
     return SavePayload{
-        Timeline::fromUnchecked(historyDurations),
+        Timeline::fromPersistedRows(historyDurations),
         Timeline(currentSessionDurations, std::nullopt),
         Timeline(currentMemoryDurations, ongoingDurationForSave),
         needsMergeConfirmation

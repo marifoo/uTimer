@@ -298,12 +298,12 @@ void IntegrationTest::test_integration_retention_cleanup_preserves_current()
     
     // Insert data from 5 days ago (should be deleted)
     std::deque<TimeDuration> old;
-    old.emplace_back(DurationType::Activity, now.addDays(-5), now.addDays(-5).addSecs(60));
+    old.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, now.addDays(-5), now.addDays(-5).addSecs(60)));
     QVERIFY(manager.saveDurations(old, TransactionMode::Append));
     
     // Insert data from today (should be kept)
     std::deque<TimeDuration> current;
-    current.emplace_back(DurationType::Activity, now.addSecs(-100), now.addSecs(-90));
+    current.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, now.addSecs(-100), now.addSecs(-90)));
     QVERIFY(manager.saveDurations(current, TransactionMode::Append));
     
     // Cleanup runs in checkSchemaOnStartup(), not in the constructor.
@@ -337,7 +337,7 @@ void IntegrationTest::test_integration_duplicate_prevention()
     
     // Insert same segment twice via update-by-id; second call updates same row.
     std::deque<TimeDuration> durations;
-    durations.emplace_back(DurationType::Activity, start, end);
+    durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, start, end));
     
     QVERIFY(manager.updateDurationsById(durations).ok());
     durations.front().endTime = end.addSecs(10);
@@ -368,7 +368,7 @@ void IntegrationTest::test_integration_empty_database_operations()
 }
 
 // ============================================================================
-// Phase 1 test gate (T1)
+// Shutdown sequence: stop → flush → clean-shutdown marker
 // ============================================================================
 
 void IntegrationTest::test_F_shutdown_sequence_stop_flush_marker()
@@ -419,7 +419,7 @@ void IntegrationTest::test_F_shutdown_sequence_stop_flush_marker()
 }
 
 // ============================================================================
-// Phase 5 pre-flight regression tests (T5.0a)
+// DayBoundaryWatcher regression: cross-midnight behavior
 // ============================================================================
 
 /**
@@ -590,7 +590,7 @@ void IntegrationTest::test_integration_backpause_db_update()
 }
 
 // ============================================================================
-// Phase 5 test gate (Tests Y–AB)
+// DayBoundaryWatcher: scheduled vs watchdog midnight-stop signals
 // ============================================================================
 
 /**
@@ -738,7 +738,7 @@ void IntegrationTest::test_AB_scheduleMidnightStop_is_gone()
 }
 
 /**
- * Phase 3: recoverStartupCheckpoints overlap policy.
+ * recoverStartupCheckpoints overlap policy.
  *
  * Seeds two orphan rows against a real SqliteSessionStore: one that does not
  * overlap any finalised row (should be recovered) and one that does overlap
@@ -808,7 +808,7 @@ void IntegrationTest::test_recoverStartupCheckpoints_overlap_rejected_not_counte
 }
 
 /**
- * Phase 3: recoverStartupCheckpoints reports finalized and dropped counts.
+ * recoverStartupCheckpoints reports finalized and dropped counts.
  *
  * Verifies that finalized_count and dropped_count in StartupRecoveryResult
  * accurately reflect the number of rows finalized vs. orphaned/dropped.
@@ -873,7 +873,7 @@ void IntegrationTest::test_recoverStartupCheckpoints_reports_finalized_and_dropp
 }
 
 /**
- * Phase 3: Timer correctly uses recovered_seconds from recoverStartupCheckpoints.
+ * Timer correctly uses recovered_seconds from recoverStartupCheckpoints.
  *
  * Verifies the Timer → store boundary: Timer passes the recovered_seconds
  * from the store result directly to getStartupRecoveredSeconds().
@@ -966,7 +966,7 @@ void IntegrationTest::test_hasEntriesForDate_timezone()
 
     SqliteSessionStore db(settings);
     std::deque<TimeDuration> durations;
-    durations.emplace_back(TimeDuration::fromTrusted(DurationType::Activity, localNoon, localNoonEnd));
+    durations.emplace_back(TimeDuration::fromPersistedRow(DurationType::Activity, localNoon, localNoonEnd));
     QVERIFY(db.saveDurations(durations, TransactionMode::Append));
 
     // hasEntriesForDate must find this entry.
@@ -1017,8 +1017,8 @@ void IntegrationTest::test_midnight_boundary_timezone()
 
     SqliteSessionStore db(settings);
     std::deque<TimeDuration> durations;
-    durations.emplace_back(TimeDuration::fromTrusted(DurationType::Activity, startOfDay14, endOfDay14));
-    durations.emplace_back(TimeDuration::fromTrusted(DurationType::Activity, startOfDay15, endOfDay15));
+    durations.emplace_back(TimeDuration::fromPersistedRow(DurationType::Activity, startOfDay14, endOfDay14));
+    durations.emplace_back(TimeDuration::fromPersistedRow(DurationType::Activity, startOfDay15, endOfDay15));
     QVERIFY(db.saveDurations(durations, TransactionMode::Append));
 
     // Boundary: 2025-06-14 must see entry A; entry B must not bleed into it.

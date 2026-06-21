@@ -6,7 +6,7 @@
  * - Global event handling (Shutdown, Sleep/Wake)
  * - User warning system (Health checks for too much work / no pause)
  *
- * Day-boundary policy (Phase 5): owned by Timer::DayBoundaryWatcher.
+ * Day-boundary policy: owned by Timer::DayBoundaryWatcher.
  * MainWin only syncs the GUI when it observes the engine has stopped.
  */
 

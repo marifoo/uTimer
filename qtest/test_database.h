@@ -80,7 +80,7 @@ private slots:
     void test_connection_open_after_construction();
     void test_pragma_synchronous_normal_set_after_construction();
 
-    // Phase 4 test gate (T4)
+    // commitSession and replaceAll contract tests
     void test_T_commitSession_upserts_by_segment_id();
     void test_U_commitSession_orphan_cleanup_is_internal();
     void test_V_replaceAll_wipes_and_rewrites();
@@ -100,7 +100,7 @@ private slots:
     void test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dropped();
     void test_reconcileUnfinalizedCheckpoints_outright_drops_are_deleted();
 
-    // Phase 1.1: SchemaStatus enum tests
+    // SchemaStatus enum: validation of existing DB shape
     void test_schema_status_ready_on_existing_valid_db();
     void test_schema_status_outdated_legacy_columns();
     void test_schema_status_outdated_missing_column();
@@ -108,11 +108,11 @@ private slots:
     void test_schema_status_ready_recreates_missing_idx_start_utc();
     void test_schema_status_inaccessible_readonly_file();
 
-    // Phase 1.2: initializeFromStore isolation tests
+    // Timer::initializeFromStore isolation: no side effects before recovery is called
     void test_constructor_only_does_not_consume_marker();
     void test_outdated_schema_does_not_mutate_db();
 
-    // Phase 2.1: checkpoint demotion guard
+    // saveCheckpoint demotion guard: must not overwrite finalized rows
     void test_saveCheckpoint_does_not_demote_finalized_row();
 };
 

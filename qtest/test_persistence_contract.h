@@ -9,8 +9,8 @@
  * behaviors against the REAL SqliteSessionStore (no spy or duplicate logic).
  *
  * These tests were extracted from FakeSessionStore when it was simplified to a
- * pure spy (Phase 6.2).  They confirm that SqliteSessionStore itself satisfies
- * the persistence contracts that tests previously relied on the fake to mirror.
+ * pure spy.  They confirm that SqliteSessionStore itself satisfies the persistence
+ * contracts that tests previously relied on the fake to mirror.
  */
 class PersistenceContractTest : public QObject
 {

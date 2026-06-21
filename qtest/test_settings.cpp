@@ -1,6 +1,62 @@
 #include "test_settings.h"
 #include "timeformat.h"
 #include <QtTest>
+#include <QFile>
+
+// 9.4: unknown keys must survive a Settings constructor round-trip.
+void SettingsTest::test_settings_unknown_key_survives_roundtrip()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString settingsPath = QDir(tempDir.path()).filePath("settings.ini");
+
+    // Seed an unknown key into the file before Settings reads it.
+    {
+        QSettings seed(settingsPath, QSettings::IniFormat);
+        seed.setValue("uTimer/history_days_to_keep", 30);
+        seed.setValue("uTimer/unknown_future_key", "preserve_me");
+        seed.sync();
+    }
+
+    // Constructing Settings must not drop the unknown key.
+    Settings s(settingsPath);
+    QCOMPARE(s.syncStatus(), QSettings::NoError);
+
+    // Re-read the file directly and verify the unknown key survived.
+    QSettings verify(settingsPath, QSettings::IniFormat);
+    QVERIFY2(verify.contains("uTimer/unknown_future_key"),
+             "Unknown key must survive a Settings load/save round-trip");
+    QCOMPARE(verify.value("uTimer/unknown_future_key").toString(), QString("preserve_me"));
+}
+
+// 9.4: a sync failure must be visible via syncStatus().
+void SettingsTest::test_settings_sync_failure_reported()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    const QString settingsPath = QDir(tempDir.path()).filePath("readonly.ini");
+
+    // Create the file and make it read-only so sync() cannot write.
+    {
+        QFile f(settingsPath);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.close();
+    }
+    QFile::setPermissions(settingsPath, QFile::ReadOwner | QFile::ReadUser);
+
+    // Skip this test if we are root (root ignores read-only permissions).
+    if (QFile(settingsPath).open(QIODevice::WriteOnly)) {
+        QSKIP("Running as root — read-only file permission test not meaningful");
+    }
+
+    Settings s(settingsPath);
+    QVERIFY2(s.syncStatus() != QSettings::NoError,
+             "syncStatus() must be non-zero when the file cannot be written");
+
+    // Restore write permission for temp dir cleanup.
+    QFile::setPermissions(settingsPath,
+        QFile::ReadOwner | QFile::WriteOwner | QFile::ReadUser | QFile::WriteUser);
+}
 
 void SettingsTest::test_settings_defaults_and_bounds()
 {

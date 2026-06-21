@@ -4,12 +4,12 @@
  * Acts as the Source of Truth for user preferences.
  * Uses Qt's QSettings (IniFormat) for cross-platform file storage.
  *
- * Implementation Detail:
- * - readSettingsFile() and writeSettingsFile() are used for bulk I/O.
- * - The constructor triggers a read-clear-write-sync cycle to ensure the
- *   configuration file is normalized and contains all expected keys (even defaults)
- *   on the first run. This "self-repairing" behavior ensures user-settings.ini
- *   is always complete.
+ * Load/save separation:
+ * - readSettingsFile() reads known keys and applies defaults/bounds.
+ * - writeAndSync() writes only the known keys and calls sync(), recording the
+ *   outcome in last_sync_status_. Unknown keys already in the file are preserved.
+ * - The constructor normalizes missing or out-of-range values by writing them back,
+ *   but does NOT call clear() before writing: unknown keys survive a round-trip.
  */
 
 #include "settings.h"
@@ -34,9 +34,9 @@ Settings::Settings(const QString filename) : sfile_(filename, QSettings::IniForm
 {
 	sfile_.setIniCodec("UTF-8");
 	readSettingsFile();
-	sfile_.clear();
-	writeSettingsFile();
-	sfile_.sync();
+	// Write back normalized values (defaults filled in, bounds applied).
+	// No clear() so unknown keys in the file are preserved.
+	writeAndSync();
 }
 
 void Settings::readSettingsFile()
@@ -57,7 +57,7 @@ void Settings::readSettingsFile()
 	checkpoint_interval_min_ = qBound(0, sfile_.value(kKeyCheckpointMin, 5).toInt(), 60);
 }
 
-void Settings::writeSettingsFile()
+void Settings::writeAndSync()
 {
 	sfile_.setValue(kKeyPressStart, autostart_timing_);
 	sfile_.setValue(kKeyAutopause, autopause_enabled_);
@@ -70,6 +70,9 @@ void Settings::writeSettingsFile()
 	sfile_.setValue(kKeyHistoryDays, history_days_to_keep_);
 	sfile_.setValue(kKeyBootTimeSec, boot_time_sec_);
 	sfile_.setValue(kKeyCheckpointMin, checkpoint_interval_min_);
+
+	sfile_.sync();
+	last_sync_status_ = sfile_.status();
 
 	if (log_to_file_) {
 		if (autopause_enabled_)
@@ -147,13 +150,13 @@ qint64 Settings::getExcessiveActivityThresholdMsec() const
 void Settings::setAutopauseState(const bool autopause_enabled)
 {
 	autopause_enabled_ = autopause_enabled;
-	writeSettingsFile();
+	writeAndSync();
 }
 
 void Settings::setPinToTopState(const bool pinned_to_top)
 {
 	start_pinned_to_top_ = pinned_to_top;
-	writeSettingsFile();
+	writeAndSync();
 }
 
 unsigned int Settings::getBootTimeSec() const

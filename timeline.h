@@ -18,11 +18,11 @@ public:
     Timeline(std::deque<TimeDuration> completed,
              std::optional<TimeDuration> ongoing);
 
-    // Factory for cross-midnight or other non-same-day rows that must bypass the
-    // same-day invariant check. Only use when the caller has verified the data is
-    // intentionally cross-midnight (e.g. pre-existing DB rows being preserved as-is).
-    static Timeline fromUnchecked(std::deque<TimeDuration> completed,
-                                  std::optional<TimeDuration> ongoing = std::nullopt);
+    // Factory for Timelines built from persisted DB rows: bypasses the same-day invariant
+    // check because DB rows are already stored and may legitimately include cross-midnight
+    // entries that must be preserved as-is.
+    static Timeline fromPersistedRows(std::deque<TimeDuration> completed,
+                                      std::optional<TimeDuration> ongoing = std::nullopt);
 
     const std::deque<TimeDuration>& completed() const;
     const std::optional<TimeDuration>& ongoing() const;
@@ -59,5 +59,20 @@ struct NormalizedResult {
     Timeline timeline;
     std::vector<QString> removedIds;
 };
+
+/// Merge decision returned by classifyMerge().
+/// Describes what normalized() should do with the (prev, curr) pair.
+enum class MergeDecision {
+    None,            ///< No merge — types differ or no branch matched; advance iterator.
+    EraseIt,         ///< Erase curr (prev is unchanged, e.g. near-duplicate or subset).
+    Supersede,       ///< curr supersedes prev: copy curr's fields to prev, then erase curr.
+    ExtendPrevStart, ///< Extend prev's start to curr's start (join), then erase curr.
+    ExtendPrevEnd    ///< Extend prev's end to curr's end (overlap/gap merge), then erase curr.
+};
+
+/// Classify how prev and curr should be merged in normalized().
+/// Only meaningful when prev.type == curr.type; returns None for differing types.
+/// Branches are order-dependent and mirror the normalized() merge loop exactly.
+MergeDecision classifyMerge(const TimeDuration& prev, const TimeDuration& curr);
 
 #endif // TIMELINE_H

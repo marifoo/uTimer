@@ -27,7 +27,7 @@ void TimelineTest::test_M_totals()
     comp.push_back(mk(DurationType::Pause, base + 600, base + 900));
 
     // Ongoing: 200ms Activity
-    TimeDuration ongoing(DurationType::Activity, makeUtc(base + 1000), makeUtc(base + 1200));
+    TimeDuration ongoing = TimeDuration::fromPersistedRow(DurationType::Activity, makeUtc(base + 1000), makeUtc(base + 1200));
 
     Timeline t(comp, ongoing);
 
@@ -72,7 +72,7 @@ void TimelineTest::test_O_withSplit_preserves_total_duration()
     const SegmentId origId = SegmentId::fromString("original-segment-id");
 
     std::deque<TimeDuration> comp;
-    comp.push_back(TimeDuration(DurationType::Activity, makeUtc(base), makeUtc(base + 10000), origId));
+    comp.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, makeUtc(base), makeUtc(base + 10000), origId));
 
     Timeline original(comp, std::nullopt);
     QDateTime splitAt = makeUtc(base + 4000);
@@ -121,17 +121,17 @@ void TimelineTest::test_P_normalized_matches_cleanDurations()
     auto makeDeque = [&]() {
         std::deque<TimeDuration> d;
         // Two Activity segments with small gap (< 500ms) — should be merged (Branch 6)
-        d.push_back(TimeDuration(DurationType::Activity,
+        d.push_back(TimeDuration::fromPersistedRow(DurationType::Activity,
             QDateTime::fromMSecsSinceEpoch(base, Qt::UTC),
             QDateTime::fromMSecsSinceEpoch(base + 1000, Qt::UTC), id1));
-        d.push_back(TimeDuration(DurationType::Activity,
+        d.push_back(TimeDuration::fromPersistedRow(DurationType::Activity,
             QDateTime::fromMSecsSinceEpoch(base + 1200, Qt::UTC),
             QDateTime::fromMSecsSinceEpoch(base + 2000, Qt::UTC), id2));
         // Near-duplicate Pause entries (within 50ms diff) — should be de-duped (Branch 1)
-        d.push_back(TimeDuration(DurationType::Pause,
+        d.push_back(TimeDuration::fromPersistedRow(DurationType::Pause,
             QDateTime::fromMSecsSinceEpoch(base + 3000, Qt::UTC),
             QDateTime::fromMSecsSinceEpoch(base + 4000, Qt::UTC), id3));
-        d.push_back(TimeDuration(DurationType::Pause,
+        d.push_back(TimeDuration::fromPersistedRow(DurationType::Pause,
             QDateTime::fromMSecsSinceEpoch(base + 3010, Qt::UTC),
             QDateTime::fromMSecsSinceEpoch(base + 4020, Qt::UTC), id4));
         return d;
@@ -192,6 +192,49 @@ void TimelineTest::test_R_factory_rejects_negative_duration()
 }
 
 // ============================================================================
+// Test R (9.1 extension) — typed DurationCreateError for each rejection cause
+// ============================================================================
+
+void TimelineTest::test_R_create_error_invalid_timestamp()
+{
+    QDateTime invalid;
+    QDateTime valid(QDate(2025, 6, 15), QTime(9, 0, 0), Qt::LocalTime);
+
+    auto r1 = TimeDuration::create(DurationType::Activity, invalid, valid);
+    QVERIFY(!r1.has_value());
+    QCOMPARE(r1.error, DurationCreateError::InvalidTimestamp);
+
+    auto r2 = TimeDuration::create(DurationType::Activity, valid, invalid);
+    QVERIFY(!r2.has_value());
+    QCOMPARE(r2.error, DurationCreateError::InvalidTimestamp);
+}
+
+void TimelineTest::test_R_create_error_nonpositive()
+{
+    QDateTime dt(QDate(2025, 6, 15), QTime(9, 0, 0), Qt::LocalTime);
+
+    // zero duration
+    auto r1 = TimeDuration::create(DurationType::Activity, dt, dt);
+    QVERIFY(!r1.has_value());
+    QCOMPARE(r1.error, DurationCreateError::NonPositive);
+
+    // negative duration
+    auto r2 = TimeDuration::create(DurationType::Activity, dt.addSecs(1), dt);
+    QVERIFY(!r2.has_value());
+    QCOMPARE(r2.error, DurationCreateError::NonPositive);
+}
+
+void TimelineTest::test_R_create_error_cross_midnight()
+{
+    QDateTime start(QDate(2025, 6, 15), QTime(23, 30, 0), Qt::LocalTime);
+    QDateTime end(QDate(2025, 6, 16), QTime(0, 30, 0), Qt::LocalTime);
+
+    auto r = TimeDuration::create(DurationType::Activity, start, end);
+    QVERIFY(!r.has_value());
+    QCOMPARE(r.error, DurationCreateError::CrossMidnight);
+}
+
+// ============================================================================
 // Test S — normalized() cross-day merge guard
 // ============================================================================
 
@@ -245,6 +288,105 @@ void TimelineTest::test_S_normalized_same_day_still_merges()
 }
 
 // ============================================================================
+// 9.3: classifyMerge targeted cases — exercise each branch directly
+// ============================================================================
+
+namespace {
+
+// Helper: same-day Activity segment from raw millisecond offsets.
+TimeDuration makeAct(qint64 startMs, qint64 endMs)
+{
+    return TimeDuration::fromPersistedRow(DurationType::Activity,
+                                          QDateTime::fromMSecsSinceEpoch(startMs, Qt::UTC),
+                                          QDateTime::fromMSecsSinceEpoch(endMs, Qt::UTC));
+}
+
+} // namespace
+
+void TimelineTest::test_classifyMerge_none_for_different_types()
+{
+    const qint64 base = 5'000'000;
+    TimeDuration act = makeAct(base, base + 1000);
+    TimeDuration pau = TimeDuration::fromPersistedRow(DurationType::Pause,
+                     QDateTime::fromMSecsSinceEpoch(base + 2000, Qt::UTC),
+                     QDateTime::fromMSecsSinceEpoch(base + 3000, Qt::UTC));
+    QCOMPARE(classifyMerge(act, pau), MergeDecision::None);
+}
+
+void TimelineTest::test_classifyMerge_branch1_near_duplicate()
+{
+    // Two segments whose endpoints differ by < 50 ms → near-duplicate → EraseIt
+    const qint64 base = 6'000'000;
+    TimeDuration prev = makeAct(base, base + 1000);
+    TimeDuration curr = makeAct(base + 5, base + 1030); // diff_end=30ms, diff_dur=30ms
+    QCOMPARE(classifyMerge(prev, curr), MergeDecision::EraseIt);
+}
+
+void TimelineTest::test_classifyMerge_branch2_supersede()
+{
+    // curr starts earlier and is at least as long → Supersede
+    const qint64 base = 7'000'000;
+    TimeDuration prev = makeAct(base + 100, base + 1000);
+    TimeDuration curr = makeAct(base,       base + 1000); // starts earlier, same end
+    QCOMPARE(classifyMerge(prev, curr), MergeDecision::Supersede);
+}
+
+void TimelineTest::test_classifyMerge_branch3_extend_prev_start()
+{
+    // curr starts before prev but ends inside it → ExtendPrevStart
+    const qint64 base = 8'000'000;
+    TimeDuration prev = makeAct(base + 200, base + 1000);
+    TimeDuration curr = makeAct(base,       base + 600); // starts before, ends inside
+    QCOMPARE(classifyMerge(prev, curr), MergeDecision::ExtendPrevStart);
+}
+
+void TimelineTest::test_classifyMerge_branch4_forward_overlap()
+{
+    // curr starts inside prev and extends past it → ExtendPrevEnd
+    const qint64 base = 9'000'000;
+    TimeDuration prev = makeAct(base,       base + 1000);
+    TimeDuration curr = makeAct(base + 500, base + 2000); // starts inside, ends after
+    QCOMPARE(classifyMerge(prev, curr), MergeDecision::ExtendPrevEnd);
+}
+
+void TimelineTest::test_classifyMerge_branch5_subset()
+{
+    // curr is entirely inside prev → EraseIt
+    const qint64 base = 10'000'000;
+    TimeDuration prev = makeAct(base,       base + 2000);
+    TimeDuration curr = makeAct(base + 200, base + 1800); // fully inside
+    QCOMPARE(classifyMerge(prev, curr), MergeDecision::EraseIt);
+}
+
+void TimelineTest::test_classifyMerge_branch6_small_gap()
+{
+    // gap < 500 ms, same calendar day → ExtendPrevEnd
+    // Use a fixed UTC base on the same day (1970-01-01)
+    const qint64 base = 11'000'000;
+    TimeDuration prev = makeAct(base, base + 1000);
+    TimeDuration curr = makeAct(base + 1200, base + 2000); // gap = 200ms < 500ms
+    QCOMPARE(classifyMerge(prev, curr), MergeDecision::ExtendPrevEnd);
+}
+
+void TimelineTest::test_classifyMerge_branch7_slight_overlap()
+{
+    // gap = -50ms (50ms overlap, < 100ms threshold), same day → ExtendPrevEnd
+    const qint64 base = 12'000'000;
+    TimeDuration prev = makeAct(base, base + 1000);
+    TimeDuration curr = makeAct(base + 950, base + 2000); // overlap = 50ms
+    QCOMPARE(classifyMerge(prev, curr), MergeDecision::ExtendPrevEnd);
+}
+
+void TimelineTest::test_classifyMerge_none_large_gap()
+{
+    // gap >= 500ms, same type → None (no merge)
+    const qint64 base = 13'000'000;
+    TimeDuration prev = makeAct(base, base + 1000);
+    TimeDuration curr = makeAct(base + 2000, base + 3000); // gap = 1000ms > 500ms
+    QCOMPARE(classifyMerge(prev, curr), MergeDecision::None);
+}
+
+// ============================================================================
 // Test Q — groupByDate assigns segments to correct dates
 // ============================================================================
 
@@ -260,9 +402,9 @@ void TimelineTest::test_Q_groupByDate()
     const QDateTime day2End2(QDate(2024, 1, 11), QTime(17, 0, 0), Qt::UTC);
 
     std::deque<TimeDuration> comp;
-    comp.push_back(TimeDuration(DurationType::Activity, day1Start, day1End));
-    comp.push_back(TimeDuration(DurationType::Pause, day2Start, day2End));
-    comp.push_back(TimeDuration(DurationType::Activity, day2Start2, day2End2));
+    comp.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, day1Start, day1End));
+    comp.push_back(TimeDuration::fromPersistedRow(DurationType::Pause, day2Start, day2End));
+    comp.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, day2Start2, day2End2));
 
     Timeline t(comp, std::nullopt);
     auto byDate = t.groupByDate();

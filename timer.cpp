@@ -999,7 +999,7 @@ std::optional<TimeDuration> Timer::getOngoingDuration_locked() const
         return std::nullopt;
     }
     DurationType type = (mode_ == Mode::Activity) ? DurationType::Activity : DurationType::Pause;
-    return TimeDuration::fromTrusted(type, session_.segment_start_time, now, session_.segment_id);
+    return TimeDuration::fromLiveSession(type, session_.segment_start_time, now, session_.segment_id);
 }
 
 qint64 Timer::getStartupRecoveredSeconds() const
@@ -1099,11 +1099,10 @@ EntriesForDateResult Timer::hasEntriesForDate(const QDate& date)
 /**
  * Appends a single same-day segment to session_.durations.
  *
- * Cross-midnight inputs are silently discarded (with a [MIDNIGHT] log line).
  * DayBoundaryWatcher's scheduled stop and watchdog prevent cross-midnight
- * inputs from reaching here; this discard is a last-line defence.
- *
- * Zero-duration and negative-duration inputs are also dropped.
+ * inputs from reaching here; this discard is a last-line defence.  Zero-
+ * and negative-duration inputs (e.g. start == end) are also dropped.
+ * Each rejection is logged with the specific reason.
  */
 void Timer::addDuration(DurationType type,
                               const QDateTime& startTime,
@@ -1112,9 +1111,25 @@ void Timer::addDuration(DurationType type,
 {
     auto seg = TimeDuration::create(type, startTime, endTime, segmentId);
     if (!seg.has_value()) {
-        Logger::Log(QString("[MIDNIGHT] Discarding cross-midnight segment: %1 → %2")
-            .arg(startTime.toString(Qt::ISODateWithMs))
-            .arg(endTime.toString(Qt::ISODateWithMs)));
+        switch (seg.error) {
+        case DurationCreateError::InvalidTimestamp:
+            Logger::Log(QString("[ADDURATION] Discarding segment with invalid timestamp: %1 → %2")
+                .arg(startTime.toString(Qt::ISODateWithMs))
+                .arg(endTime.toString(Qt::ISODateWithMs)));
+            break;
+        case DurationCreateError::NonPositive:
+            Logger::Log(QString("[ADDURATION] Discarding zero/negative-duration segment: %1 → %2")
+                .arg(startTime.toString(Qt::ISODateWithMs))
+                .arg(endTime.toString(Qt::ISODateWithMs)));
+            break;
+        case DurationCreateError::CrossMidnight:
+            Logger::Log(QString("[MIDNIGHT] Discarding cross-midnight segment: %1 → %2")
+                .arg(startTime.toString(Qt::ISODateWithMs))
+                .arg(endTime.toString(Qt::ISODateWithMs)));
+            break;
+        default:
+            break;
+        }
         return;
     }
     const qint64 dur = seg->duration;
@@ -1140,7 +1155,7 @@ bool Timer::isOngoingSegmentCrossMidnight() const
  * transition). Safe to call multiple times; only the first call does real work.
  *
  * Emits stopped(MidnightWatchdog). The GUI is updated via the stopped() signal
- * connection in MainWin (established in Phase 5).
+ * connection in MainWin.
  */
 bool Timer::discardCrossMidnightOngoingAndStop(const QDateTime& now)
 {
@@ -1166,7 +1181,7 @@ bool Timer::discardCrossMidnightOngoingAndStop(const QDateTime& now)
     }
 
     // Reuse stopTimer for teardown. The cross-midnight ongoing segment is
-    // silently discarded by addDuration (TimeDuration::create rejects it).
+    // discarded by addDuration (TimeDuration::create returns CrossMidnight).
     // durations is already empty (success path) or retained in unsaved buffer
     // (flush-failure path), so the updateDurationsInDB call inside stopTimer is a
     // no-op on success and a harmless retry on flush failure.

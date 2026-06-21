@@ -46,8 +46,8 @@ void PersistenceContractTest::test_commitSession_normalizes_adjacent_same_type()
 
     // Arrange: two adjacent Activity segments (identical type, gap <= merge threshold)
     std::deque<TimeDuration> durations;
-    durations.emplace_back(DurationType::Activity, t0, t1);
-    durations.emplace_back(DurationType::Activity, t1, t2);  // adjacent, same type
+    durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, t0, t1));
+    durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, t1, t2));  // adjacent, same type
     Timeline session(durations, std::nullopt);
 
     // Act
@@ -82,12 +82,12 @@ void PersistenceContractTest::test_commitSession_upserts_existing_segment_id()
     // Arrange: first commit — insert one Activity row
     const SegmentId stableId = SegmentId::mint();
     std::deque<TimeDuration> initial;
-    initial.emplace_back(DurationType::Activity, t0, t1, stableId);
+    initial.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, t0, t1, stableId));
     QVERIFY(db.commitSession(Timeline(initial, std::nullopt)).ok());
 
     // Act: second commit with the same segment_id but an extended end_utc
     std::deque<TimeDuration> updated;
-    updated.emplace_back(DurationType::Activity, t0, t2, stableId);
+    updated.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, t0, t2, stableId));
     QVERIFY(db.commitSession(Timeline(updated, std::nullopt)).ok());
 
     // Assert: still exactly one row; end_utc updated to t2
@@ -120,16 +120,16 @@ void PersistenceContractTest::test_commitSession_removes_merged_away_segment_id(
     const SegmentId secondId = SegmentId::mint();
 
     std::deque<TimeDuration> seed;
-    seed.emplace_back(DurationType::Activity, t0, t1, firstId);
-    seed.emplace_back(DurationType::Pause,    t1, t2, secondId);
+    seed.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, t0, t1, firstId));
+    seed.push_back(TimeDuration::fromPersistedRow(DurationType::Pause, t1, t2, secondId));
     QVERIFY(db.commitSession(Timeline(seed, std::nullopt)).ok());
     QCOMPARE(db.loadDurations().size(), static_cast<size_t>(2));
 
     // Act: commit both as Activity (same type, adjacent) — normalization merges them;
     // secondId is merged away and must be deleted from the DB.
     std::deque<TimeDuration> toMerge;
-    toMerge.emplace_back(DurationType::Activity, t0, t1, firstId);
-    toMerge.emplace_back(DurationType::Activity, t1, t2, secondId);  // same type now → will be merged
+    toMerge.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, t0, t1, firstId));
+    toMerge.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, t1, t2, secondId));  // same type now → will be merged
     QVERIFY(db.commitSession(Timeline(toMerge, std::nullopt)).ok());
 
     // Assert: one merged row remains; secondId is gone
@@ -164,15 +164,15 @@ void PersistenceContractTest::test_replaceAll_atomically_replaces_all_rows()
 
     // Arrange: seed a pre-existing row that replaceAll must wipe out
     std::deque<TimeDuration> old;
-    old.emplace_back(DurationType::Pause, old0, old1);
+    old.push_back(TimeDuration::fromPersistedRow(DurationType::Pause, old0, old1));
     QVERIFY(db.commitSession(Timeline(old, std::nullopt)).ok());
     QCOMPARE(db.loadDurations().size(), static_cast<size_t>(1));
 
     // Act: replaceAll with one history row and one session row
     std::deque<TimeDuration> histDurations;
-    histDurations.emplace_back(DurationType::Activity, h0, h1);
+    histDurations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, h0, h1));
     std::deque<TimeDuration> sessDurations;
-    sessDurations.emplace_back(DurationType::Pause, s0, s1);
+    sessDurations.push_back(TimeDuration::fromPersistedRow(DurationType::Pause, s0, s1));
 
     QVERIFY(db.replaceAll(Timeline(histDurations, std::nullopt),
                           Timeline(sessDurations, std::nullopt)).ok());

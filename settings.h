@@ -23,11 +23,14 @@ private:
 	int history_days_to_keep_;
 	unsigned int boot_time_sec_;
 	int checkpoint_interval_min_;
+	QSettings::Status last_sync_status_ = QSettings::NoError;
 	void readSettingsFile();
-	void writeSettingsFile();
+	void writeAndSync();
 
 public:
 	Settings(const QString filename);
+	/// Returns the status from the most recent sync() call (NoError on success).
+	QSettings::Status syncStatus() const { return last_sync_status_; }
 	int getHistoryDays() const;
 	bool isAutopauseEnabled() const;
 	bool isAutostartTimingEnabled() const;

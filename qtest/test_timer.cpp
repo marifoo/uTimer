@@ -155,7 +155,7 @@ void TimerTest::test_timer_set_duration_type()
 
     // Add a duration manually
     QDateTime now = QDateTime::currentDateTime();
-    tracker.sessionState_dbg().durations.emplace_back(DurationType::Activity, now.addSecs(-10), now);
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, now.addSecs(-10), now));
     QCOMPARE(tracker.sessionState_dbg().durations.size(), (size_t)1);
     QCOMPARE(tracker.sessionState_dbg().durations[0].type, DurationType::Activity);
 
@@ -377,7 +377,7 @@ void TimerTest::test_session_state_reset_for_new_session()
     FakeSessionStore fakeDb;
     Timer tracker(settings, fakeDb);
     QDateTime now = QDateTime::currentDateTime();
-    tracker.sessionState_dbg().durations.emplace_back(DurationType::Activity, now.addSecs(-10), now);
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, now.addSecs(-10), now));
     tracker.sessionState_dbg().has_unsaved_data = true;
     tracker.sessionState_dbg().unsaved_durations = tracker.sessionState_dbg().durations;
 
@@ -444,7 +444,7 @@ void TimerTest::test_session_state_adopt_ongoing_segment()
     Timer tracker(settings, fakeDb);
     QDateTime start = QDateTime::currentDateTime().addSecs(-30);
     QDateTime end = QDateTime::currentDateTime();
-    TimeDuration ongoing(DurationType::Activity, start, end);
+    TimeDuration ongoing = TimeDuration::fromLiveSession(DurationType::Activity, start, end);
 
     // Act
     tracker.sessionState_dbg().adoptOngoingSegment(ongoing);
@@ -630,7 +630,7 @@ void TimerTest::test_boot_time_not_added_when_db_has_entries_for_today()
         SqliteSessionStore seeder(settings);
         QDateTime now = QDateTime::currentDateTimeUtc();
         std::deque<TimeDuration> durations;
-        durations.emplace_back(DurationType::Activity, now.addSecs(-3600), now.addSecs(-3540));
+        durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, now.addSecs(-3600), now.addSecs(-3540)));
         QVERIFY(seeder.saveDurations(durations, TransactionMode::Append));
     }
 
@@ -773,6 +773,29 @@ void TimerTest::test_addduration_discards_zero_and_negative_duration()
     tracker.addDuration_dbg(DurationType::Activity, now, now.addSecs(-10));
 
     // Assert
+    QVERIFY(tracker.sessionState_dbg().durations.empty());
+}
+
+// 9.1: all three DurationCreateError causes (InvalidTimestamp, NonPositive, CrossMidnight)
+// must discard the segment in addDuration. This test covers the InvalidTimestamp path,
+// which was previously lumped under the catch-all [MIDNIGHT] log tag.
+void TimerTest::test_addduration_discards_invalid_timestamp()
+{
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    QDateTime valid = QDateTime::currentDateTime();
+    QDateTime invalid; // default-constructed QDateTime is invalid
+
+    // Invalid start
+    tracker.addDuration_dbg(DurationType::Activity, invalid, valid);
+    QVERIFY(tracker.sessionState_dbg().durations.empty());
+
+    // Invalid end
+    tracker.addDuration_dbg(DurationType::Activity, valid, invalid);
     QVERIFY(tracker.sessionState_dbg().durations.empty());
 }
 
@@ -1001,15 +1024,14 @@ void TimerTest::test_getOngoingDuration_returns_nullopt_when_cross_midnight()
 }
 
 // ============================================================================
-// Phase 1 test gate (T1)
+// Timer public surface regression guard
 // ============================================================================
 
 void TimerTest::test_D_timetracker_public_surface_regression()
 {
-    // Test D: Construct a Timer and exercise every remaining public
-    // method to confirm none were accidentally removed during Phase 1.
-    // This is a regression guard — it would fail to compile if a method
-    // disappeared from the header.
+    // Construct a Timer and exercise every public method to confirm none
+    // were accidentally removed. This is a regression guard — it would fail
+    // to compile if a method disappeared from the header.
 
     // Arrange
     QTemporaryDir tempDir;
@@ -1215,7 +1237,7 @@ void TimerTest::test_E_boot_time_inmemory_start_date_skips_boot_time()
     QDateTime startToday = QDateTime(now.date(), QTime(23, 0, 0));
     QDateTime endTomorrow = startToday.addSecs(3600); // crosses midnight
     tracker.sessionState_dbg().durations.push_back(
-        TimeDuration::fromTrusted(DurationType::Activity, startToday, endTomorrow));
+        TimeDuration::fromPersistedRow(DurationType::Activity, startToday, endTomorrow));
 
     // Act: start the timer (DB says No, but in-memory entry exists for today)
     tracker.useTimerViaButton(Button::Start);
@@ -1233,7 +1255,7 @@ void TimerTest::test_E_boot_time_inmemory_start_date_skips_boot_time()
 }
 
 // ============================================================================
-// Phase 4 test gate — Test X
+// Stop persists state via commitSession only
 // ============================================================================
 
 /**
@@ -1373,7 +1395,7 @@ void TimerTest::test_dialog_open_allows_lock_bookkeeping()
 }
 
 // ============================================================================
-// Step 4: T1+T9 — Pause-merge removal tests
+// Pause-merge removal: unpause creates new Pause segment with fresh id
 // ============================================================================
 
 void TimerTest::test_T1_unpause_creates_new_pause_segment_with_fresh_id()
@@ -1461,7 +1483,7 @@ void TimerTest::test_T9_new_activity_segment_after_unpause_has_activity_type()
 }
 
 // ============================================================================
-// Step 4: T10 — autopause flag cleared in startTimer
+// Autopause flag cleared in startTimer
 // ============================================================================
 
 void TimerTest::test_T10_was_active_cleared_on_start_from_none()
@@ -1518,7 +1540,7 @@ void TimerTest::test_T10_was_active_cleared_on_start_from_pause()
 }
 
 // ============================================================================
-// Step 4: T8 — destructor ordering smoke test
+// Destructor ordering: crash-absence smoke test
 // ============================================================================
 
 void TimerTest::test_T8_destructor_does_not_crash_while_active()
@@ -1560,7 +1582,7 @@ void TimerTest::test_T8_destructor_does_not_crash_while_active()
 }
 
 // ============================================================================
-// Step 5: C6 + T2 — beginExclusiveEdit / endExclusiveEdit + replaceCurrentDurations guard
+// beginExclusiveEdit / endExclusiveEdit + replaceCurrentDurations checkpoint guard
 // ============================================================================
 
 // T2: replaceCurrentDurations must NOT call saveCheckpoint while dialog_open_ is true.
@@ -1583,7 +1605,7 @@ void TimerTest::test_T2_replaceCurrentDurations_skips_checkpoint_while_dialog_op
     // Build a plausible ongoing segment for replaceCurrentDurations to adopt.
     const QDateTime start = QDateTime::currentDateTime().addSecs(-60);
     const QDateTime end   = QDateTime::currentDateTime();
-    TimeDuration ongoing = TimeDuration::fromTrusted(DurationType::Activity, start, end, SegmentId::fromString("seg-001"));
+    TimeDuration ongoing = TimeDuration::fromLiveSession(DurationType::Activity, start, end, SegmentId::fromString("seg-001"));
 
     tracker.beginExclusiveEdit();
     QVERIFY(tracker.isDialogOpen_dbg());
@@ -1617,7 +1639,7 @@ void TimerTest::test_C6_replaceCurrentDurations_writes_checkpoint_after_endExclu
 
     const QDateTime start = QDateTime::currentDateTime().addSecs(-60);
     const QDateTime end   = QDateTime::currentDateTime();
-    TimeDuration ongoing = TimeDuration::fromTrusted(DurationType::Activity, start, end, SegmentId::fromString("seg-002"));
+    TimeDuration ongoing = TimeDuration::fromLiveSession(DurationType::Activity, start, end, SegmentId::fromString("seg-002"));
 
     tracker.beginExclusiveEdit();
     tracker.endExclusiveEdit();
@@ -1767,7 +1789,7 @@ void TimerTest::test_commit_ongoing_type_edit_changes_mode()
     //    simulating what HistoryDialog would commit after the user flips the checkbox.
     const QDateTime start = liveOngoing->startTime;
     const QDateTime end   = QDateTime::currentDateTime();
-    TimeDuration editedOngoing = TimeDuration::fromTrusted(
+    TimeDuration editedOngoing = TimeDuration::fromLiveSession(
         DurationType::Pause, start, end, liveOngoing->segment_id);
 
     tracker.commitEditedTimeline(Timeline({}, editedOngoing));
@@ -1793,7 +1815,7 @@ void TimerTest::test_commit_ongoing_type_edit_changes_mode()
     QVERIFY2(foundPause, "persisted row should be Pause after type-edit commit");
 }
 
-// Phase 4: commitEditedTimeline returns an EditCommitResult and aligns mode_
+// commitEditedTimeline returns an EditCommitResult and aligns mode_
 // with the type of the edited ongoing segment.
 void TimerTest::test_commitEditedTimeline_mode_aligns_with_edited_ongoing_type()
 {
@@ -1812,7 +1834,7 @@ void TimerTest::test_commitEditedTimeline_mode_aligns_with_edited_ongoing_type()
     // live Activity segment, simulating a type flip in HistoryDialog.
     auto liveOngoing = tracker.getOngoingDuration();
     QVERIFY(liveOngoing.has_value());
-    TimeDuration editedOngoing = TimeDuration::fromTrusted(
+    TimeDuration editedOngoing = TimeDuration::fromLiveSession(
         DurationType::Pause,
         liveOngoing->startTime,
         QDateTime::currentDateTime(),
@@ -1829,10 +1851,10 @@ void TimerTest::test_commitEditedTimeline_mode_aligns_with_edited_ongoing_type()
     QCOMPARE(postCommit->type, DurationType::Pause);
 }
 
-// Phase 8 regression: with history disabled the store returns Disabled (a no-op),
-// which must NOT be treated as a save failure. Stopping a session that has
-// durations must not retain bogus unsaved data, must not bump the retry-failure
-// counter, and must not emit a user warning.
+// Disabled history: the store returns Disabled (a no-op) for commitSession.
+// Disabled must NOT be treated as a save failure: stopping must not retain
+// bogus unsaved data, must not bump the retry-failure counter, and must not
+// emit a user warning.
 void TimerTest::test_disabled_history_stop_keeps_clean_state_no_warning()
 {
     // Arrange: real store with history disabled (commitSession returns Disabled).
@@ -1855,9 +1877,9 @@ void TimerTest::test_disabled_history_stop_keeps_clean_state_no_warning()
     QCOMPARE(tracker.sessionState_dbg().consecutive_retry_failures, 0);
 }
 
-// Phase 8 regression: commitEditedTimeline re-anchors a checkpoint for an ongoing
-// Activity segment. With history disabled, saveCheckpoint returns Disabled, which
-// must be reported as success, not EditCommitResult::failure.
+// commitEditedTimeline re-anchors a checkpoint for an ongoing Activity segment.
+// With history disabled, saveCheckpoint returns Disabled, which must be
+// reported as success, not EditCommitResult::failure.
 void TimerTest::test_disabled_history_commitEditedTimeline_succeeds()
 {
     // Arrange: real store with history disabled; default checkpoint interval is
@@ -1876,7 +1898,7 @@ void TimerTest::test_disabled_history_commitEditedTimeline_succeeds()
     // Keep the ongoing segment Activity so maybeReanchorCheckpoint runs saveCheckpoint.
     auto liveOngoing = tracker.getOngoingDuration();
     QVERIFY(liveOngoing.has_value());
-    TimeDuration editedOngoing = TimeDuration::fromTrusted(
+    TimeDuration editedOngoing = TimeDuration::fromLiveSession(
         DurationType::Activity,
         liveOngoing->startTime,
         QDateTime::currentDateTime(),

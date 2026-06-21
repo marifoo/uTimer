@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QElapsedTimer>
 #include <deque>
+#include <optional>
 #include <memory>
 #include <QString>
 #include "settings.h"
@@ -13,6 +14,9 @@
 #include <Windows.h>
 #endif
 
+/// Tri-state result of a lock-state query.
+/// Unknown is returned when the query fails; the debounce buffer is not updated.
+enum class LockQueryResult { Locked, Unlocked, Unknown };
 
 class LockStateWatcher : public QObject
 {
@@ -21,18 +25,25 @@ class LockStateWatcher : public QObject
 private:
 	const Settings & settings_;
 	QElapsedTimer lock_timer_;
-	std::deque<bool> lock_state_buffer_;
-	const std::deque<bool> buffer_for_lock;
-	const std::deque<bool> buffer_for_unlock;
+	std::deque<LockQueryResult> lock_state_buffer_;
+	const std::deque<LockQueryResult> buffer_for_lock;
+	const std::deque<LockQueryResult> buffer_for_unlock;
 
 #ifdef Q_OS_LINUX
+	enum class LinuxLockMethod {
+		SystemdLogind,
+		FreedesktopScreenSaver,
+		GnomeScreenSaver,
+		KdeScreenSaver
+	};
+	std::optional<LinuxLockMethod> linux_lock_method_; // set once in initializeLinuxLockDetection()
 	bool initializeLinuxLockDetection();
-	bool querySystemdLogind();
-	bool queryScreenSaverDBus(const QString &service, const QString &path, const QString &interface);
+	LockQueryResult querySystemdLogind();
+	LockQueryResult queryScreenSaverDBus(const QString &service, const QString &path, const QString &interface);
 #endif
 
-	bool isSessionLocked();
-	LockEvent determineLockEvent(bool session_locked);
+	LockQueryResult isSessionLocked();
+	LockEvent determineLockEvent(LockQueryResult query_result);
 
 public:
 	explicit LockStateWatcher(const Settings & settings, QObject *parent = nullptr);
@@ -40,7 +51,7 @@ public:
 #ifndef QT_NO_DEBUG
     // ---- Debug-build test probe ----
     /// Exposes the debounce logic for direct unit testing.
-    LockEvent determineLockEvent_dbg(bool sessionLocked) { return determineLockEvent(sessionLocked); }
+    LockEvent determineLockEvent_dbg(LockQueryResult result) { return determineLockEvent(result); }
 #endif
 
 signals:

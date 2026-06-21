@@ -50,10 +50,10 @@ void HistoryCommitTest::test_accept_stays_open_on_db_failure()
 
     const QDateTime now = QDateTime::currentDateTime();
     tracker.sessionState_dbg().durations.push_back(
-        TimeDuration(DurationType::Activity, now.addSecs(-30), now.addSecs(-20)));
+        TimeDuration::fromPersistedRow(DurationType::Activity, now.addSecs(-30), now.addSecs(-20)));
 
     std::deque<TimeDuration> dbDurations;
-    dbDurations.emplace_back(DurationType::Pause, now.addSecs(-19), now.addSecs(-10));
+    dbDurations.push_back(TimeDuration::fromPersistedRow(DurationType::Pause, now.addSecs(-19), now.addSecs(-10)));
     QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
 
     HistoryDialog dialog(tracker, settings);
@@ -114,9 +114,9 @@ void HistoryCommitTest::test_accept_stays_open_on_merge_decline()
     const QDateTime memEnd(today, QTime(11, 45, 0), Qt::UTC);
 
     std::deque<TimeDuration> dbDurations;
-    dbDurations.emplace_back(DurationType::Activity, dbStart, dbEnd);
+    dbDurations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, dbStart, dbEnd));
     QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
-    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, memStart, memEnd));
 
     HistoryDialog dialog(tracker, settings);
 
@@ -155,7 +155,7 @@ void HistoryCommitTest::test_accept_closes_on_success()
 
     const QDateTime now = QDateTime::currentDateTime();
     tracker.sessionState_dbg().durations.push_back(
-        TimeDuration(DurationType::Activity, now.addSecs(-30), now.addSecs(-10)));
+        TimeDuration::fromPersistedRow(DurationType::Activity, now.addSecs(-30), now.addSecs(-10)));
 
     HistoryDialog dialog(tracker, settings);
     dialog.accept();

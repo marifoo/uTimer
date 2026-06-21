@@ -5,7 +5,7 @@
 #include "testcommon.h"
 
 /**
- * HistoryCommitTest — tests for Phase 5.2: accept() blocks close on failure,
+ * HistoryCommitTest — accept() blocks close on DB failure,
  * and TimerExclusiveEditGuard restores checkpoints on all exit paths.
  */
 class HistoryCommitTest : public QObject

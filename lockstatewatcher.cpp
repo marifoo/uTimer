@@ -44,26 +44,21 @@ struct ScopedLibrary {
 #include <QDBusInterface>
 #include <QDBusMessage>
 #include <QDBusVariant>
-#include <optional>
-
-namespace {
-enum class LinuxLockMethod {
-	SystemdLogind,
-	FreedesktopScreenSaver,
-	GnomeScreenSaver,
-	KdeScreenSaver
-};
-static std::optional<LinuxLockMethod> linux_lock_method_; // single instance assumed (constructed once in main())
-} // namespace
 #endif
 
 LockStateWatcher::LockStateWatcher(const Settings &settings, QObject *parent)
 	: QObject(parent),
 	settings_(settings),
-	buffer_for_lock{ false, false, true, true, true }, // fixed pattern for lock detection
-	buffer_for_unlock{ true, true, false, false, false } // fixed pattern for unlock detection
+	buffer_for_lock{
+		LockQueryResult::Unlocked, LockQueryResult::Unlocked,
+		LockQueryResult::Locked, LockQueryResult::Locked, LockQueryResult::Locked },
+	buffer_for_unlock{
+		LockQueryResult::Locked, LockQueryResult::Locked,
+		LockQueryResult::Unlocked, LockQueryResult::Unlocked, LockQueryResult::Unlocked }
 {
-	lock_state_buffer_ = { false, false, false, false, false};
+	lock_state_buffer_ = {
+		LockQueryResult::Unlocked, LockQueryResult::Unlocked, LockQueryResult::Unlocked,
+		LockQueryResult::Unlocked, LockQueryResult::Unlocked };
 	lock_timer_.invalidate();
 
 #ifdef Q_OS_LINUX
@@ -76,61 +71,54 @@ LockStateWatcher::LockStateWatcher(const Settings &settings, QObject *parent)
 /**
  * Platform-agnostic check for the current session lock state.
  *
- * Windows Implementation:
- * Uses WTSQuerySessionInformation from WtsApi32.dll.
- * Note: The DLL is loaded dynamically at runtime (using LoadLibrary/GetProcAddress)
- * rather than linking statically. This ensures the application remains portable
- * and runs even if the WTS API behaves differently on some Windows versions,
- * though WtsApi32 is standard since XP.
+ * Returns LockQueryResult::Unknown on any query failure; the debounce buffer
+ * is left unchanged so a transient DBus or API error is not treated as an unlock.
  *
- * Linux Implementation:
- * Delegates to the specific DBus method identified during initialization
- * (Systemd, GNOME, KDE, etc.).
+ * Windows: WTSQuerySessionInformation from WtsApi32.dll (loaded dynamically).
+ * Linux: delegates to the DBus method selected during initialization.
+ * Other: always returns Unknown (unsupported platform).
  */
-bool LockStateWatcher::isSessionLocked()
+LockQueryResult LockStateWatcher::isSessionLocked()
 {
 #ifdef Q_OS_WIN
-	// Using RAII wrapper for automatic library cleanup
 	typedef BOOL(PASCAL *WTSQuerySessionInformation)(HANDLE hServer, DWORD SessionId, WTS_INFO_CLASS WTSInfoClass, LPTSTR* ppBuffer, DWORD* pBytesReturned);
 	typedef void(PASCAL *WTSFreeMemory)(PVOID pMemory);
 
 	ScopedLibrary hLib(L"wtsapi32.dll");
-	if (!hLib) {
-		return false;
-	}
+	if (!hLib)
+		return LockQueryResult::Unknown;
 
 	auto pWTSQuerySessionInformation = reinterpret_cast<WTSQuerySessionInformation>(
 		GetProcAddress(hLib.handle, "WTSQuerySessionInformationW"));
-	if (!pWTSQuerySessionInformation) {
-		return false;
-	}
+	if (!pWTSQuerySessionInformation)
+		return LockQueryResult::Unknown;
 
 	auto pWTSFreeMemory = reinterpret_cast<WTSFreeMemory>(
 		GetProcAddress(hLib.handle, "WTSFreeMemory"));
-	if (!pWTSFreeMemory) {
-		return false;  // Don't proceed without cleanup capability
-	}
+	if (!pWTSFreeMemory)
+		return LockQueryResult::Unknown;
 
 	LPTSTR ppBuffer = nullptr;
 	DWORD dwBytesReturned = 0;
 	DWORD dwSessionID = WTSGetActiveConsoleSessionId();
-	bool isLocked = false;
+	LockQueryResult result = LockQueryResult::Unknown;
 
 	if (pWTSQuerySessionInformation(WTS_CURRENT_SERVER_HANDLE, dwSessionID,
 	                                WTSSessionInfoEx, &ppBuffer, &dwBytesReturned)) {
 		if (dwBytesReturned > 0 && ppBuffer) {
 			auto pInfo = reinterpret_cast<WTSINFOEXW*>(ppBuffer);
 			if (pInfo->Level == 1) {
-				isLocked = (pInfo->Data.WTSInfoExLevel1.SessionFlags == WTS_SESSIONSTATE_LOCK);
+				result = (pInfo->Data.WTSInfoExLevel1.SessionFlags == WTS_SESSIONSTATE_LOCK)
+				         ? LockQueryResult::Locked : LockQueryResult::Unlocked;
 			}
 		}
 		pWTSFreeMemory(ppBuffer);
 	}
 
-	return isLocked;
+	return result;
 #elif defined(Q_OS_LINUX)
 	if (!linux_lock_method_.has_value())
-		return false;
+		return LockQueryResult::Unknown;
 	switch (linux_lock_method_.value()) {
 		case LinuxLockMethod::SystemdLogind:
 			return querySystemdLogind();
@@ -143,14 +131,18 @@ bool LockStateWatcher::isSessionLocked()
 	}
 	Q_UNREACHABLE();
 #else
-	// Unsupported platform
-	return false;
+	return LockQueryResult::Unknown;
 #endif
 }
 
-LockEvent LockStateWatcher::determineLockEvent(bool session_locked)
+LockEvent LockStateWatcher::determineLockEvent(LockQueryResult query_result)
 {
-	lock_state_buffer_.push_back(session_locked);
+	// Unknown means the query failed; leave the buffer unchanged so a transient
+	// failure is not mistaken for an unlock transition.
+	if (query_result == LockQueryResult::Unknown)
+		return LockEvent::None;
+
+	lock_state_buffer_.push_back(query_result);
 	lock_state_buffer_.pop_front();
 
 	if (lock_state_buffer_ == buffer_for_lock)
@@ -272,7 +264,7 @@ bool LockStateWatcher::initializeLinuxLockDetection()
 	return false;
 }
 
-bool LockStateWatcher::querySystemdLogind()
+LockQueryResult LockStateWatcher::querySystemdLogind()
 {
 	QDBusMessage msg = QDBusMessage::createMethodCall(
 		"org.freedesktop.login1",
@@ -288,13 +280,14 @@ bool LockStateWatcher::querySystemdLogind()
 	if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
 		QVariant v = reply.arguments().first();
 		if (v.canConvert<QDBusVariant>()) {
-			return v.value<QDBusVariant>().variant().toBool();
+			return v.value<QDBusVariant>().variant().toBool()
+			       ? LockQueryResult::Locked : LockQueryResult::Unlocked;
 		}
 	}
-	return false;
+	return LockQueryResult::Unknown;
 }
 
-bool LockStateWatcher::queryScreenSaverDBus(const QString &service, const QString &path, const QString &interface)
+LockQueryResult LockStateWatcher::queryScreenSaverDBus(const QString &service, const QString &path, const QString &interface)
 {
 	QDBusMessage msg = QDBusMessage::createMethodCall(service, path, interface, "GetActive");
 
@@ -302,9 +295,10 @@ bool LockStateWatcher::queryScreenSaverDBus(const QString &service, const QStrin
 	QDBusMessage reply = QDBusConnection::sessionBus().call(msg, QDBus::Block, 100);
 
 	if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty()) {
-		return reply.arguments().first().toBool();
+		return reply.arguments().first().toBool()
+		       ? LockQueryResult::Locked : LockQueryResult::Unlocked;
 	}
-	return false;
+	return LockQueryResult::Unknown;
 }
 
 #endif // Q_OS_LINUX

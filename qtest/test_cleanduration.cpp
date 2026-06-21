@@ -9,7 +9,7 @@ static TimeDuration mkId(DurationType type, qint64 startMs, qint64 endMs, const 
 {
     QDateTime start = QDateTime::fromMSecsSinceEpoch(startMs, Qt::UTC);
     QDateTime end = QDateTime::fromMSecsSinceEpoch(endMs, Qt::UTC);
-    return TimeDuration::fromTrusted(type, start, end, SegmentId::fromString(id));
+    return TimeDuration::fromPersistedRow(type, start, end, SegmentId::fromString(id));
 }
 
 void CleanDurationsTest::test_cleanDurations_duplicateRemoval()
