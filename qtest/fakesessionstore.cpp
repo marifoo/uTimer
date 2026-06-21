@@ -1,9 +1,13 @@
 /**
- * FakeSessionStore -- implementation of the in-memory test double.
+ * FakeSessionStore -- spy test double for SessionStore.
  *
- * Every method records its name in callLog and operates on in-memory data
- * structures.  No SQLite is involved.  Return values come from the
- * configurable *Result members set by the test.
+ * Records every call made to it (callLog) and stores raw segments
+ * passed to commitSession/replaceAll so tests can inspect what was
+ * written.  No normalization, upsert, or overlap logic is duplicated
+ * here; those behaviors are verified against the real SqliteSessionStore
+ * in test_persistence_contract.cpp.
+ *
+ * Return values come from the configurable *Result members set by the test.
  */
 
 #include "fakesessionstore.h"
@@ -17,46 +21,11 @@ SessionStoreResult FakeSessionStore::commitSession(const Timeline& session)
 {
     callLog.append("commitSession");
     if (commitSessionResult.ok()) {
-        // Mirror SqliteSessionStore: normalize internally, compute orphans, then upsert.
-        std::vector<SegmentId> beforeIds;
-        for (const auto& d : session.completed())
-            beforeIds.push_back(d.segment_id);
-
-        Timeline normed = session.normalized();
-
-        // Delete orphaned segment IDs (those that disappeared during normalization)
-        for (const auto& id : beforeIds) {
-            bool stillPresent = false;
-            for (const auto& d : normed.completed())
-                if (d.segment_id == id) { stillPresent = true; break; }
-            if (!stillPresent) {
-                committedSegmentIds.remove(id.toString());
-                for (auto it = storedDurations.begin(); it != storedDurations.end(); ) {
-                    if (it->segment_id == id)
-                        it = storedDurations.erase(it);
-                    else
-                        ++it;
-                }
-            }
-        }
-
-        // Upsert normalized segments; enforce UNIQUE(segment_id) for new inserts.
-        for (const auto& d : normed.completed()) {
-            bool found = false;
-            for (auto& existing : storedDurations) {
-                if (existing.segment_id == d.segment_id) {
-                    existing = d;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                Q_ASSERT_X(!committedSegmentIds.contains(d.segment_id.toString()),
-                           "FakeSessionStore::commitSession",
-                           "UNIQUE(segment_id) violation: duplicate segment_id submitted");
-                committedSegmentIds.insert(d.segment_id.toString());
-                storedDurations.push_back(d);
-            }
+        // Spy: record the segments as submitted, without normalization or upsert policy.
+        // Tests that need normalization semantics should use SqliteSessionStore directly.
+        for (const auto& d : session.completed()) {
+            committedSegmentIds.insert(d.segment_id.toString());
+            storedDurations.push_back(d);
         }
     }
     return commitSessionResult;

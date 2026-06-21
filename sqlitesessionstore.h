@@ -113,7 +113,39 @@ private:
     /// operation.  Violations are logged via qWarning (not fatal).
     /// The database must be open when this is called.
     void checkSegmentIdUniqueness();
-#endif
+
+public:
+    // ---- Debug-build test probes ----
+    // Expose internal DB connection management for test seeding via raw SQL.
+    // NOT compiled in release builds.
+
+    /// Opens (or reopens) the database connection. Returns true on success.
+    /// Exposed for tests that need to seed the DB via rawDb_dbg() directly.
+    bool ensureOpen_dbg() { return ensureOpen(); }
+
+    /// Closes the database connection (lazy: happens at next open).
+    /// Call after raw SQL seeding to release the connection for the next open.
+    void lazyClose_dbg() { lazyClose(); }
+
+    /// Returns the raw QSqlDatabase handle for test-only SQL seeding.
+    /// The connection must be open (call ensureOpen_dbg() first).
+    QSqlDatabase& rawDb_dbg() { return db; }
+
+    /// Exposes private types and methods for white-box tests of recovery internals.
+    using OrphanCheckpoint_dbg = OrphanCheckpoint;
+    using ReconcileResult_dbg  = ReconcileResult;
+    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints_dbg() { return loadUnfinalizedCheckpoints(); }
+    bool finalizeIfNoOverlap_dbg(qint64 rowId, const QDateTime& s, const QDateTime& e) {
+        return finalizeIfNoOverlap(rowId, s, e);
+    }
+    ReconcileResult reconcileUnfinalizedCheckpoints_dbg(
+        const std::vector<OrphanCheckpoint>& toFinalize,
+        const std::vector<long long>& outrightDropIds)
+    {
+        return reconcileUnfinalizedCheckpoints(toFinalize, outrightDropIds);
+    }
+    QString dbConnectionName_dbg() const { return db.connectionName(); }
+#endif // QT_NO_DEBUG
 
 };
 

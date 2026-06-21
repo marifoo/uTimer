@@ -77,6 +77,23 @@ public:
     ~HistoryDialog() override;
     QString getLoadReconciliationMessage() const;
 
+#ifndef QT_NO_DEBUG
+    // ---- Debug-build test probes ----
+    /// Mutable access to the edit session for test assertions and setup.
+    HistoryEditSession& editSession_dbg() { return session_; }
+    const HistoryEditSession& editSession_dbg() const { return session_; }
+    /// Widget accessors for smoke tests.
+    QLabel* pageLabel_dbg() const { return pageLabel_; }
+    QLabel* loadReconciliationLabel_dbg() const { return loadReconciliationLabel_; }
+    QTableWidget* table_dbg() const { return table_; }
+    /// Set the context menu row/page for split tests.
+    void setContextMenuTarget_dbg(int row, int page) { contextMenuRow_ = row; contextMenuPage_ = page; }
+    /// Triggers a split-row operation directly (as if the context menu was used).
+    void onSplitRow_dbg() { onSplitRow(); }
+    /// Updates the page totals label for the given page index.
+    void updateTotalsLabel_dbg(uint idx) { updateTotalsLabel(idx); }
+#endif
+
     /**
      * Commits pending edits to the database and Timer. Returns true on success.
      * Returns false (and keeps the dialog open / exits early) if:

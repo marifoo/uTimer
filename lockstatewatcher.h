@@ -37,6 +37,12 @@ private:
 public:
 	explicit LockStateWatcher(const Settings & settings, QObject *parent = nullptr);
 
+#ifndef QT_NO_DEBUG
+    // ---- Debug-build test probe ----
+    /// Exposes the debounce logic for direct unit testing.
+    LockEvent determineLockEvent_dbg(bool sessionLocked) { return determineLockEvent(sessionLocked); }
+#endif
+
 signals:
 	void desktopLockEvent(LockEvent event);
 

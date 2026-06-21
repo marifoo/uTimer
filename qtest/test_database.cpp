@@ -276,7 +276,7 @@ void DatabaseTest::test_clockDriftResilience_durationStoredFromElapsed()
     QSqlDatabase::removeDatabase(connName);
 
     // Duration is computed from timestamps at load.
-    auto orphans = manager.loadUnfinalizedCheckpoints(); // private; accessible via #define private public
+    auto orphans = manager.loadUnfinalizedCheckpoints_dbg(); 
     QCOMPARE(static_cast<int>(orphans.size()), 1);
     QCOMPARE(orphans[0].duration, wallClockMs);
 }
@@ -300,8 +300,8 @@ void DatabaseTest::test_loadDurations_skipsNegativeDurationRows()
     QVERIFY(manager.updateDurationsById(durations).ok());
 
     // Insert a row with start > end (reversed) — should be skipped at load.
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery query(manager.rawDb_dbg());
     query.prepare(
         "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
         "VALUES (:segment_id, :type, :start_utc, :end_utc, 1)"
@@ -311,7 +311,7 @@ void DatabaseTest::test_loadDurations_skipsNegativeDurationRows()
     query.bindValue(":start_utc", end.toUTC().toString(Qt::ISODateWithMs));   // reversed
     query.bindValue(":end_utc", start.toUTC().toString(Qt::ISODateWithMs));   // reversed
     QVERIFY(query.exec());
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
     auto loaded = manager.loadDurations();
     QCOMPARE(static_cast<int>(loaded.size()), 1); // reversed row skipped
@@ -440,8 +440,8 @@ void DatabaseTest::test_database_checkpoint_single_row_per_segment()
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, start, newEnd, segmentId).ok());
 
     // Verify checkpoint row remains unfinalized and updated in place.
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery query(manager.rawDb_dbg());
     query.prepare("SELECT COUNT(*), end_utc, is_finalized FROM durations WHERE segment_id = :segment_id");
     query.bindValue(":segment_id", segmentId.toString());
     QVERIFY(query.exec());
@@ -449,7 +449,7 @@ void DatabaseTest::test_database_checkpoint_single_row_per_segment()
     QCOMPARE(query.value(0).toInt(), 1);
     QCOMPARE(query.value(1).toString(), newEnd.toUTC().toString(Qt::ISODateWithMs));
     QCOMPARE(query.value(2).toInt(), 0);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 }
 
 void DatabaseTest::test_database_checkpoint_missing_segment_reinserts_same_segment_id()
@@ -468,20 +468,20 @@ void DatabaseTest::test_database_checkpoint_missing_segment_reinserts_same_segme
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, start, end, segmentId).ok());
 
     // Manually delete the checkpoint row (simulating retention cleanup)
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery query(manager.rawDb_dbg());
     query.prepare("DELETE FROM durations WHERE segment_id = :segment_id");
     query.bindValue(":segment_id", segmentId.toString());
     QVERIFY(query.exec());
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
     // Try to update checkpoint - should detect missing row and INSERT new one
     QDateTime newEnd = start.addSecs(20);
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, start, newEnd, segmentId).ok());
 
     // Verify new checkpoint row exists as unfinalized
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery verifyQuery(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery verifyQuery(manager.rawDb_dbg());
     verifyQuery.prepare("SELECT COUNT(*), end_utc, is_finalized FROM durations WHERE segment_id = :segment_id");
     verifyQuery.bindValue(":segment_id", segmentId.toString());
     QVERIFY(verifyQuery.exec());
@@ -489,7 +489,7 @@ void DatabaseTest::test_database_checkpoint_missing_segment_reinserts_same_segme
     QCOMPARE(verifyQuery.value(0).toInt(), 1);
     QCOMPARE(verifyQuery.value(1).toString(), newEnd.toUTC().toString(Qt::ISODateWithMs));
     QCOMPARE(verifyQuery.value(2).toInt(), 0);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 }
 
 void DatabaseTest::test_database_checkpoint_preserves_start_time()
@@ -512,8 +512,8 @@ void DatabaseTest::test_database_checkpoint_preserves_start_time()
     QVERIFY(manager.saveCheckpoint(DurationType::Activity, originalStart, secondEnd, checkpointSegmentId).ok());
 
     // Verify start_utc/end_utc are correct and the row is unfinalized.
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery query(manager.rawDb_dbg());
     query.prepare("SELECT start_utc, end_utc, is_finalized FROM durations WHERE segment_id = :segment_id");
     query.bindValue(":segment_id", checkpointSegmentId.toString());
     QVERIFY(query.exec());
@@ -521,7 +521,7 @@ void DatabaseTest::test_database_checkpoint_preserves_start_time()
     QCOMPARE(query.value(0).toString(), originalStart.toUTC().toString(Qt::ISODateWithMs));
     QCOMPARE(query.value(1).toString(), secondEnd.toUTC().toString(Qt::ISODateWithMs));
     QCOMPARE(query.value(2).toInt(), 0);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 }
 
 void DatabaseTest::test_database_update_by_id_insert_mode()
@@ -626,8 +626,8 @@ void DatabaseTest::test_database_load_negative_duration()
     SqliteSessionStore manager(settings);
 
     // Directly insert a row with valid timestamps.
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery query(manager.rawDb_dbg());
     const QDateTime now = QDateTime::currentDateTimeUtc();
     const QDateTime end = now.addSecs(5);
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
@@ -636,7 +636,7 @@ void DatabaseTest::test_database_load_negative_duration()
     query.bindValue(":start_utc", now.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
     // Duration is computed from timestamps at load — always non-negative.
     auto loaded = manager.loadDurations();
@@ -653,8 +653,8 @@ void DatabaseTest::test_database_load_start_after_end()
     SqliteSessionStore manager(settings);
 
     // Manually insert start > end (reversed)
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery query(manager.rawDb_dbg());
     const QDateTime now = QDateTime::currentDateTimeUtc();
     const QDateTime start = now;
     const QDateTime end = now.addSecs(-10); // End BEFORE start
@@ -665,7 +665,7 @@ void DatabaseTest::test_database_load_start_after_end()
     query.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
     // Load should SKIP invalid entry
     auto loaded = manager.loadDurations();
@@ -681,8 +681,8 @@ void DatabaseTest::test_database_load_invalid_enum_type()
     SqliteSessionStore manager(settings);
 
     // Manually insert invalid type (valid are 0=Activity, 1=Pause)
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery query(manager.rawDb_dbg());
     const QDateTime now = QDateTime::currentDateTimeUtc();
     const QDateTime end = now.addSecs(10);
 
@@ -692,7 +692,7 @@ void DatabaseTest::test_database_load_invalid_enum_type()
     query.bindValue(":start_utc", now.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
     // Load should skip invalid type
     auto loaded = manager.loadDurations();
@@ -710,15 +710,15 @@ void DatabaseTest::test_database_load_duration_mismatch_tolerance()
     const QDateTime start = QDateTime::currentDateTimeUtc();
     const QDateTime end = start.addMSecs(1000);
 
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery query(manager.rawDb_dbg());
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
                  "VALUES (:segment_id, 0, :start_utc, :end_utc, 1)");
     query.bindValue(":segment_id", SegmentId::mint().toString());
     query.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
     // Duration is computed from timestamps.
     auto loaded = manager.loadDurations();
@@ -759,8 +759,8 @@ void DatabaseTest::test_database_load_invalid_type_increments_skipped_and_omits_
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
 
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery query(manager.rawDb_dbg());
     const QDateTime start = QDateTime::currentDateTimeUtc();
     const QDateTime end = start.addSecs(10);
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
@@ -769,7 +769,7 @@ void DatabaseTest::test_database_load_invalid_type_increments_skipped_and_omits_
     query.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
     auto loaded = manager.loadDurations();
     QCOMPARE(loaded.skipped, 1);
@@ -786,8 +786,8 @@ void DatabaseTest::test_database_load_200ms_mismatch_increments_repaired_and_use
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
 
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery query(manager.rawDb_dbg());
     const QDateTime start = QDateTime::currentDateTimeUtc();
     const QDateTime end = start.addMSecs(1000);
     query.prepare("INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
@@ -796,7 +796,7 @@ void DatabaseTest::test_database_load_200ms_mismatch_increments_repaired_and_use
     query.bindValue(":start_utc", start.toString(Qt::ISODateWithMs));
     query.bindValue(":end_utc", end.toString(Qt::ISODateWithMs));
     QVERIFY(query.exec());
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
     auto loaded = manager.loadDurations();
     QCOMPARE(loaded.repaired, 0);
@@ -855,8 +855,8 @@ void DatabaseTest::test_database_schema_creates_idx_finalized_start()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
 
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery query(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery query(manager.rawDb_dbg());
     QVERIFY(query.exec(
         "SELECT name FROM sqlite_master "
         "WHERE type = 'index' AND name = 'idx_start_utc'"
@@ -1268,7 +1268,7 @@ void DatabaseTest::test_retention_cleanup_retries_after_failure()
 
     // Constructor detects read-only file and leaves connection closed.
     SqliteSessionStore manager(settings);
-    QVERIFY(!manager.db.isOpen());
+    QVERIFY(!manager.rawDb_dbg().isOpen());
 
     // checkSchemaOnStartup() fails while DB is read-only (ensureOpen() returns false).
     QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Inaccessible);
@@ -1308,7 +1308,7 @@ void DatabaseTest::test_connection_names_unique_across_100_instances()
     // is guaranteed unique.
     for (int i = 0; i < 100; ++i) {
         auto* mgr = new SqliteSessionStore(settings);
-        QString name = mgr->db.connectionName();
+        QString name = mgr->dbConnectionName_dbg();
         connectionNames.insert(name);
         delete mgr;
     }
@@ -1333,7 +1333,7 @@ void DatabaseTest::test_connection_open_after_construction()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
 
-    QVERIFY(manager.db.isOpen());
+    QVERIFY(manager.rawDb_dbg().isOpen());
 }
 
 /**
@@ -1350,8 +1350,8 @@ void DatabaseTest::test_pragma_synchronous_normal_set_after_construction()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
 
-    QVERIFY(manager.db.isOpen());
-    QSqlQuery q(manager.db);
+    QVERIFY(manager.rawDb_dbg().isOpen());
+    QSqlQuery q(manager.rawDb_dbg());
     QVERIFY(q.exec("PRAGMA synchronous"));
     QVERIFY(q.next());
     // 1 = NORMAL, 2 = FULL (SQLite default is FULL = 2)
@@ -1638,15 +1638,15 @@ void DatabaseTest::test_database_saveDurations_append_upserts_existing_segment_i
     // Capture the autoincrement id assigned to that row.
     qint64 originalRowId = -1;
     {
-        QVERIFY(manager.ensureOpen());
-        QSqlQuery q(manager.db);
+        QVERIFY(manager.ensureOpen_dbg());
+        QSqlQuery q(manager.rawDb_dbg());
         q.prepare("SELECT id FROM durations WHERE segment_id = :sid");
         q.bindValue(":sid", segId.toString());
         QVERIFY(q.exec());
         QVERIFY(q.next());
         originalRowId = q.value(0).toLongLong();
         QVERIFY(!q.next()); // exactly one row
-        manager.lazyClose();
+        manager.lazyClose_dbg();
     }
     QVERIFY(originalRowId > 0);
 
@@ -1657,8 +1657,8 @@ void DatabaseTest::test_database_saveDurations_append_upserts_existing_segment_i
 
     // Assert: still exactly one row for that segment_id, fields are updated,
     // and the autoincrement id is unchanged.
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery verify(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery verify(manager.rawDb_dbg());
     verify.prepare("SELECT id, type, start_utc, end_utc "
                    "FROM durations WHERE segment_id = :sid");
     verify.bindValue(":sid", segId.toString());
@@ -1671,7 +1671,7 @@ void DatabaseTest::test_database_saveDurations_append_upserts_existing_segment_i
     QCOMPARE(verify.value(2).toString(), expStartUtc.toString(Qt::ISODateWithMs));
     QCOMPARE(verify.value(3).toString(), expEndUtc.toString(Qt::ISODateWithMs));
     QVERIFY(!verify.next()); // no duplicate
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 }
 
 /**
@@ -1686,7 +1686,7 @@ static qint64 seedOrphanRow(SqliteSessionStore& manager,
                             const QDateTime& endUtc,
                             DurationType type = DurationType::Activity)
 {
-    QSqlQuery q(manager.db);
+    QSqlQuery q(manager.rawDb_dbg());
     q.prepare(
         "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
         "VALUES (:segment_id, :type, :start_utc, :end_utc, 0)"
@@ -1709,36 +1709,36 @@ void DatabaseTest::test_finalizeIfNoOverlap_succeeds_when_no_overlap()
     Settings settings(createSettingsFile(tempDir.path(), 7));
     SqliteSessionStore manager(settings);
 
-    QVERIFY(manager.ensureOpen());
+    QVERIFY(manager.ensureOpen_dbg());
 
     // Existing finalised row from 10:00 to 11:00.
     const QDateTime existingStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 0, 0), Qt::UTC);
     const QDateTime existingEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 0, 0), Qt::UTC);
     std::deque<TimeDuration> seeded;
     seeded.emplace_back(DurationType::Activity, existingStartUtc.toLocalTime(), existingEndUtc.toLocalTime());
-    manager.lazyClose();
+    manager.lazyClose_dbg();
     QVERIFY(manager.updateDurationsById(seeded).ok());
 
     // Orphan from 12:00 to 12:30 — no overlap with the finalised row above.
     const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC);
     const QDateTime orphanEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(12, 30, 0), Qt::UTC);
 
-    QVERIFY(manager.ensureOpen());
+    QVERIFY(manager.ensureOpen_dbg());
     const qint64 orphanRowId = seedOrphanRow(manager, orphanStartUtc, orphanEndUtc);
     QVERIFY(orphanRowId > 0);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
-    QVERIFY(manager.finalizeIfNoOverlap(orphanRowId, orphanStartUtc, orphanEndUtc));
+    QVERIFY(manager.finalizeIfNoOverlap_dbg(orphanRowId, orphanStartUtc, orphanEndUtc));
 
     // Verify the row is now finalised.
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery verify(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery verify(manager.rawDb_dbg());
     verify.prepare("SELECT is_finalized FROM durations WHERE id = :id");
     verify.bindValue(":id", orphanRowId);
     QVERIFY(verify.exec());
     QVERIFY(verify.next());
     QCOMPARE(verify.value(0).toInt(), 1);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 }
 
 void DatabaseTest::test_finalizeIfNoOverlap_rejects_when_overlapping_finalized_row_exists()
@@ -1760,13 +1760,13 @@ void DatabaseTest::test_finalizeIfNoOverlap_rejects_when_overlapping_finalized_r
     const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC);
     const QDateTime orphanEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(11, 30, 0), Qt::UTC);
 
-    QVERIFY(manager.ensureOpen());
+    QVERIFY(manager.ensureOpen_dbg());
     const qint64 orphanRowId = seedOrphanRow(manager, orphanStartUtc, orphanEndUtc);
     QVERIFY(orphanRowId > 0);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
     // The overlap probe must reject the finalise attempt.
-    QVERIFY(!manager.finalizeIfNoOverlap(orphanRowId, orphanStartUtc, orphanEndUtc));
+    QVERIFY(!manager.finalizeIfNoOverlap_dbg(orphanRowId, orphanStartUtc, orphanEndUtc));
 }
 
 void DatabaseTest::test_finalizeIfNoOverlap_leaves_row_unchanged_on_overlap()
@@ -1788,22 +1788,22 @@ void DatabaseTest::test_finalizeIfNoOverlap_leaves_row_unchanged_on_overlap()
     const QDateTime orphanStartUtc = QDateTime(QDate(2025, 1, 1), QTime(9, 30, 0), Qt::UTC);
     const QDateTime orphanEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC);
 
-    QVERIFY(manager.ensureOpen());
+    QVERIFY(manager.ensureOpen_dbg());
     const qint64 orphanRowId = seedOrphanRow(manager, orphanStartUtc, orphanEndUtc);
     QVERIFY(orphanRowId > 0);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
-    QVERIFY(!manager.finalizeIfNoOverlap(orphanRowId, orphanStartUtc, orphanEndUtc));
+    QVERIFY(!manager.finalizeIfNoOverlap_dbg(orphanRowId, orphanStartUtc, orphanEndUtc));
 
     // After rejection, the row must still be is_finalized = 0 (transaction atomicity).
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery verify(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery verify(manager.rawDb_dbg());
     verify.prepare("SELECT is_finalized FROM durations WHERE id = :id");
     verify.bindValue(":id", orphanRowId);
     QVERIFY(verify.exec());
     QVERIFY(verify.next());
     QCOMPARE(verify.value(0).toInt(), 0);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 }
 
 void DatabaseTest::test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dropped()
@@ -1823,7 +1823,7 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dr
 
     // Orphan A: 12:00 - 12:30 — no overlap → should be finalised.
     // Orphan B: 10:30 - 11:30 — overlaps existing → should be reported as dropped.
-    QVERIFY(manager.ensureOpen());
+    QVERIFY(manager.ensureOpen_dbg());
     const QDateTime aStartUtc = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC);
     const QDateTime aEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(12, 30, 0), Qt::UTC);
     const QDateTime bStartUtc = QDateTime(QDate(2025, 1, 1), QTime(10, 30, 0), Qt::UTC);
@@ -1831,15 +1831,15 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dr
     const qint64 aId = seedOrphanRow(manager, aStartUtc, aEndUtc);
     const qint64 bId = seedOrphanRow(manager, bStartUtc, bEndUtc);
     QVERIFY(aId > 0 && bId > 0);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
-    std::vector<SqliteSessionStore::OrphanCheckpoint> toFinalize;
-    SqliteSessionStore::OrphanCheckpoint a; a.id = aId; a.startTime = aStartUtc.toLocalTime(); a.endTime = aEndUtc.toLocalTime();
-    SqliteSessionStore::OrphanCheckpoint b; b.id = bId; b.startTime = bStartUtc.toLocalTime(); b.endTime = bEndUtc.toLocalTime();
+    std::vector<SqliteSessionStore::OrphanCheckpoint_dbg> toFinalize;
+    SqliteSessionStore::OrphanCheckpoint_dbg a; a.id = aId; a.startTime = aStartUtc.toLocalTime(); a.endTime = aEndUtc.toLocalTime();
+    SqliteSessionStore::OrphanCheckpoint_dbg b; b.id = bId; b.startTime = bStartUtc.toLocalTime(); b.endTime = bEndUtc.toLocalTime();
     toFinalize.push_back(a);
     toFinalize.push_back(b);
 
-    SqliteSessionStore::ReconcileResult result = manager.reconcileUnfinalizedCheckpoints(toFinalize, {});
+    SqliteSessionStore::ReconcileResult_dbg result = manager.reconcileUnfinalizedCheckpoints_dbg(toFinalize, {});
     QVERIFY(result.ok);
     QCOMPARE(result.finalized.size(), (size_t)1);
     QCOMPARE(result.finalized[0], aId);
@@ -1847,8 +1847,8 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dr
     QCOMPARE(result.dropped[0], bId);
 
     // Verify DB state: A is finalised, B remains unfinalised.
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery verify(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery verify(manager.rawDb_dbg());
     verify.prepare("SELECT id, is_finalized FROM durations WHERE id IN (:a, :b) ORDER BY id");
     verify.bindValue(":a", aId);
     verify.bindValue(":b", bId);
@@ -1862,7 +1862,7 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_reports_finalized_and_dr
         seen++;
     }
     QCOMPARE(seen, 2);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 }
 
 void DatabaseTest::test_reconcileUnfinalizedCheckpoints_outright_drops_are_deleted()
@@ -1874,7 +1874,7 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_outright_drops_are_delet
     SqliteSessionStore manager(settings);
 
     // Two orphans, no overlapping finalised rows in the DB.
-    QVERIFY(manager.ensureOpen());
+    QVERIFY(manager.ensureOpen_dbg());
     const QDateTime aStartUtc = QDateTime(QDate(2025, 1, 1), QTime(12, 0, 0), Qt::UTC);
     const QDateTime aEndUtc   = QDateTime(QDate(2025, 1, 1), QTime(12, 30, 0), Qt::UTC);
     const QDateTime bStartUtc = QDateTime(QDate(2025, 1, 1), QTime(13, 0, 0), Qt::UTC);
@@ -1882,34 +1882,34 @@ void DatabaseTest::test_reconcileUnfinalizedCheckpoints_outright_drops_are_delet
     const qint64 aId = seedOrphanRow(manager, aStartUtc, aEndUtc);
     const qint64 bId = seedOrphanRow(manager, bStartUtc, bEndUtc);
     QVERIFY(aId > 0 && bId > 0);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
     // Reconcile with B in the outright-drop list and A in toFinalize.
-    std::vector<SqliteSessionStore::OrphanCheckpoint> toFinalize;
-    SqliteSessionStore::OrphanCheckpoint a; a.id = aId; a.startTime = aStartUtc.toLocalTime(); a.endTime = aEndUtc.toLocalTime();
+    std::vector<SqliteSessionStore::OrphanCheckpoint_dbg> toFinalize;
+    SqliteSessionStore::OrphanCheckpoint_dbg a; a.id = aId; a.startTime = aStartUtc.toLocalTime(); a.endTime = aEndUtc.toLocalTime();
     toFinalize.push_back(a);
 
-    SqliteSessionStore::ReconcileResult result = manager.reconcileUnfinalizedCheckpoints(toFinalize, {bId});
+    SqliteSessionStore::ReconcileResult_dbg result = manager.reconcileUnfinalizedCheckpoints_dbg(toFinalize, {bId});
     QVERIFY(result.ok);
     QCOMPARE(result.finalized.size(), (size_t)1);
     QCOMPARE(result.finalized[0], aId);
     QCOMPARE(result.dropped.size(), (size_t)0); // outright drops are not reported in `dropped`
 
     // Verify DB state: A finalised, B deleted entirely.
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery verify(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery verify(manager.rawDb_dbg());
     verify.prepare("SELECT id FROM durations WHERE id = :b");
     verify.bindValue(":b", bId);
     QVERIFY(verify.exec());
     QVERIFY(!verify.next()); // B is gone
 
-    QSqlQuery verifyA(manager.db);
+    QSqlQuery verifyA(manager.rawDb_dbg());
     verifyA.prepare("SELECT is_finalized FROM durations WHERE id = :a");
     verifyA.bindValue(":a", aId);
     QVERIFY(verifyA.exec());
     QVERIFY(verifyA.next());
     QCOMPARE(verifyA.value(0).toInt(), 1);
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 }
 
 // ============================================================================
@@ -2044,24 +2044,24 @@ void DatabaseTest::test_schema_status_ready_recreates_missing_idx_start_utc()
     {
         SqliteSessionStore seed(settings);
         QVERIFY(seed.saveDurations({}, TransactionMode::Append));
-        QVERIFY(seed.ensureOpen());
-        QSqlQuery q(seed.db);
+        QVERIFY(seed.ensureOpen_dbg());
+        QSqlQuery q(seed.rawDb_dbg());
         QVERIFY(q.exec("DROP INDEX IF EXISTS idx_start_utc"));
-        seed.lazyClose();
+        seed.lazyClose_dbg();
     }
 
     SqliteSessionStore manager(settings);
     QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Ready);
 
     // The index should now exist again.
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery verify(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery verify(manager.rawDb_dbg());
     QVERIFY(verify.exec(
         "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_start_utc'"
     ));
     QVERIFY(verify.next());
     QCOMPARE(verify.value(0).toString(), QString("idx_start_utc"));
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 }
 
 void DatabaseTest::test_schema_status_inaccessible_readonly_file()
@@ -2196,8 +2196,8 @@ void DatabaseTest::test_saveCheckpoint_does_not_demote_finalized_row()
     const SegmentId finalizedId = SegmentId::mint();
     const QDateTime start = QDateTime::fromMSecsSinceEpoch(10'000'000, Qt::UTC);
     const QDateTime end   = start.addSecs(60);
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery insertQuery(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery insertQuery(manager.rawDb_dbg());
     insertQuery.prepare(
         "INSERT INTO durations (segment_id, type, start_utc, end_utc, is_finalized) "
         "VALUES (:segment_id, 0, :start_utc, :end_utc, 1)"
@@ -2206,7 +2206,7 @@ void DatabaseTest::test_saveCheckpoint_does_not_demote_finalized_row()
     insertQuery.bindValue(":start_utc", start.toUTC().toString(Qt::ISODateWithMs));
     insertQuery.bindValue(":end_utc",   end.toUTC().toString(Qt::ISODateWithMs));
     QVERIFY(insertQuery.exec());
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 
     // Attempt to save a checkpoint using the same segment_id.
     const QDateTime newEnd = end.addSecs(30);
@@ -2216,8 +2216,8 @@ void DatabaseTest::test_saveCheckpoint_does_not_demote_finalized_row()
     QCOMPARE(result.category, SessionStoreResult::CallerBug);
 
     // The row must still be finalized and its end_utc must be unchanged.
-    QVERIFY(manager.ensureOpen());
-    QSqlQuery verifyQuery(manager.db);
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery verifyQuery(manager.rawDb_dbg());
     verifyQuery.prepare(
         "SELECT is_finalized, end_utc FROM durations WHERE segment_id = :segment_id"
     );
@@ -2226,5 +2226,5 @@ void DatabaseTest::test_saveCheckpoint_does_not_demote_finalized_row()
     QVERIFY(verifyQuery.next());
     QCOMPARE(verifyQuery.value(0).toInt(), 1);
     QCOMPARE(verifyQuery.value(1).toString(), end.toUTC().toString(Qt::ISODateWithMs));
-    manager.lazyClose();
+    manager.lazyClose_dbg();
 }

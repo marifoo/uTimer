@@ -78,9 +78,10 @@ struct TimeDuration {
         return TimeDuration(type, start, end, std::move(segmentId));
     }
 
-private:
-    // Raw constructor — use create() or fromTrusted() at call sites.
-    TimeDuration(DurationType type, QDateTime start, QDateTime end, SegmentId segmentId = SegmentId{})
+    // Raw constructor — bypasses create()'s validation guards (same-day, positive duration).
+    // Prefer create() for production-path data; use fromTrusted() or this directly only
+    // when the caller guarantees validity (e.g. loading from DB, test seeding).
+    explicit TimeDuration(DurationType type, QDateTime start, QDateTime end, SegmentId segmentId = SegmentId{})
         : segment_id(segmentId.isEmpty() ? SegmentId::mint() : std::move(segmentId)),
           type(type), duration(start.msecsTo(end)), startTime(start), endTime(end) {
     }

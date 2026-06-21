@@ -1,13 +1,8 @@
 #include "test_historyeditsession.h"
 #include <QtTest>
 
-// Expose private members of HistoryEditSession for direct field access in tests.
-#define private public
-#define protected public
 #include "../historyeditsession.h"
 #include "../timer.h"
-#undef private
-#undef protected
 
 #include "fakesessionstore.h"
 #include "testcommon.h"
@@ -59,18 +54,18 @@ void HistoryEditSessionTest::test_build_today_page_only_from_memory()
 
     const QDateTime start = todayUTC(10, 0);
     const QDateTime end   = todayUTC(10, 30);
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, start, end));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, start, end));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
 
-    QCOMPARE(session.pages_.size(), static_cast<size_t>(1));
-    QCOMPARE(session.pages_[0].isCurrent, true);
-    QCOMPARE(session.pages_[0].pageDate, QDate::currentDate());
+    QCOMPARE(session.pages().size(), static_cast<size_t>(1));
+    QCOMPARE(session.pages()[0].isCurrent, true);
+    QCOMPARE(session.pages()[0].pageDate, QDate::currentDate());
     // pendingTimelines[0] has 1 completed row (the memory row)
-    QCOMPARE(session.pendingTimelines_.size(), static_cast<size_t>(1));
-    QCOMPARE(session.pendingTimelines_[0].completed().size(), static_cast<size_t>(1));
-    QVERIFY(!session.pendingTimelines_[0].ongoing().has_value());
+    QCOMPARE(session.pendingTimelines().size(), static_cast<size_t>(1));
+    QCOMPARE(session.pendingTimelines()[0].completed().size(), static_cast<size_t>(1));
+    QVERIFY(!session.pendingTimelines()[0].ongoing().has_value());
 }
 
 void HistoryEditSessionTest::test_build_today_page_memory_plus_db()
@@ -91,16 +86,16 @@ void HistoryEditSessionTest::test_build_today_page_memory_plus_db()
     // Memory row (different time, different segment_id)
     const QDateTime memStart = todayUTC(9, 0);
     const QDateTime memEnd   = todayUTC(9, 30);
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
 
     // Only 1 page: today.
-    QCOMPARE(session.pages_.size(), static_cast<size_t>(1));
-    QCOMPARE(session.pages_[0].isCurrent, true);
+    QCOMPARE(session.pages().size(), static_cast<size_t>(1));
+    QCOMPARE(session.pages()[0].isCurrent, true);
     // 2 completed rows: memory row + db today row.
-    QCOMPARE(session.pendingTimelines_[0].completed().size(), static_cast<size_t>(2));
+    QCOMPARE(session.pendingTimelines()[0].completed().size(), static_cast<size_t>(2));
 }
 
 void HistoryEditSessionTest::test_build_historical_page_separate_from_today()
@@ -122,11 +117,11 @@ void HistoryEditSessionTest::test_build_historical_page_separate_from_today()
     session.buildFromTimer(tracker);
 
     // 2 pages: today (empty, isCurrent=true) + yesterday (1 entry, isCurrent=false).
-    QCOMPARE(session.pages_.size(), static_cast<size_t>(2));
-    QCOMPARE(session.pages_[0].isCurrent, true);
-    QCOMPARE(session.pages_[1].isCurrent, false);
-    QCOMPARE(session.pages_[1].pageDate, QDate::currentDate().addDays(-1));
-    QCOMPARE(session.pendingTimelines_[1].completed().size(), static_cast<size_t>(1));
+    QCOMPARE(session.pages().size(), static_cast<size_t>(2));
+    QCOMPARE(session.pages()[0].isCurrent, true);
+    QCOMPARE(session.pages()[1].isCurrent, false);
+    QCOMPARE(session.pages()[1].pageDate, QDate::currentDate().addDays(-1));
+    QCOMPARE(session.pendingTimelines()[1].completed().size(), static_cast<size_t>(1));
 }
 
 void HistoryEditSessionTest::test_build_deduplicates_db_row_matching_memory_segment_id()
@@ -142,7 +137,7 @@ void HistoryEditSessionTest::test_build_deduplicates_db_row_matching_memory_segm
 
     // Memory row with sharedId
     Timer tracker(settings, fakeDb);
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, start, end, sharedId));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, start, end, sharedId));
 
     // DB row with the same segment_id — should be deduped out.
     fakeDb.loadDurationsResult.durations.push_back(
@@ -152,8 +147,8 @@ void HistoryEditSessionTest::test_build_deduplicates_db_row_matching_memory_segm
     session.buildFromTimer(tracker);
 
     // Only the memory row survives (DB duplicate is excluded).
-    QCOMPARE(session.pendingTimelines_[0].completed().size(), static_cast<size_t>(1));
-    QCOMPARE(session.pendingTimelines_[0].completed()[0].segment_id, sharedId);
+    QCOMPARE(session.pendingTimelines()[0].completed().size(), static_cast<size_t>(1));
+    QCOMPARE(session.pendingTimelines()[0].completed()[0].segment_id, sharedId);
 }
 
 // ---------------------------------------------------------------------------
@@ -170,13 +165,13 @@ void HistoryEditSessionTest::test_origin_memory_rows_marked_true()
 
     const QDateTime start = todayUTC(10, 0);
     const QDateTime end   = todayUTC(10, 30);
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, start, end));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, start, end));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
 
-    const QString segId = session.pendingTimelines_[0].completed()[0].segment_id.toString();
-    QVERIFY(session.originIsMemory_.value(segId, false));
+    const QString segId = session.pendingTimelines()[0].completed()[0].segment_id.toString();
+    QVERIFY(session.originIsMemory().value(segId, false));
 }
 
 void HistoryEditSessionTest::test_origin_db_rows_marked_false()
@@ -196,8 +191,8 @@ void HistoryEditSessionTest::test_origin_db_rows_marked_false()
     HistoryEditSession session;
     session.buildFromTimer(tracker);
 
-    const QString segId = session.pendingTimelines_[1].completed()[0].segment_id.toString();
-    QCOMPARE(session.originIsMemory_.value(segId, true), false);
+    const QString segId = session.pendingTimelines()[1].completed()[0].segment_id.toString();
+    QCOMPARE(session.originIsMemory().value(segId, true), false);
 }
 
 // ---------------------------------------------------------------------------
@@ -214,26 +209,26 @@ void HistoryEditSessionTest::test_split_registers_child_with_same_origin()
 
     const QDateTime start = todayUTC(10, 0);
     const QDateTime end   = todayUTC(10, 0, 8); // 8-second segment
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, start, end));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, start, end));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
 
-    const QString origId = session.pendingTimelines_[0].completed()[0].segment_id.toString();
-    QCOMPARE(session.originIsMemory_.value(origId, false), true);
+    const QString origId = session.pendingTimelines()[0].completed()[0].segment_id.toString();
+    QCOMPARE(session.originIsMemory().value(origId, false), true);
 
     // Split at 4 s
     const QDateTime splitAt = todayUTC(10, 0, 4);
-    session.pendingTimelines_[0] = session.pendingTimelines_[0].withSplit(
+    session.pendingTimelines()[0] = session.pendingTimelines()[0].withSplit(
         0, splitAt, DurationType::Activity, DurationType::Pause);
 
     // The second half gets a fresh segment_id; register it with the same origin.
-    const auto& newComp = session.pendingTimelines_[0].completed();
+    const auto& newComp = session.pendingTimelines()[0].completed();
     QCOMPARE(newComp.size(), static_cast<size_t>(2));
     const QString childId = newComp[1].segment_id.toString();
     session.registerSplitChild(childId, true /*wasMemory*/);
 
-    QCOMPARE(session.originIsMemory_.value(childId, false), true);
+    QCOMPARE(session.originIsMemory().value(childId, false), true);
 }
 
 void HistoryEditSessionTest::test_split_history_row_child_is_false_origin()
@@ -253,21 +248,21 @@ void HistoryEditSessionTest::test_split_history_row_child_is_false_origin()
     HistoryEditSession session;
     session.buildFromTimer(tracker);
 
-    QCOMPARE(session.pages_.size(), static_cast<size_t>(2));
+    QCOMPARE(session.pages().size(), static_cast<size_t>(2));
 
-    const QString origId = session.pendingTimelines_[1].completed()[0].segment_id.toString();
-    QCOMPARE(session.originIsMemory_.value(origId, true), false);
+    const QString origId = session.pendingTimelines()[1].completed()[0].segment_id.toString();
+    QCOMPARE(session.originIsMemory().value(origId, true), false);
 
     const QDateTime splitAt = yesterdayUTC(10, 0, 4);
-    session.pendingTimelines_[1] = session.pendingTimelines_[1].withSplit(
+    session.pendingTimelines()[1] = session.pendingTimelines()[1].withSplit(
         0, splitAt, DurationType::Activity, DurationType::Pause);
 
-    const auto& newComp = session.pendingTimelines_[1].completed();
+    const auto& newComp = session.pendingTimelines()[1].completed();
     QCOMPARE(newComp.size(), static_cast<size_t>(2));
     const QString childId = newComp[1].segment_id.toString();
     session.registerSplitChild(childId, false /*wasMemory*/);
 
-    QCOMPARE(session.originIsMemory_.value(childId, true), false);
+    QCOMPARE(session.originIsMemory().value(childId, true), false);
 }
 
 // ---------------------------------------------------------------------------
@@ -284,16 +279,16 @@ void HistoryEditSessionTest::test_type_toggle_updates_pending_timeline()
 
     const QDateTime start = todayUTC(10, 0);
     const QDateTime end   = todayUTC(10, 30);
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, start, end));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, start, end));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
 
-    QCOMPARE(session.pendingTimelines_[0].completed()[0].type, DurationType::Activity);
+    QCOMPARE(session.pendingTimelines()[0].completed()[0].type, DurationType::Activity);
 
-    session.setPageTimeline(0, session.pendingTimelines_[0].withSegmentType(0, DurationType::Pause));
+    session.setPageTimeline(0, session.pendingTimelines()[0].withSegmentType(0, DurationType::Pause));
 
-    QCOMPARE(session.pendingTimelines_[0].completed()[0].type, DurationType::Pause);
+    QCOMPARE(session.pendingTimelines()[0].completed()[0].type, DurationType::Pause);
 }
 
 // ---------------------------------------------------------------------------
@@ -316,7 +311,7 @@ void HistoryEditSessionTest::test_no_merge_needed_for_non_overlapping()
 
     const QDateTime memStart = todayUTC(9, 0);
     const QDateTime memEnd   = todayUTC(9, 30);
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -342,7 +337,7 @@ void HistoryEditSessionTest::test_merge_needed_for_overlapping_rows()
 
     const QDateTime memStart = todayUTC(10, 15);
     const QDateTime memEnd   = todayUTC(10, 45);
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -377,7 +372,7 @@ void HistoryEditSessionTest::test_cross_midnight_preserved_in_payload()
     session.buildFromTimer(tracker);
 
     // crossMidnightRows_ must hold exactly the one cross-midnight row.
-    QCOMPARE(session.crossMidnightRows_.size(), static_cast<size_t>(1));
+    QCOMPARE(session.crossMidnightRows().size(), static_cast<size_t>(1));
 
     // After buildSavePayload(), the cross-midnight row is in historyTimeline.
     const auto payload = session.buildSavePayload();
@@ -405,8 +400,8 @@ void HistoryEditSessionTest::test_refresh_ongoing_updates_end_time()
     HistoryEditSession session;
     session.buildFromTimer(tracker);
 
-    QVERIFY(session.pendingTimelines_[0].ongoing().has_value());
-    const QDateTime snapshotEnd = session.pendingTimelines_[0].ongoing()->endTime;
+    QVERIFY(session.pendingTimelines()[0].ongoing().has_value());
+    const QDateTime snapshotEnd = session.pendingTimelines()[0].ongoing()->endTime;
 
     // Wait so the engine's ongoing end-time advances.
     QTest::qWait(100);
@@ -414,7 +409,7 @@ void HistoryEditSessionTest::test_refresh_ongoing_updates_end_time()
     // refreshOngoing() should update the end-time to the newer value.
     session.refreshOngoing(tracker);
 
-    const QDateTime refreshedEnd = session.pendingTimelines_[0].ongoing()->endTime;
+    const QDateTime refreshedEnd = session.pendingTimelines()[0].ongoing()->endTime;
     QVERIFY2(refreshedEnd > snapshotEnd,
              "refreshed end-time must be strictly later than snapshot end-time");
 
@@ -435,8 +430,8 @@ void HistoryEditSessionTest::test_refresh_ongoing_skipped_when_user_modified()
     HistoryEditSession session;
     session.buildFromTimer(tracker);
 
-    QVERIFY(session.pendingTimelines_[0].ongoing().has_value());
-    const QDateTime snapshotEnd = session.pendingTimelines_[0].ongoing()->endTime;
+    QVERIFY(session.pendingTimelines()[0].ongoing().has_value());
+    const QDateTime snapshotEnd = session.pendingTimelines()[0].ongoing()->endTime;
 
     // Mark the ongoing row as user-modified.
     session.markOngoingModified();
@@ -446,7 +441,7 @@ void HistoryEditSessionTest::test_refresh_ongoing_skipped_when_user_modified()
     // refreshOngoing() must be a no-op when user has edited the ongoing row.
     session.refreshOngoing(tracker);
 
-    QCOMPARE(session.pendingTimelines_[0].ongoing()->endTime, snapshotEnd);
+    QCOMPARE(session.pendingTimelines()[0].ongoing()->endTime, snapshotEnd);
 
     tracker.useTimerViaButton(Button::Stop);
 }
@@ -468,7 +463,7 @@ void HistoryEditSessionTest::test_refresh_ongoing_clears_when_engine_has_no_ongo
     HistoryEditSession session;
     session.buildFromTimer(tracker);
 
-    QVERIFY(session.pendingTimelines_[0].ongoing().has_value());
+    QVERIFY(session.pendingTimelines()[0].ongoing().has_value());
 
     // Stop the engine (simulates a deferred midnight stop or similar).
     tracker.useTimerViaButton(Button::Stop);
@@ -476,7 +471,7 @@ void HistoryEditSessionTest::test_refresh_ongoing_clears_when_engine_has_no_ongo
     // refreshOngoing() must clear the ongoing in the session.
     session.refreshOngoing(tracker);
 
-    QVERIFY(!session.pendingTimelines_[0].ongoing().has_value());
+    QVERIFY(!session.pendingTimelines()[0].ongoing().has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -501,7 +496,7 @@ void HistoryEditSessionTest::test_payload_history_vs_session_buckets()
 
     const QDateTime memStart = todayUTC(9, 0);
     const QDateTime memEnd   = todayUTC(9, 30);
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -536,7 +531,7 @@ void HistoryEditSessionTest::test_payload_memory_timeline_for_commit()
     // Memory row today.
     const QDateTime memStart = todayUTC(9, 0);
     const QDateTime memEnd   = todayUTC(9, 30);
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);
@@ -571,7 +566,7 @@ void HistoryEditSessionTest::test_payload_memory_absorbs_merged_memory_row()
     // Memory Activity row 10:15–10:45 (overlaps DB row)
     const QDateTime memStart = todayUTC(10, 15);
     const QDateTime memEnd   = todayUTC(10, 45);
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
 
     HistoryEditSession session;
     session.buildFromTimer(tracker);

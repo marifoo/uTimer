@@ -10,14 +10,14 @@ void LockStateWatcherTest::test_lockstatewatcher_debounce_logic()
     std::deque<bool> pattern = {false,false,true,true,true};
     LockEvent event = LockEvent::None;
     for (bool state : pattern) {
-        event = watcher.determineLockEvent(state);
+        event = watcher.determineLockEvent_dbg(state);
     }
     QCOMPARE(event, LockEvent::Lock);
 
     // feed majority unlock pattern
     pattern = {true,true,false,false,false};
     for (bool state : pattern) {
-        event = watcher.determineLockEvent(state);
+        event = watcher.determineLockEvent_dbg(state);
     }
     QCOMPARE(event, LockEvent::Unlock);
 }

@@ -32,6 +32,7 @@ SOURCES += \
     test_healthmonitor.cpp \
     test_timeline.cpp \
     test_renames.cpp \
+    test_persistence_contract.cpp \
     $$PWD/../healthmonitor.cpp \
     $$PWD/../splitdialog.cpp \
     $$PWD/../historydialog.cpp \
@@ -64,6 +65,7 @@ HEADERS += \
     test_healthmonitor.h \
     test_timeline.h \
     test_renames.h \
+    test_persistence_contract.h \
     $$PWD/../apppaths.h \
     $$PWD/../splitdialog.h \
     $$PWD/../historyeditsession.h \

@@ -111,8 +111,10 @@ public:
         LockResume,    ///< Desktop unlocked and timer was auto-resumed.
     };
 
-private:
+public:
     enum class Mode {Activity, Pause, None};
+
+private:
 
     /**
      * DayBoundaryWatcher — owns the 23:59:59.500 single-shot QTimer and the
@@ -348,6 +350,67 @@ signals:
 
 private slots:
     void saveCheckpoint();  // Periodic checkpoint saving every 5 minutes
+
+#ifndef QT_NO_DEBUG
+public:
+    // ---- Debug-build test probes ----
+    // Narrow accessors for white-box tests. NOT compiled in release builds.
+
+    /// Direct access to the SessionState for test setup and assertions.
+    SessionState& sessionState_dbg() { return session_; }
+    const SessionState& sessionState_dbg() const { return session_; }
+
+    /// Expose frequently-checked flags for test assertions.
+    bool isDialogOpen_dbg() const { return dialog_open_; }
+    bool isLocked_dbg() const { return is_locked_; }
+    bool isAutopausePendingResume_dbg() const { return autopause_pending_resume_; }
+    void setAutopausePendingResume_dbg(bool v) { autopause_pending_resume_ = v; }
+
+    /// Forces the engine into a specific mode without transition logic.
+    /// Use only in tests that need to arrange a pre-condition state.
+    void forceMode_dbg(Mode m) { mode_ = m; }
+
+    /// Expose the QElapsedTimer so tests can reset it to control elapsed time.
+    QElapsedTimer& elapsedTimer_dbg() { return timer_; }
+
+    /// Exposes the internal checkpoint-save path for direct testing.
+    void saveCheckpointInternal_dbg(const QDateTime& now) { saveCheckpointInternal(now); }
+
+    /// Exposes the backpause path for direct testing.
+    void backpauseTimer_dbg(const QDateTime& now) { backpauseTimer(now); }
+
+    /// Exposes the addDuration path for direct testing.
+    void addDuration_dbg(DurationType type, const QDateTime& start, const QDateTime& end) {
+        addDuration(type, start, end);
+    }
+
+    /// Returns whether the periodic checkpoint QTimer is currently running.
+    bool isCheckpointTimerActive_dbg() const { return checkpointTimer_.isActive(); }
+
+    /// Exposes the pending deferred lock event (set while dialog_open_).
+    LockEvent pendingLockEvent_dbg() const { return pending_lock_event_; }
+    void setPendingMidnightStop_dbg(bool v) { pending_midnight_stop_ = v; }
+    bool pendingMidnightStop_dbg() const { return pending_midnight_stop_; }
+
+    /// Triggers the periodic checkpoint slot directly (bypasses timer interval).
+    void triggerCheckpoint_dbg() { saveCheckpoint(); }
+
+    /// Calls the internal cross-midnight discard helper directly.
+    bool discardCrossMidnightOngoingAndStop_dbg(const QDateTime& now) {
+        return discardCrossMidnightOngoingAndStop(now);
+    }
+
+    /// Exposes the DayBoundaryWatcher for test control of the scheduled-stop timer.
+    DayBoundaryWatcher& dayBoundaryWatcher_dbg() { return day_boundary_watcher_; }
+
+    /// Exposes the internal DB-write helpers for the regression surface test.
+    bool appendDurationsToDB_dbg() { return appendDurationsToDB(); }
+    bool updateDurationsInDB_dbg() { return updateDurationsInDB(); }
+    void replaceCurrentDurations_dbg(const std::deque<TimeDuration>& d,
+                                     const std::optional<TimeDuration>& o = std::nullopt) {
+        replaceCurrentDurations(d, o);
+    }
+#endif // QT_NO_DEBUG
 };
 
 Q_DECLARE_METATYPE(Timer::StopReason)

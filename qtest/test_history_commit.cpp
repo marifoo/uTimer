@@ -5,12 +5,7 @@
 #include <QAbstractButton>
 #include <QApplication>
 
-// Expose private members for testing
-#define private public
-#define protected public
 #include "../historydialog.h"
-#undef private
-#undef protected
 
 using TestCommon::createSettingsFile;
 
@@ -54,7 +49,7 @@ void HistoryCommitTest::test_accept_stays_open_on_db_failure()
     Timer tracker(settings, db);
 
     const QDateTime now = QDateTime::currentDateTime();
-    tracker.session_.durations.push_back(
+    tracker.sessionState_dbg().durations.push_back(
         TimeDuration(DurationType::Activity, now.addSecs(-30), now.addSecs(-20)));
 
     std::deque<TimeDuration> dbDurations;
@@ -95,8 +90,8 @@ void HistoryCommitTest::test_accept_stays_open_on_db_failure()
     QVERIFY(dialog.result() != QDialog::Accepted);
 
     // Timer state must be unchanged.
-    QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(1));
-    QCOMPARE(tracker.session_.durations[0].type, DurationType::Activity);
+    QCOMPARE(tracker.sessionState_dbg().durations.size(), static_cast<size_t>(1));
+    QCOMPARE(tracker.sessionState_dbg().durations[0].type, DurationType::Activity);
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +116,7 @@ void HistoryCommitTest::test_accept_stays_open_on_merge_decline()
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Activity, dbStart, dbEnd);
     QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
-    tracker.session_.durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
+    tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
 
     HistoryDialog dialog(tracker, settings);
 
@@ -142,7 +137,7 @@ void HistoryCommitTest::test_accept_stays_open_on_merge_decline()
     QVERIFY(dialog.result() != QDialog::Accepted);
 
     // Timer session unchanged.
-    QCOMPARE(tracker.session_.durations.size(), static_cast<size_t>(1));
+    QCOMPARE(tracker.sessionState_dbg().durations.size(), static_cast<size_t>(1));
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +154,7 @@ void HistoryCommitTest::test_accept_closes_on_success()
     Timer tracker(settings, db);
 
     const QDateTime now = QDateTime::currentDateTime();
-    tracker.session_.durations.push_back(
+    tracker.sessionState_dbg().durations.push_back(
         TimeDuration(DurationType::Activity, now.addSecs(-30), now.addSecs(-10)));
 
     HistoryDialog dialog(tracker, settings);
@@ -190,19 +185,19 @@ void HistoryCommitTest::test_raii_guard_resumes_on_accept()
 
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
-    QVERIFY(tracker.checkpointTimer_.isActive());
+    QVERIFY(tracker.isCheckpointTimerActive_dbg());
 
     {
         HistoryDialog dialog(tracker, settings);
-        QVERIFY(tracker.dialog_open_);
-        QVERIFY(!tracker.checkpointTimer_.isActive());
+        QVERIFY(tracker.isDialogOpen_dbg());
+        QVERIFY(!tracker.isCheckpointTimerActive_dbg());
 
         dialog.accept();
     }
 
     // After accept (and dialog destruction), exclusive edit must have ended.
-    QVERIFY(!tracker.dialog_open_);
-    QVERIFY(tracker.checkpointTimer_.isActive());
+    QVERIFY(!tracker.isDialogOpen_dbg());
+    QVERIFY(tracker.isCheckpointTimerActive_dbg());
 
     tracker.useTimerViaButton(Button::Stop);
 }
@@ -228,19 +223,19 @@ void HistoryCommitTest::test_raii_guard_resumes_on_reject()
 
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
-    QVERIFY(tracker.checkpointTimer_.isActive());
+    QVERIFY(tracker.isCheckpointTimerActive_dbg());
 
     {
         HistoryDialog dialog(tracker, settings);
-        QVERIFY(tracker.dialog_open_);
-        QVERIFY(!tracker.checkpointTimer_.isActive());
+        QVERIFY(tracker.isDialogOpen_dbg());
+        QVERIFY(!tracker.isCheckpointTimerActive_dbg());
 
         dialog.reject();
     }
 
     // After reject, exclusive edit must have ended.
-    QVERIFY(!tracker.dialog_open_);
-    QVERIFY(tracker.checkpointTimer_.isActive());
+    QVERIFY(!tracker.isDialogOpen_dbg());
+    QVERIFY(tracker.isCheckpointTimerActive_dbg());
 
     tracker.useTimerViaButton(Button::Stop);
 }
@@ -266,18 +261,18 @@ void HistoryCommitTest::test_raii_guard_resumes_on_destruction()
 
     tracker.useTimerViaButton(Button::Start);
     QTest::qWait(20);
-    QVERIFY(tracker.checkpointTimer_.isActive());
+    QVERIFY(tracker.isCheckpointTimerActive_dbg());
 
     {
         HistoryDialog dialog(tracker, settings);
-        QVERIFY(tracker.dialog_open_);
-        QVERIFY(!tracker.checkpointTimer_.isActive());
+        QVERIFY(tracker.isDialogOpen_dbg());
+        QVERIFY(!tracker.isCheckpointTimerActive_dbg());
         // Dialog is destroyed here without accept or reject.
     }
 
     // After destruction, exclusive edit must have ended.
-    QVERIFY(!tracker.dialog_open_);
-    QVERIFY(tracker.checkpointTimer_.isActive());
+    QVERIFY(!tracker.isDialogOpen_dbg());
+    QVERIFY(tracker.isCheckpointTimerActive_dbg());
 
     tracker.useTimerViaButton(Button::Stop);
 }

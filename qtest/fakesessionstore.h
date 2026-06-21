@@ -1,16 +1,21 @@
 /**
- * FakeSessionStore -- in-memory test double for SessionStore.
+ * FakeSessionStore -- spy test double for SessionStore.
  *
- * Records every call made to it so tests can assert which operations were
- * performed and in what order.  Return values are configurable per-method
- * so tests can simulate failures.  Data is stored in-memory (no SQLite).
+ * Records every call made to it (callLog) so tests can assert which
+ * operations were performed and in what order.  Stores raw segments passed
+ * to commitSession/replaceAll for inspection.  Return values are
+ * configurable per-method to simulate failures.
+ *
+ * Intentionally contains NO normalization, upsert, overlap, or reconcile
+ * policy — those behaviors are verified against the real SqliteSessionStore
+ * in test_persistence_contract.cpp.
  *
  * Typical usage:
  *     FakeSessionStore fakeDb;
  *     Timer tracker(settings, fakeDb);
  *     // ... exercise tracker ...
  *     QCOMPARE(fakeDb.callLog.count("saveCheckpoint"), 1);
- *     QCOMPARE(fakeDb.storedDurations.size(), 3);
+ *     QVERIFY(fakeDb.callLog.contains("commitSession"));
  */
 
 #ifndef FAKESESSIONSTORE_H
@@ -69,8 +74,8 @@ public:
     SchemaStatus checkSchemaResult = SchemaStatus::Ready;
     bool setMarkerResult = true;
 
-    /// Set of segment_ids that have been committed via commitSession().
-    /// Used to enforce UNIQUE(segment_id): duplicate submissions Q_ASSERT-fail.
+    /// Set of segment_ids seen in commitSession() calls.
+    /// Populated on success for cross-path uniqueness checks in saveCheckpoint.
     QSet<QString> committedSegmentIds;
 
     /// Pre-loaded durations returned by loadDurations(). Tests populate this.
