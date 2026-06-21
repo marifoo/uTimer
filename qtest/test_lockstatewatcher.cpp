@@ -26,6 +26,45 @@ void LockStateWatcherTest::test_lockstatewatcher_debounce_logic()
     QCOMPARE(event, LockEvent::Unlock);
 }
 
+// ItemE: shouldEmitLongLock — Unknown never matures regardless of elapsed time.
+void LockStateWatcherTest::test_shouldEmitLongLock_unknown_does_not_mature()
+{
+    Settings settings(TestCommon::createSettingsFile(QDir::tempPath(), 7));
+    LockStateWatcher watcher(settings);
+
+    // Arrange: elapsed well past the backpause threshold (15 min default = 900000 ms).
+    const qint64 pastThreshold = settings.getBackpauseMsec() + 1000;
+
+    // Act + Assert: Unknown must never trigger long-lock maturation.
+    QVERIFY(!watcher.shouldEmitLongLock_dbg(LockQueryResult::Unknown, pastThreshold));
+}
+
+// ItemE: shouldEmitLongLock — Locked with elapsed >= backpause DOES mature.
+void LockStateWatcherTest::test_shouldEmitLongLock_locked_matures()
+{
+    Settings settings(TestCommon::createSettingsFile(QDir::tempPath(), 7));
+    LockStateWatcher watcher(settings);
+
+    // Arrange: elapsed exactly at threshold.
+    const qint64 atThreshold = settings.getBackpauseMsec();
+
+    // Act + Assert: Locked result at or past threshold triggers long-lock.
+    QVERIFY(watcher.shouldEmitLongLock_dbg(LockQueryResult::Locked, atThreshold));
+}
+
+// ItemE: shouldEmitLongLock — Locked with elapsed < backpause does NOT mature.
+void LockStateWatcherTest::test_shouldEmitLongLock_locked_short_elapsed_does_not_mature()
+{
+    Settings settings(TestCommon::createSettingsFile(QDir::tempPath(), 7));
+    LockStateWatcher watcher(settings);
+
+    // Arrange: elapsed one millisecond short of the threshold.
+    const qint64 belowThreshold = settings.getBackpauseMsec() - 1;
+
+    // Act + Assert: not enough time elapsed — no long-lock emission.
+    QVERIFY(!watcher.shouldEmitLongLock_dbg(LockQueryResult::Locked, belowThreshold));
+}
+
 // 9.5: Unknown (query failure) must not modify the debounce buffer.
 // Scenario: buffer is in a partially-locked state (3 of 5 = Locked).
 // Feeding Unknown should not trigger a false Unlock transition.

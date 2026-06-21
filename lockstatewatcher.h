@@ -44,14 +44,17 @@ private:
 
 	LockQueryResult isSessionLocked();
 	LockEvent determineLockEvent(LockQueryResult query_result);
+	bool shouldEmitLongLock(LockQueryResult latest, qint64 elapsedMs) const;
 
 public:
 	explicit LockStateWatcher(const Settings & settings, QObject *parent = nullptr);
 
 #ifndef QT_NO_DEBUG
-    // ---- Debug-build test probe ----
+    // ---- Debug-build test probes ----
     /// Exposes the debounce logic for direct unit testing.
     LockEvent determineLockEvent_dbg(LockQueryResult result) { return determineLockEvent(result); }
+    /// Exposes the long-lock maturation check for direct unit testing.
+    bool shouldEmitLongLock_dbg(LockQueryResult latest, qint64 elapsedMs) const { return shouldEmitLongLock(latest, elapsedMs); }
 #endif
 
 signals:
