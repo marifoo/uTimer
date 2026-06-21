@@ -1467,7 +1467,7 @@ void DatabaseTest::test_V_replaceAll_wipes_and_rewrites()
     replacement.emplace_back(DurationType::Pause,    now.addSecs(-40), now.addSecs(-10));
 
     QVERIFY(manager.replaceAll(Timeline(replacement, std::nullopt),
-                                Timeline({}, std::nullopt)));
+                                Timeline({}, std::nullopt)).ok());
 
     auto loaded = manager.loadDurations();
     QCOMPARE(static_cast<int>(loaded.size()), 2);
@@ -1511,7 +1511,7 @@ void DatabaseTest::test_W_backup_created_before_replaceAll_not_commitSession()
 
     // replaceAll SHOULD create a new backup file
     QVERIFY(manager.replaceAll(Timeline(segs, std::nullopt),
-                                Timeline({}, std::nullopt)));
+                                Timeline({}, std::nullopt)).ok());
     QStringList afterReplace = appDir.entryList(QStringList() << "*.backup", QDir::Files);
     QVERIFY(afterReplace.size() > countAfterSeed); // new backup created
 

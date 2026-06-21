@@ -13,6 +13,37 @@
  * represented here as a pure virtual.  Internal helpers (ensureOpen,
  * ensureSchema, createBackup, etc.) remain private implementation details
  * of the concrete class.
+ *
+ * ── Unified result vocabulary ──────────────────────────────────────────
+ *
+ * All store methods that can fail use SessionStoreResult::Category to
+ * report their outcome.  The categories have consistent meanings across
+ * every method:
+ *
+ *   Success       — operation completed; any returned data is valid.
+ *
+ *   Disabled      — history storage is disabled (history_days_to_keep == 0).
+ *                   The call was a no-op.  This is not an error; callers
+ *                   should treat the absence of data as intentional.
+ *                   Retrying with the same arguments will always return
+ *                   Disabled until history is re-enabled.
+ *
+ *   TransientError — a recoverable failure (e.g. SQL execution error,
+ *                   transaction could not start).  The caller may retry;
+ *                   data was not mutated.
+ *
+ *   FatalError    — unrecoverable failure (e.g. DB connection lost).
+ *                   Callers should emit a user warning and refuse new sessions.
+ *
+ *   CallerBug     — invalid input supplied by the caller (e.g. empty
+ *                   segment_id, or a segment_id that already belongs to
+ *                   finalized history).  Retrying with the same arguments
+ *                   will not help.  Log as critical.
+ *
+ * Methods that carry additional payload (loadDurations, hasEntriesForDate)
+ * embed a status field that uses the same categories.  The per-method
+ * contract matrices in test_contract_matrix.cpp document which categories
+ * apply to each method.
  */
 
 #ifndef SESSIONSTORE_H
@@ -25,14 +56,44 @@
 #include "timeline.h"
 
 /**
- * Forward declaration of LoadResult type.
- * Defined here so both the interface and the concrete class share the same
- * type without requiring SqliteSessionStore to be included.
+ * Typed result returned by SessionStore operations that write to the database.
+ *
+ * Category semantics — see unified vocabulary in file-level comment above.
+ */
+struct SessionStoreResult {
+    enum Category { Success, Disabled, TransientError, FatalError, CallerBug };
+    Category category;
+    QString message;
+    bool ok() const { return category == Success; }
+    /// True when the call did its job OR was a no-op because history storage
+    /// is disabled.  Control-flow seams that treat "history off" the same as
+    /// success (no unsaved-data retention, no failure warning) should use this
+    /// instead of ok(); Disabled is not an error.
+    bool okOrDisabled() const { return category == Success || category == Disabled; }
+    static SessionStoreResult success()  { return {Success, {}}; }
+    static SessionStoreResult disabled() { return {Disabled, {}}; }
+    static SessionStoreResult transient(QString msg) { return {TransientError, std::move(msg)}; }
+    static SessionStoreResult callerBug(QString msg) { return {CallerBug, std::move(msg)}; }
+    static SessionStoreResult fatal(QString msg) { return {FatalError, std::move(msg)}; }
+};
+
+/**
+ * Result of loadDurations().
+ *
+ * status carries the same SessionStoreResult::Category vocabulary:
+ *   Success       — query ran; durations holds all finalized rows (may be empty).
+ *   Disabled      — history storage is disabled; durations is always empty.
+ *                   Treat as "no history," not an error.
+ *   TransientError / FatalError — DB could not be opened or the query failed;
+ *                   durations is empty.  Surface an error to the user.
+ *
+ * CallerBug is not applicable to loadDurations.
  */
 struct LoadResult {
     std::deque<TimeDuration> durations;
     int skipped = 0;
     int repaired = 0;
+    SessionStoreResult::Category status = SessionStoreResult::Success;
 
     size_t size() const { return durations.size(); }
     bool empty() const { return durations.empty(); }
@@ -65,29 +126,6 @@ struct StartupRecoveryResult {
 };
 
 /**
- * Typed result returned by SessionStore operations that write to the database.
- *
- * Category semantics:
- *   Success       — operation completed successfully.
- *   TransientError — a recoverable failure (e.g. SQL execution error); the
- *                   caller may retry.
- *   CallerBug     — invalid input supplied by the caller (e.g. empty segment_id);
- *                   retrying with the same arguments will not help. Log as critical.
- *   FatalError    — unrecoverable failure (e.g. DB connection lost); the caller
- *                   should emit a user warning and refuse new sessions.
- */
-struct SessionStoreResult {
-    enum Category { Success, TransientError, CallerBug, FatalError };
-    Category category;
-    QString message;
-    bool ok() const { return category == Success; }
-    static SessionStoreResult success() { return {Success, {}}; }
-    static SessionStoreResult transient(QString msg) { return {TransientError, std::move(msg)}; }
-    static SessionStoreResult callerBug(QString msg) { return {CallerBug, std::move(msg)}; }
-    static SessionStoreResult fatal(QString msg) { return {FatalError, std::move(msg)}; }
-};
-
-/**
  * Result of checkSchemaOnStartup().
  *
  *   Ready        — existing DB has the expected schema; safe to use.
@@ -106,21 +144,46 @@ public:
 
     /// @pre All segment_ids in the timeline must be non-empty
     virtual SessionStoreResult commitSession(const Timeline& session) = 0;
-    virtual bool replaceAll(const Timeline& history, const Timeline& session) = 0;
+
+    /// Atomically replaces all rows (history finalized + session unfinalized).
+    /// Returns Disabled when history storage is off (no-op, not an error).
+    /// Returns TransientError or FatalError on DB failure.
+    /// CallerBug is not applicable.
+    virtual SessionStoreResult replaceAll(const Timeline& history, const Timeline& session) = 0;
+
+    /// Returns all finalized rows sorted chronologically.
+    /// result.status is Disabled when history is off, or TransientError/FatalError
+    /// on DB failure.  On any non-Success status, result.durations is empty.
     virtual LoadResult loadDurations() = 0;
-    // Returns Yes iff at least one finalised row's start falls on `localDate`
-    // interpreted in the system local time zone.
+
+    /// Returns Yes iff at least one finalised row's start falls on `localDate`
+    /// interpreted in the system local time zone.
+    /// Returns Unknown when history is disabled or the DB cannot be opened —
+    /// callers must treat Unknown as "answer unknowable," not "no entries."
     virtual EntriesForDateResult hasEntriesForDate(const QDate& localDate) = 0;
+
     /// Writes or extends an unfinalized checkpoint row identified by segmentId.
     /// Invariant: checkpoint writes must never demote finalized history. If segmentId
     /// already belongs to a finalized row, the call returns CallerBug and leaves the
     /// row unchanged. Only unfinalized rows may be created or updated by this method.
+    /// Returns Disabled when history storage is off (no-op, not an error).
     /// @pre segmentId must be non-empty
     virtual SessionStoreResult saveCheckpoint(DurationType type, const QDateTime& startTime,
                                               const QDateTime& endTime, const SegmentId& segmentId) = 0;
+
     virtual SchemaStatus checkSchemaOnStartup() = 0;
-    virtual void flushToDisc() = 0;
-    virtual bool setLastCleanShutdownMarker(const QDateTime& timestamp) = 0;
+
+    /// Forces pending writes to disc.  Returns Disabled when history is off,
+    /// TransientError on failure, Success otherwise.
+    /// CallerBug is not applicable.
+    virtual SessionStoreResult flushToDisc() = 0;
+
+    /// Writes the clean-shutdown marker timestamp.
+    /// Returns Disabled when history is off (no-op, not an error).
+    /// Returns TransientError on write failure.
+    /// CallerBug is not applicable.
+    virtual SessionStoreResult setLastCleanShutdownMarker(const QDateTime& timestamp) = 0;
+
     /// Recovers unfinalized checkpoint rows left by a previous crash or unclean exit.
     /// Internally consumes the last-clean-shutdown marker, applies too-short/stale/
     /// overlap policies, and finalizes qualifying rows.  Returns domain facts only —

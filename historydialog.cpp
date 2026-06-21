@@ -147,9 +147,9 @@ bool HistoryDialog::saveChanges()
             .arg(historyTimeline.completed().size())
             .arg(sessionTimeline.completed().size()));
 
-        const bool dbSaveSucceeded = timetracker_.replaceAll(historyTimeline, sessionTimeline);
-        if (!dbSaveSucceeded) {
-            Logger::Log("[HISTORY] CRITICAL: Failed to save durations to DB");
+        const SessionStoreResult dbResult = timetracker_.replaceAll(historyTimeline, sessionTimeline);
+        if (!dbResult.ok() && dbResult.category != SessionStoreResult::Disabled) {
+            Logger::Log("[HISTORY] CRITICAL: Failed to save durations to DB: " + dbResult.message);
             QMessageBox::critical(this, "Database Error",
                 "Failed to save changes to the database. Your changes to historical entries may be lost.");
             return false;

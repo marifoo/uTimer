@@ -308,7 +308,7 @@ public:
     qint64 getStartupRecoveredSeconds() const;
     bool shouldShowStartupRecoveryNotification() const;
     void setDurationType(size_t idx, DurationType type);
-    bool replaceAll(const Timeline& history, const Timeline& session);
+    SessionStoreResult replaceAll(const Timeline& history, const Timeline& session);
     /// Freezes checkpoints and defers midnight/lock events. Call before opening HistoryDialog.
     void beginExclusiveEdit();
     /// Resumes checkpoints and replays deferred events. Call after closing HistoryDialog.

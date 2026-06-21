@@ -175,7 +175,7 @@ void PersistenceContractTest::test_replaceAll_atomically_replaces_all_rows()
     sessDurations.emplace_back(DurationType::Pause, s0, s1);
 
     QVERIFY(db.replaceAll(Timeline(histDurations, std::nullopt),
-                          Timeline(sessDurations, std::nullopt)));
+                          Timeline(sessDurations, std::nullopt)).ok());
 
     // Assert via raw SQL: 2 total rows, 1 finalized (history), 1 unfinalized (session)
     QVERIFY(db.ensureOpen_dbg());

@@ -38,10 +38,16 @@ void ShutdownCoordinator::run(ShutdownMode mode)
     }
 
     Logger::Log("[DB] Flushing database to disk before shutdown");
-    db_.flushToDisc();
+    const SessionStoreResult flushResult = db_.flushToDisc();
+    if (!flushResult.ok() && flushResult.category != SessionStoreResult::Disabled) {
+        Logger::Log("[DB] Warning: flushToDisc failed during shutdown: " + flushResult.message);
+    }
 
     if (result.canCleanMark && !result.stopCalled) {
-        db_.setLastCleanShutdownMarker(QDateTime::currentDateTime());
+        const SessionStoreResult markerResult = db_.setLastCleanShutdownMarker(QDateTime::currentDateTime());
+        if (!markerResult.ok() && markerResult.category != SessionStoreResult::Disabled) {
+            Logger::Log("[DB] Warning: setLastCleanShutdownMarker failed during shutdown: " + markerResult.message);
+        }
     }
 
     if (!result.stopped) {

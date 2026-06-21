@@ -54,7 +54,7 @@ void HistoryCommitTest::test_accept_stays_open_on_db_failure()
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, now.addSecs(-19), now.addSecs(-10));
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
 
     HistoryDialog dialog(tracker, settings);
 
@@ -115,7 +115,7 @@ void HistoryCommitTest::test_accept_stays_open_on_merge_decline()
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Activity, dbStart, dbEnd);
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
     tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
 
     HistoryDialog dialog(tracker, settings);

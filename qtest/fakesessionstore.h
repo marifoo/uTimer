@@ -37,14 +37,14 @@ public:
     // ---- SessionStore interface ----
 
     SessionStoreResult commitSession(const Timeline& session) override;
-    bool replaceAll(const Timeline& history, const Timeline& session) override;
+    SessionStoreResult replaceAll(const Timeline& history, const Timeline& session) override;
     LoadResult loadDurations() override;
     EntriesForDateResult hasEntriesForDate(const QDate& date) override;
     SessionStoreResult saveCheckpoint(DurationType type, const QDateTime& startTime,
                                       const QDateTime& endTime, const SegmentId& segmentId) override;
     SchemaStatus checkSchemaOnStartup() override;
-    void flushToDisc() override;
-    bool setLastCleanShutdownMarker(const QDateTime& timestamp) override;
+    SessionStoreResult flushToDisc() override;
+    SessionStoreResult setLastCleanShutdownMarker(const QDateTime& timestamp) override;
     StartupRecoveryResult recoverStartupCheckpoints(const QDateTime& now) override;
 
     // ---- Call log (for assertions) ----
@@ -69,10 +69,11 @@ public:
     // ---- Configurable return values ----
 
     SessionStoreResult commitSessionResult = SessionStoreResult::success();
-    bool replaceDurationsResult = true;
+    SessionStoreResult replaceDurationsResult = SessionStoreResult::success();
     SessionStoreResult saveCheckpointResult = SessionStoreResult::success();
     SchemaStatus checkSchemaResult = SchemaStatus::Ready;
-    bool setMarkerResult = true;
+    SessionStoreResult setMarkerResult = SessionStoreResult::success();
+    SessionStoreResult flushToDiscResult = SessionStoreResult::success();
 
     /// Set of segment_ids seen in commitSession() calls.
     /// Populated on success for cross-path uniqueness checks in saveCheckpoint.

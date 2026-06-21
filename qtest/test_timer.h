@@ -121,6 +121,10 @@ private slots:
     // Phase 4: commitEditedTimeline returns success and aligns mode_
     void test_commitEditedTimeline_mode_aligns_with_edited_ongoing_type();
 
+    // Phase 8: disabled history is a no-op, not a save/checkpoint failure
+    void test_disabled_history_stop_keeps_clean_state_no_warning();
+    void test_disabled_history_commitEditedTimeline_succeeds();
+
     // QF1: signal contract — started/paused/modeChanged emit counts
     void test_QF1_explicit_pause_emits_paused_not_modeChanged();
     void test_QF1_explicit_resume_emits_started_not_modeChanged();

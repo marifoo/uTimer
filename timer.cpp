@@ -408,7 +408,8 @@ bool Timer::retryUnsavedDurations()
 
     Logger::Log("[DB] Retrying save of previously unsaved durations");
     const SessionStoreResult retryResult = appendDurationsChunkToDB(retry_source);
-    if (retryResult.ok()) {
+    if (retryResult.okOrDisabled()) {
+        // Disabled history is a no-op, not a retry failure.
         session_.clearUnsaved();
         session_.consecutive_retry_failures = 0;
         Logger::Log("[DB] Previously unsaved durations saved successfully");
@@ -894,7 +895,8 @@ bool Timer::maybeReanchorCheckpoint(const TimeDuration& seg)
                                                            seg.startTime,
                                                            seg.endTime,
                                                            session_.segment_id);
-    if (cpResult.ok()) {
+    if (cpResult.okOrDisabled()) {
+        // Disabled history is a no-op, not a checkpoint write failure.
         return true;
     } else if (cpResult.category == SessionStoreResult::CallerBug) {
         Logger::Log("[CHECKPOINT] replaceCurrentDurations: saveCheckpoint caller bug: " + cpResult.message);
@@ -1033,7 +1035,8 @@ Timer::ShutdownResult Timer::shutdown()
 
 bool Timer::appendDurationsToDB()
 {
-    return appendDurationsChunkToDB(session_.durations).ok();
+    // Disabled history is a no-op, not a failure.
+    return appendDurationsChunkToDB(session_.durations).okOrDisabled();
 }
 
 void Timer::logDbResultOrWarn(const SessionStoreResult& result, const QString& context)
@@ -1066,7 +1069,9 @@ bool Timer::updateDurationsInDB()
     }
     const SessionStoreResult result = db_.commitSession(Timeline(session_.durations, std::nullopt));
     logDbResultOrWarn(result, "commitSession");
-    const bool ok = result.ok();
+    // Disabled history is a no-op, not a save failure: treat it as success so
+    // we don't retain bogus unsaved data or skip the clean-shutdown marker.
+    const bool ok = result.okOrDisabled();
 #ifndef QT_NO_DEBUG
     if (ok) {
         checkCrossLayerInvariants();
@@ -1075,15 +1080,15 @@ bool Timer::updateDurationsInDB()
     return ok;
 }
 
-bool Timer::replaceAll(const Timeline& history, const Timeline& session)
+SessionStoreResult Timer::replaceAll(const Timeline& history, const Timeline& session)
 {
     QMutexLocker locker(&mutex_);
-    const bool ok = db_.replaceAll(history, session);
-    if (ok) {
+    const SessionStoreResult result = db_.replaceAll(history, session);
+    if (result.okOrDisabled()) {
         // DB is now authoritative; stale retry cache must not survive past here.
         session_.clearUnsaved();
     }
-    return ok;
+    return result;
 }
 
 EntriesForDateResult Timer::hasEntriesForDate(const QDate& date)

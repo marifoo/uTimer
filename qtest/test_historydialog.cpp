@@ -55,7 +55,7 @@ void HistoryDialogTest::test_historydialog_createPages_includes_current_db_ongoi
     // Save a DB entry for today
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, now.addSecs(-50), now.addSecs(-40));
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
 
     // Start ongoing activity
     tracker.useTimerViaButton(Button::Start);
@@ -88,7 +88,7 @@ void HistoryDialogTest::test_historydialog_createPages_dedups_db_row_with_small_
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Activity, memoryStart.addMSecs(-2), memoryEnd, segmentId);
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
 
     HistoryDialog dialog(tracker, settings);
     QCOMPARE(dialog.editSession_dbg().pages().size(), static_cast<size_t>(1));
@@ -122,7 +122,7 @@ void HistoryDialogTest::test_historydialog_createPages_groups_unsplit_cross_midn
         QVERIFY(validSeg.has_value());
         std::deque<TimeDuration> init;
         init.push_back(std::move(*validSeg));
-        QVERIFY(tracker.replaceAll(Timeline(std::move(init), std::nullopt), Timeline({}, std::nullopt)));
+        QVERIFY(tracker.replaceAll(Timeline(std::move(init), std::nullopt), Timeline({}, std::nullopt)).ok());
     }
 
     // Insert the cross-midnight row directly via SQL (bypassing same-day invariant).
@@ -205,7 +205,7 @@ void HistoryDialogTest::test_historydialog_saveChanges_updates_timetracker_and_d
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, now.addSecs(-140), now.addSecs(-120));
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
 
     HistoryDialog dialog(tracker, settings);
     dialog.editSession_dbg().pendingTimelines()[0] = dialog.editSession_dbg().pendingTimelines()[0].withSegmentType(0, DurationType::Pause);
@@ -282,7 +282,7 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, dbStart, dbEnd);
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
 
     HistoryDialog dialog(tracker, settings);
     QCOMPARE(dialog.editSession_dbg().pendingTimelines()[0].completed().size(), static_cast<size_t>(2));
@@ -338,7 +338,7 @@ void HistoryDialogTest::test_historydialog_split_non_today_db_row_survives_save_
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Activity, start, end);
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
 
     HistoryDialog dialog(tracker, settings);
     QVERIFY(dialog.editSession_dbg().pages().size() >= static_cast<size_t>(2));
@@ -432,7 +432,7 @@ void HistoryDialogTest::test_historydialog_save_unrelated_edit_preserves_row_and
     const QDateTime historicalEnd = historicalStart.addSecs(300);
     std::deque<TimeDuration> historicalRows;
     historicalRows.emplace_back(DurationType::Pause, historicalStart, historicalEnd);
-    QVERIFY(tracker.replaceAll(Timeline(historicalRows, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(historicalRows, std::nullopt), Timeline({}, std::nullopt)).ok());
 
 
     tracker.useTimerViaButton(Button::Start);
@@ -563,7 +563,7 @@ void HistoryDialogTest::test_historydialog_save_keeps_db_rows_for_history_plus_c
     const QDateTime historicalEnd = historicalStart.addSecs(60);
     std::deque<TimeDuration> historicalRows;
     historicalRows.emplace_back(DurationType::Pause, historicalStart, historicalEnd);
-    QVERIFY(tracker.replaceAll(Timeline(historicalRows, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(historicalRows, std::nullopt), Timeline({}, std::nullopt)).ok());
 
     const QDateTime now = QDateTime::currentDateTime();
     tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, now.addSecs(-30), now.addSecs(-20)));
@@ -722,7 +722,7 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, dbStart, dbEnd);
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
 
     HistoryDialog dialog(tracker, settings);
     QCOMPARE(dialog.editSession_dbg().pendingTimelines()[0].completed().size(), static_cast<size_t>(2));
@@ -947,7 +947,7 @@ void HistoryDialogTest::test_saveChanges_deduplicates_cross_bucket_overlaps()
     // Seed DB with today's finalized history row
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Activity, dbStart, dbEnd);
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
 
     // Seed in-memory session row (overlaps the DB row)
     tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
@@ -1028,7 +1028,7 @@ void HistoryDialogTest::test_saveChanges_noop_save_unchanged()
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Pause, dbStart, dbEnd);
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
 
     tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
 
@@ -1133,7 +1133,7 @@ void HistoryDialogTest::test_H4_overlap_cancel_aborts_save()
 
     std::deque<TimeDuration> dbDurations;
     dbDurations.emplace_back(DurationType::Activity, dbStart, dbEnd);
-    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline(dbDurations, std::nullopt), Timeline({}, std::nullopt)).ok());
     tracker.sessionState_dbg().durations.push_back(TimeDuration(DurationType::Activity, memStart, memEnd));
 
     HistoryDialog dialog(tracker, settings);
@@ -1196,7 +1196,7 @@ void HistoryDialogTest::test_H2_midnight_crossing_shown_on_both_pages()
         QSqlDatabase::removeDatabase(connName);
     }
     // Seed DB to create the schema.
-    QVERIFY(tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt)).ok());
     {
         const QString connName = "h2_insert";
         QSqlDatabase rawDb = QSqlDatabase::addDatabase("QSQLITE", connName);
@@ -1265,7 +1265,7 @@ void HistoryDialogTest::test_H14_cross_midnight_totals_and_counts()
     const QDateTime segEnd(QDate::currentDate(), QTime(0, 10, 0), Qt::LocalTime); // 20 min total
 
     // Seed DB schema, then insert cross-midnight row directly via SQL.
-    QVERIFY(tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt)));
+    QVERIFY(tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt)).ok());
     {
         const QString connName = "h14_insert";
         QSqlDatabase rawDb = QSqlDatabase::addDatabase("QSQLITE", connName);

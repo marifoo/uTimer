@@ -404,9 +404,9 @@ void TimerTest::test_replaceAll_success_clears_unsaved_cache()
     tracker.sessionState_dbg().unsaved_durations = tracker.sessionState_dbg().durations;
     tracker.sessionState_dbg().has_unsaved_data = true;
 
-    const bool ok = tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt));
+    const SessionStoreResult result = tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt));
 
-    QVERIFY(ok);
+    QVERIFY(result.ok());
     QVERIFY(!tracker.sessionState_dbg().has_unsaved_data);
     QVERIFY(tracker.sessionState_dbg().unsaved_durations.empty());
 }
@@ -417,7 +417,7 @@ void TimerTest::test_replaceAll_failure_keeps_unsaved_cache()
     QVERIFY(tempDir.isValid());
     Settings settings(createSettingsFile(tempDir.path(), 7));
     FakeSessionStore fakeDb;
-    fakeDb.replaceDurationsResult = false;
+    fakeDb.replaceDurationsResult = SessionStoreResult::transient("injected failure");
     Timer tracker(settings, fakeDb);
 
     QDateTime now = QDateTime::currentDateTime();
@@ -426,9 +426,10 @@ void TimerTest::test_replaceAll_failure_keeps_unsaved_cache()
     tracker.sessionState_dbg().unsaved_durations = tracker.sessionState_dbg().durations;
     tracker.sessionState_dbg().has_unsaved_data = true;
 
-    const bool ok = tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt));
+    const SessionStoreResult result = tracker.replaceAll(Timeline({}, std::nullopt), Timeline({}, std::nullopt));
 
-    QVERIFY(!ok);
+    QVERIFY(!result.ok());
+    QVERIFY(result.category == SessionStoreResult::TransientError);
     QVERIFY(tracker.sessionState_dbg().has_unsaved_data);
     QVERIFY(!tracker.sessionState_dbg().unsaved_durations.empty());
 }
@@ -1826,4 +1827,64 @@ void TimerTest::test_commitEditedTimeline_mode_aligns_with_edited_ongoing_type()
     auto postCommit = tracker.getOngoingDuration();
     QVERIFY(postCommit.has_value());
     QCOMPARE(postCommit->type, DurationType::Pause);
+}
+
+// Phase 8 regression: with history disabled the store returns Disabled (a no-op),
+// which must NOT be treated as a save failure. Stopping a session that has
+// durations must not retain bogus unsaved data, must not bump the retry-failure
+// counter, and must not emit a user warning.
+void TimerTest::test_disabled_history_stop_keeps_clean_state_no_warning()
+{
+    // Arrange: real store with history disabled (commitSession returns Disabled).
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 0));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+    QSignalSpy warnSpy(&tracker, &Timer::userWarning);
+
+    // Act: run and stop a session that produces a completed Activity segment.
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    tracker.useTimerViaButton(Button::Stop);
+
+    // Assert: Disabled was folded into success, so no failure side effects.
+    QCOMPARE(warnSpy.count(), 0);
+    QCOMPARE(tracker.sessionState_dbg().has_unsaved_data, false);
+    QCOMPARE(tracker.sessionState_dbg().consecutive_retry_failures, 0);
+}
+
+// Phase 8 regression: commitEditedTimeline re-anchors a checkpoint for an ongoing
+// Activity segment. With history disabled, saveCheckpoint returns Disabled, which
+// must be reported as success, not EditCommitResult::failure.
+void TimerTest::test_disabled_history_commitEditedTimeline_succeeds()
+{
+    // Arrange: real store with history disabled; default checkpoint interval is
+    // non-zero so the checkpoint path inside commitEditedTimeline is exercised.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 0));
+    SqliteSessionStore db(settings);
+    Timer tracker(settings, db);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    QVERIFY(tracker.isActive());
+
+    // Keep the ongoing segment Activity so maybeReanchorCheckpoint runs saveCheckpoint.
+    auto liveOngoing = tracker.getOngoingDuration();
+    QVERIFY(liveOngoing.has_value());
+    TimeDuration editedOngoing = TimeDuration::fromTrusted(
+        DurationType::Activity,
+        liveOngoing->startTime,
+        QDateTime::currentDateTime(),
+        liveOngoing->segment_id);
+
+    // Act + Assert: disabled checkpoint write is a no-op, so commit succeeds.
+    const auto result = tracker.commitEditedTimeline(Timeline({}, editedOngoing));
+    QVERIFY(result.ok);
+
+    tracker.useTimerViaButton(Button::Stop);
 }

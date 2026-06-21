@@ -31,10 +31,10 @@ SessionStoreResult FakeSessionStore::commitSession(const Timeline& session)
     return commitSessionResult;
 }
 
-bool FakeSessionStore::replaceAll(const Timeline& history, const Timeline& session)
+SessionStoreResult FakeSessionStore::replaceAll(const Timeline& history, const Timeline& session)
 {
     callLog.append("replaceAll");
-    if (replaceDurationsResult) {
+    if (replaceDurationsResult.ok() || replaceDurationsResult.category == SessionStoreResult::Disabled) {
         storedDurations.clear();
         committedSegmentIds.clear();
         for (const auto& d : history.completed()) {
@@ -96,12 +96,13 @@ SchemaStatus FakeSessionStore::checkSchemaOnStartup()
     return checkSchemaResult;
 }
 
-void FakeSessionStore::flushToDisc()
+SessionStoreResult FakeSessionStore::flushToDisc()
 {
     callLog.append("flushToDisc");
+    return flushToDiscResult;
 }
 
-bool FakeSessionStore::setLastCleanShutdownMarker(const QDateTime& /*timestamp*/)
+SessionStoreResult FakeSessionStore::setLastCleanShutdownMarker(const QDateTime& /*timestamp*/)
 {
     callLog.append("setLastCleanShutdownMarker");
     return setMarkerResult;

@@ -555,6 +555,9 @@ BackupResult SqliteSessionStore::createBackup(const std::deque<TimeDuration>& du
  */
 SessionStoreResult SqliteSessionStore::commitSession(const Timeline& session)
 {
+    if (history_days_to_keep_ == 0) {
+        return SessionStoreResult::disabled();
+    }
     const auto [normed, orphanIds] = session.normalizedWithRemovedIds();
     return updateDurationsById(normed.completed(), orphanIds);
 }
@@ -675,12 +678,12 @@ bool SqliteSessionStore::saveDurations(const std::deque<TimeDuration>& durations
     return commitSuccessful;
 }
 
-bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& session)
+SessionStoreResult SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& session)
 {
     QMutexLocker locker(&db_mutex_);
 
     if (history_days_to_keep_ == 0) {
-        return true;
+        return SessionStoreResult::disabled();
     }
 
     const std::deque<TimeDuration>& historyDurations = history.completed();
@@ -692,13 +695,13 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
 
     if (!ensureOpen()) {
         Logger::Log("[DB] Could not open DB to replace durations");
-        return false;
+        return SessionStoreResult::fatal("DB connection could not be opened");
     }
 
     const BackupResult backup = createBackup(allDurations, TransactionMode::Replace);
     if (backup == BackupResult::ReopenFailed) {
         Logger::Log("[DB] CRITICAL: DB connection lost after backup - aborting replace");
-        return false;
+        return SessionStoreResult::fatal("DB connection lost after backup");
     }
     if (backup != BackupResult::Success) {
         Logger::Log("[DB] Warning: Backup failed before REPLACE operation - proceeding without backup");
@@ -706,14 +709,14 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
 
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting transaction for replace: " + db.lastError().text());
-        return false;
+        return SessionStoreResult::transient("Failed to start replace transaction: " + db.lastError().text());
     }
 
     QSqlQuery clearQuery(db);
     if (!clearQuery.exec("DELETE FROM durations")) {
         db.rollback();
         Logger::Log("[DB] Error clearing durations table: " + clearQuery.lastError().text());
-        return false;
+        return SessionStoreResult::transient("Failed to clear durations: " + clearQuery.lastError().text());
     }
 
     QSqlQuery finalizedInsert(db);
@@ -722,7 +725,7 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
         "VALUES (:segment_id, :type, :start_utc, :end_utc, 1)"
     );
     if (!insertRows(finalizedInsert, historyDurations))
-        return false;
+        return SessionStoreResult::transient("Failed to insert history rows");
 
     QSqlQuery unfinalizedInsert(db);
     unfinalizedInsert.prepare(
@@ -730,20 +733,18 @@ bool SqliteSessionStore::replaceAll(const Timeline& history, const Timeline& ses
         "VALUES (:segment_id, :type, :start_utc, :end_utc, 0)"
     );
     if (!insertRows(unfinalizedInsert, currentSessionDurations))
-        return false;
+        return SessionStoreResult::transient("Failed to insert session rows");
 
-    const bool success = db.commit();
-    if (!success) {
+    if (!db.commit()) {
         Logger::Log("[DB] Error committing replace transaction: " + db.lastError().text());
+        return SessionStoreResult::transient("Failed to commit replace transaction: " + db.lastError().text());
     }
 
 #ifndef QT_NO_DEBUG
-    if (success) {
-        checkSegmentIdUniqueness();
-    }
+    checkSegmentIdUniqueness();
 #endif
 
-    return success;
+    return SessionStoreResult::success();
 }
 
 /**
@@ -764,14 +765,21 @@ LoadResult SqliteSessionStore::loadDurations()
 
     LoadResult result;
 
+    if (history_days_to_keep_ == 0) {
+        result.status = SessionStoreResult::Disabled;
+        return result;
+    }
+
     if (!ensureOpen()) {
         Logger::Log("[DB] Could not open DB to load Durations");
+        result.status = SessionStoreResult::FatalError;
         return result;
     }
 
     // Start read transaction for consistent snapshot
     if (!db.transaction()) {
         Logger::Log("[DB] Error starting read transaction: " + db.lastError().text());
+        result.status = SessionStoreResult::TransientError;
         return result;
     }
 
@@ -781,6 +789,7 @@ LoadResult SqliteSessionStore::loadDurations()
     if (!query.exec()) {
         db.rollback();
         Logger::Log("[DB] Error executing load query: " + query.lastError().text());
+        result.status = SessionStoreResult::TransientError;
         return result;
     }
 
@@ -908,9 +917,8 @@ SessionStoreResult SqliteSessionStore::saveCheckpoint(DurationType type, const Q
         return SessionStoreResult::callerBug("saveCheckpoint called with empty segment_id");
     }
 
-    // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
-        return SessionStoreResult::success();
+        return SessionStoreResult::disabled();
     }
 
     if (!ensureOpen()) {
@@ -1012,9 +1020,8 @@ SessionStoreResult SqliteSessionStore::updateDurationsById(const std::deque<Time
         return SessionStoreResult::success();
     }
 
-    // If history storage is disabled, treat as success (no-op)
     if (history_days_to_keep_ == 0) {
-        return SessionStoreResult::success();
+        return SessionStoreResult::disabled();
     }
 
     if (!ensureOpen()) {
@@ -1127,28 +1134,28 @@ SessionStoreResult SqliteSessionStore::updateDurationsById(const std::deque<Time
  * Without the checkpoint, the most recent writes live only in the WAL
  * and a power failure could leave them unrecoverable from the main file.
  */
-void SqliteSessionStore::flushToDisc()
+SessionStoreResult SqliteSessionStore::flushToDisc()
 {
     QMutexLocker locker(&db_mutex_);
 
     if (history_days_to_keep_ == 0) {
-        return;
+        return SessionStoreResult::disabled();
     }
 
     if (!ensureOpen()) {
         Logger::Log("[DB] flushToDisc: could not open DB");
-        return;
+        return SessionStoreResult::transient("DB connection could not be opened");
     }
 
     QSqlQuery pragma(db);
     if (!pragma.exec("PRAGMA synchronous=FULL")) {
         Logger::Log("[DB] flushToDisc: set synchronous=FULL failed: " + pragma.lastError().text());
-        return;
+        return SessionStoreResult::transient("Failed to set synchronous=FULL: " + pragma.lastError().text());
     }
 
     if (!db.transaction()) {
         Logger::Log("[DB] flushToDisc: could not begin transaction");
-        return;
+        return SessionStoreResult::transient("Failed to start flush transaction: " + db.lastError().text());
     }
 
     const QString ts = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
@@ -1159,15 +1166,16 @@ void SqliteSessionStore::flushToDisc()
     if (!query.exec()) {
         Logger::Log("[DB] flushToDisc: write failed: " + query.lastError().text());
         db.rollback();
-        return;
+        return SessionStoreResult::transient("Flush write failed: " + query.lastError().text());
     }
     if (!db.commit()) {
         Logger::Log("[DB] flushToDisc: commit failed: " + db.lastError().text());
         db.rollback();
-        return;
+        return SessionStoreResult::transient("Flush commit failed: " + db.lastError().text());
     }
 
     Logger::Log("[DB] flushToDisc: durable heartbeat committed");
+    return SessionStoreResult::success();
 }
 
 std::deque<SqliteSessionStore::OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
@@ -1359,20 +1367,20 @@ SqliteSessionStore::ReconcileResult SqliteSessionStore::reconcileUnfinalizedChec
     return result;
 }
 
-bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
+SessionStoreResult SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
 {
     QMutexLocker locker(&db_mutex_);
 
     if (history_days_to_keep_ == 0) {
-        return true;
+        return SessionStoreResult::disabled();
     }
 
     if (!ensureOpen()) {
-        return false;
+        return SessionStoreResult::transient("DB connection could not be opened");
     }
 
     if (!db.transaction()) {
-        return false;
+        return SessionStoreResult::transient("Failed to start marker transaction: " + db.lastError().text());
     }
 
     const QString markerValue = toUtcIso(timestamp);
@@ -1383,15 +1391,15 @@ bool SqliteSessionStore::setLastCleanShutdownMarker(const QDateTime& timestamp)
 
     if (!query.exec()) {
         db.rollback();
-        return false;
+        return SessionStoreResult::transient("Marker write failed: " + query.lastError().text());
     }
 
-    const bool committed = db.commit();
-    if (!committed) {
+    if (!db.commit()) {
         db.rollback();
+        return SessionStoreResult::transient("Marker commit failed: " + db.lastError().text());
     }
 
-    return committed;
+    return SessionStoreResult::success();
 }
 
 std::optional<SqliteSessionStore::MarkerResult> SqliteSessionStore::consumeLastCleanShutdownMarker()
