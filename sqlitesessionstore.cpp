@@ -82,7 +82,7 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
     // Record whether this is a fresh DB before opening.
     db_was_fresh_ = !QFile::exists(db.databaseName());
 
-    // Open the connection and run one-time schema setup.
+    // Open the connection.
     if (!db.open()) {
         Logger::Log("[DB] Error opening database: " + db.lastError().text());
         return;
@@ -96,8 +96,21 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
         db.close();
         return;
     }
-    if (!ensureSchema()) {
-        db.close();
+
+    if (db_was_fresh_) {
+        // Fresh DB: build the full schema now.  checkSchemaOnStartup() will
+        // see db_was_fresh_ == true and skip validation, returning Created.
+        if (!ensureSchema()) {
+            db.close();
+        }
+    } else {
+        // Existing DB: no DDL until checkSchemaOnStartup() validates the schema.
+        // Set PRAGMA synchronous=NORMAL so writes on this connection behave
+        // correctly even before the schema is confirmed.
+        QSqlQuery syncQuery(db);
+        if (!syncQuery.exec("PRAGMA synchronous=NORMAL")) {
+            Logger::Log("[DB] Warning: Failed to set synchronous=NORMAL: " + syncQuery.lastError().text());
+        }
     }
 }
 
@@ -353,6 +366,22 @@ SchemaStatus SqliteSessionStore::checkSchemaOnStartup()
         if (!foundUniqueSegmentId) {
             Logger::Log("[DB] checkSchemaOnStartup: missing UNIQUE(segment_id) constraint");
             return SchemaStatus::Outdated;
+        }
+    }
+
+    // Additive DDL that is safe to (re)create on any validated existing DB.
+    // These objects are absent when upgrading from older app versions that
+    // pre-date app_settings / idx_segment_id.  Running them here (after
+    // validation passes) ensures no DDL touches an incompatible DB.
+    if (!ensureSettingsTable()) {
+        Logger::Log("[DB] Warning: Failed to ensure app_settings table on existing DB");
+        // Non-fatal: log and continue; the durations table is the critical one.
+    }
+
+    {
+        QSqlQuery segmentIndexQuery(db);
+        if (!segmentIndexQuery.exec("CREATE INDEX IF NOT EXISTS idx_segment_id ON durations(segment_id)")) {
+            Logger::Log("[DB] Warning: Failed to create segment_id index: " + segmentIndexQuery.lastError().text());
         }
     }
 

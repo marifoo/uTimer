@@ -2228,3 +2228,87 @@ void DatabaseTest::test_saveCheckpoint_does_not_demote_finalized_row()
     QCOMPARE(verifyQuery.value(1).toString(), end.toUTC().toString(Qt::ISODateWithMs));
     manager.lazyClose_dbg();
 }
+
+// ============================================================================
+// Item C: validate schema before any additive DDL
+// ============================================================================
+
+/**
+ * An incompatible existing DB (legacy columns, no app_settings, no indexes)
+ * must cause checkSchemaOnStartup() to return Outdated without creating
+ * app_settings, idx_segment_id, or idx_start_utc.
+ */
+void DatabaseTest::test_outdated_schema_no_additive_ddl_on_incompatible_db()
+{
+    // Arrange: seed a legacy durations table (wrong columns → Outdated).
+    // Do NOT create app_settings or any indexes.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+
+    const QString seedConn = "item_c_seed";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", seedConn);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        // Legacy schema: wrong column names, no UNIQUE, no app_settings, no indexes.
+        QVERIFY(q.exec(
+            "CREATE TABLE durations ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "segment_id TEXT NOT NULL,"
+            "type INTEGER NOT NULL,"
+            "start_date TEXT NOT NULL,"
+            "end_date TEXT NOT NULL,"
+            "is_finalized INTEGER NOT NULL DEFAULT 0"
+            ")"
+        ));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(seedConn);
+
+    // Act: construct the store and call checkSchemaOnStartup().
+    SqliteSessionStore manager(settings);
+    SchemaStatus status = manager.checkSchemaOnStartup();
+
+    // Assert: schema is Outdated.
+    QCOMPARE(status, SchemaStatus::Outdated);
+
+    // Assert: no additive objects were created by the constructor or
+    // checkSchemaOnStartup() before the Outdated verdict was returned.
+    const QString verifyConn = "item_c_verify";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", verifyConn);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+
+        // app_settings must NOT exist.
+        QVERIFY(q.exec(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='table' AND name='app_settings'"
+        ));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 0);
+
+        // idx_segment_id must NOT exist.
+        QVERIFY(q.exec(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='index' AND name='idx_segment_id'"
+        ));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 0);
+
+        // idx_start_utc must NOT exist.
+        QVERIFY(q.exec(
+            "SELECT COUNT(*) FROM sqlite_master "
+            "WHERE type='index' AND name='idx_start_utc'"
+        ));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 0);
+
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(verifyConn);
+}
