@@ -52,8 +52,10 @@ class ContractMatrixTest;
 // QTest::qExec installs its own message handler and does not chain to the
 // previously installed handler, so qInstallMessageHandler alone cannot observe
 // warnings emitted during test execution.  Instead we redirect stdout through a
-// pipe, tee every byte to the real stdout, and count "QWARN" lines that are not
-// in the allowlist of known offscreen-QPA noise.
+// pipe, tee every byte to the real stdout, and count every "QWARN" line.
+//
+// Any QWARN output now counts as unexpected — the tests are written to produce
+// zero warnings (no widget realization under the offscreen QPA plugin).
 //
 // On Windows this entire mechanism is compiled out — no redirection, no thread,
 // no QWARN enforcement (the offscreen-QPA noise and CI test runs are Linux-only).
@@ -63,25 +65,12 @@ static std::atomic<int> g_unexpectedWarnings{0};
 
 #ifndef _WIN32
 
-static bool isExpectedOffscreenWarning(const std::string& line) {
-    // The offscreen QPA plugin emits this warning whenever a widget calls
-    // QDialog::show() or triggers propagateSizeHints() (e.g. resizing under
-    // the offscreen backend).  The handful of tests that show a real widget
-    // (e.g. HistoryDialogTest checkbox toggle, split dialog, HistoryCommitTest
-    // DB-failure path) cannot avoid triggering it.  This is purely environmental
-    // noise from the test platform — not an application defect.
-    //
-    // This suppression is intentionally narrow: it matches only this exact
-    // offscreen-plugin string.  Any other QWARN text will fail the run.
-    return line.find("This plugin does not support propagateSizeHints()") != std::string::npos;
-}
-
 struct TeeCtx {
     int readFd;
     int realStdout;
 };
 
-// Reader thread: tees stdout pipe to real stdout and counts unexpected QWARNs.
+// Reader thread: tees stdout pipe to real stdout and counts every QWARN line.
 // Uses a residual line buffer so tokens split across read() boundaries are
 // handled correctly — only complete '\n'-terminated lines are scanned.
 static void* teeThread(void* arg) {
@@ -98,16 +87,14 @@ static void* teeThread(void* arg) {
         size_t nl;
         while ((nl = residual.find('\n', pos)) != std::string::npos) {
             std::string line = residual.substr(pos, nl - pos);
-            if (line.find("QWARN") != std::string::npos && !isExpectedOffscreenWarning(line))
+            if (line.find("QWARN") != std::string::npos)
                 g_unexpectedWarnings.fetch_add(1);
             pos = nl + 1;
         }
         residual.erase(0, pos);
     }
     // Scan any trailing partial line after EOF.
-    if (!residual.empty() &&
-        residual.find("QWARN") != std::string::npos &&
-        !isExpectedOffscreenWarning(residual))
+    if (!residual.empty() && residual.find("QWARN") != std::string::npos)
         g_unexpectedWarnings.fetch_add(1);
     return nullptr;
 }
@@ -121,8 +108,13 @@ int main(int argc, char *argv[])
 {
     // Silence KDE frameworkintegration's "kf.i18n: Using an empty domain"
     // QWARN, emitted when its platform theme localizes QMessageBox standard
-    // buttons via KLocalizedString on a KDE desktop. This is environmental
-    // noise, not an app issue. Append so any user-provided rules are preserved.
+    // buttons via KLocalizedString on a KDE desktop.
+    //
+    // NOTE: this is a deliberate source-level silence of third-party noise —
+    // nothing prints, the category is suppressed before Qt even formats a QWARN
+    // line.  It is NOT a printed-QWARN allowlist.  The tee-based QWARN counter
+    // below enforces zero printed QWARN lines; this rule keeps that count honest
+    // by preventing environmental KDE noise from inflating it.
     QByteArray loggingRules = qgetenv("QT_LOGGING_RULES");
     if (!loggingRules.isEmpty())
         loggingRules.append(';');

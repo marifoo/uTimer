@@ -1,6 +1,5 @@
 #include "test_historydialog.h"
 #include <QtTest>
-#include <QTimer>
 #include <QTableWidget>
 #include <QCheckBox>
 #include <QLabel>
@@ -180,7 +179,6 @@ void HistoryDialogTest::test_historydialog_checkbox_toggle_updates_pending_and_t
     tracker.sessionState_dbg().durations.push_back(TimeDuration::fromPersistedRow(DurationType::Activity, now.addSecs(-100), now.addSecs(-50)));
 
     HistoryDialog dialog(tracker, settings);
-    dialog.show();
 
     QCheckBox* box = qobject_cast<QCheckBox*>(dialog.table_dbg()->cellWidget(0, 3));
     QVERIFY(box != nullptr);
@@ -236,20 +234,11 @@ void HistoryDialogTest::test_historydialog_split_action_splits_row()
     const SegmentId originalSegmentId = tracker.sessionState_dbg().durations.back().segment_id;
 
     HistoryDialog dialog(tracker, settings);
-    dialog.setContextMenuTarget_dbg(0, 0);
 
-    QTimer::singleShot(0, []() {
-        for (QWidget* widget : QApplication::topLevelWidgets()) {
-            auto* split = qobject_cast<SplitDialog*>(widget);
-            if (!split) continue;
-            split->setFirstSegmentType(DurationType::Activity);
-            split->setSecondSegmentType(DurationType::Pause);
-            split->accept();
-            return;
-        }
-    });
-
-    dialog.onSplitRow_dbg();
+    // Bypass SplitDialog::exec() to avoid offscreen QPA propagateSizeHints() warnings.
+    // The split types are supplied directly; logic under test is the model update (withSplit,
+    // origin registration, segment_id preservation) — not the dialog UI itself.
+    dialog.applySplit_dbg(0, 0, DurationType::Activity, DurationType::Pause);
     QCOMPARE(dialog.editSession_dbg().pendingTimelines()[0].completed().size(), static_cast<size_t>(2));
     const auto& first = dialog.editSession_dbg().pendingTimelines()[0].completed()[0];
     const auto& second = dialog.editSession_dbg().pendingTimelines()[0].completed()[1];
@@ -289,20 +278,8 @@ void HistoryDialogTest::test_historydialog_split_today_mixed_origins_routes_to_c
     QCOMPARE(dialog.editSession_dbg().originIsMemory().value(dialog.editSession_dbg().pendingTimelines()[0].completed()[0].segment_id.toString()), true);
     QCOMPARE(dialog.editSession_dbg().originIsMemory().value(dialog.editSession_dbg().pendingTimelines()[0].completed()[1].segment_id.toString()), false);
 
-    dialog.setContextMenuTarget_dbg(0, 0);
-
-    QTimer::singleShot(0, []() {
-        for (QWidget* widget : QApplication::topLevelWidgets()) {
-            auto* split = qobject_cast<SplitDialog*>(widget);
-            if (!split) continue;
-            split->setFirstSegmentType(DurationType::Activity);
-            split->setSecondSegmentType(DurationType::Pause);
-            split->accept();
-            return;
-        }
-    });
-
-    dialog.onSplitRow_dbg();
+    // Bypass SplitDialog::exec() to avoid offscreen QPA propagateSizeHints() warnings.
+    dialog.applySplit_dbg(0, 0, DurationType::Activity, DurationType::Pause);
     QCOMPARE(dialog.editSession_dbg().pendingTimelines()[0].completed().size(), static_cast<size_t>(3));
     QCOMPARE(dialog.editSession_dbg().originIsMemory().value(dialog.editSession_dbg().pendingTimelines()[0].completed()[0].segment_id.toString()), true);
     QCOMPARE(dialog.editSession_dbg().originIsMemory().value(dialog.editSession_dbg().pendingTimelines()[0].completed()[1].segment_id.toString()), true);
@@ -343,20 +320,8 @@ void HistoryDialogTest::test_historydialog_split_non_today_db_row_survives_save_
     HistoryDialog dialog(tracker, settings);
     QVERIFY(dialog.editSession_dbg().pages().size() >= static_cast<size_t>(2));
 
-    dialog.setContextMenuTarget_dbg(0, 1);
-
-    QTimer::singleShot(0, []() {
-        for (QWidget* widget : QApplication::topLevelWidgets()) {
-            auto* split = qobject_cast<SplitDialog*>(widget);
-            if (!split) continue;
-            split->setFirstSegmentType(DurationType::Activity);
-            split->setSecondSegmentType(DurationType::Pause);
-            split->accept();
-            return;
-        }
-    });
-
-    dialog.onSplitRow_dbg();
+    // Bypass SplitDialog::exec() to avoid offscreen QPA propagateSizeHints() warnings.
+    dialog.applySplit_dbg(0, 1, DurationType::Activity, DurationType::Pause);
     QCOMPARE(dialog.editSession_dbg().pendingTimelines()[1].completed().size(), static_cast<size_t>(2));
     QCOMPARE(dialog.editSession_dbg().pendingTimelines()[1].completed().size(), static_cast<size_t>(2));
     QCOMPARE(dialog.editSession_dbg().originIsMemory().value(dialog.editSession_dbg().pendingTimelines()[1].completed()[0].segment_id.toString()), false);
@@ -740,19 +705,10 @@ void HistoryDialogTest::test_historydialog_save_failed_db_replace_keeps_runtime_
         QSqlQuery lockQuery(lockDb);
         QVERIFY(lockQuery.exec("BEGIN EXCLUSIVE TRANSACTION"));
 
-        QTimer::singleShot(0, []() {
-            for (QWidget* widget : QApplication::topLevelWidgets()) {
-                auto* messageBox = qobject_cast<QMessageBox*>(widget);
-                if (!messageBox) {
-                    continue;
-                }
-                if (messageBox->windowTitle() == "Database Error") {
-                    messageBox->accept();
-                    return;
-                }
-            }
-        });
-
+        // Skip QMessageBox::critical() to avoid offscreen QPA propagateSizeHints() warnings.
+        // The save failure is still tested: debugSkipCritical_ suppresses only the dialog pop-up,
+        // saveChanges() still returns false and leaves Timer state unchanged.
+        dialog.debugSkipCritical_ = true;
         dialog.done(QDialog::Accepted);
         dialog.saveChanges();
 
@@ -955,16 +911,10 @@ void HistoryDialogTest::test_saveChanges_deduplicates_cross_bucket_overlaps()
     HistoryDialog dialog(tracker, settings);
     dialog.done(QDialog::Accepted);
 
-    // Confirm the overlap-merge dialog
-    QTimer::singleShot(0, []() {
-        for (QWidget* widget : QApplication::topLevelWidgets()) {
-            auto* mb = qobject_cast<QMessageBox*>(widget);
-            if (mb && mb->windowTitle() == "Overlapping Segments") {
-                mb->button(QMessageBox::Yes)->click();
-                return;
-            }
-        }
-    });
+    // Bypass QMessageBox::question() to avoid offscreen QPA propagateSizeHints() warnings.
+    // The merge confirmation is still exercised: debugOverlapAnswer_ supplies "Yes" so the
+    // overlap is merged and saved, exactly as if the user clicked Yes.
+    dialog.debugOverlapAnswer_ = QMessageBox::Yes;
     dialog.saveChanges();
 
     // Read back DB and verify exactly one Activity row covering 10:00-10:45
@@ -1135,16 +1085,9 @@ void HistoryDialogTest::test_H4_overlap_cancel_aborts_save()
 
     HistoryDialog dialog(tracker, settings);
 
-    QTimer::singleShot(0, []() {
-        for (QWidget* widget : QApplication::topLevelWidgets()) {
-            auto* mb = qobject_cast<QMessageBox*>(widget);
-            if (mb && mb->windowTitle() == "Overlapping Segments") {
-                mb->button(QMessageBox::No)->click();
-                return;
-            }
-        }
-    });
-
+    // Bypass QMessageBox::question() to avoid offscreen QPA propagateSizeHints() warnings.
+    // Supplies "No" — same as user declining the merge — so saveChanges() aborts.
+    dialog.debugOverlapAnswer_ = QMessageBox::No;
     dialog.done(QDialog::Accepted);
     dialog.saveChanges();
 
@@ -1297,9 +1240,8 @@ void HistoryDialogTest::test_H14_cross_midnight_totals_and_counts()
     QCOMPARE(dialog.editSession_dbg().pages()[0].continuations.size(), static_cast<size_t>(1));
     QVERIFY(dialog.editSession_dbg().pages()[0].title.contains("entries: 1"));
 
-    // Today page is page 0 — pageLabel_ already shows its totals.
-    // The continuation is midnight→00:10 (10 min = 600 s = 00:10:00 Activity).
-    dialog.show();
+    // Today page is page 0 — pageLabel_ is populated in the constructor via updateTable(0).
+    // Reading its text does not require the dialog to be shown.
     const QString todayLabel = dialog.pageLabel_dbg()->text();
     QVERIFY2(todayLabel.contains("00:10:00"),
              qPrintable("Today page label should contain 00:10:00 but got: " + todayLabel));
@@ -1331,28 +1273,17 @@ void HistoryDialogTest::test_H6_split_dialog_preset_from_source_row_type()
     Timer tracker(settings, db);
 
     const QDateTime now = QDateTime::currentDateTime();
-    // Source row is Pause
+    // Row 0 is Pause, row 1 is Activity — exercise both directions of the preset.
     tracker.sessionState_dbg().durations.push_back(
-        TimeDuration::fromPersistedRow(DurationType::Pause, now.addSecs(-10), now.addSecs(-4)));
+        TimeDuration::fromPersistedRow(DurationType::Pause, now.addSecs(-20), now.addSecs(-14)));
+    tracker.sessionState_dbg().durations.push_back(
+        TimeDuration::fromPersistedRow(DurationType::Activity, now.addSecs(-12), now.addSecs(-4)));
 
     HistoryDialog dialog(tracker, settings);
-    dialog.setContextMenuTarget_dbg(0, 0);
 
-    DurationType capturedFirst = DurationType::Activity; // will be overwritten
-    QTimer::singleShot(0, [&capturedFirst]() {
-        for (QWidget* widget : QApplication::topLevelWidgets()) {
-            auto* split = qobject_cast<SplitDialog*>(widget);
-            if (!split) continue;
-            capturedFirst = split->getFirstSegmentType();
-            split->accept();
-            return;
-        }
-    });
-
-    dialog.onSplitRow_dbg();
-
-    // The dialog should have been preset to Pause (matching the source row).
-    QCOMPARE(capturedFirst, DurationType::Pause);
-    // Split should have produced 2 rows
-    QCOMPARE(dialog.editSession_dbg().pendingTimelines()[0].completed().size(), static_cast<size_t>(2));
+    // splitDialogPresetFirstType_dbg() runs onSplitRow()'s real preset step
+    // (dlg.setFirstSegmentType(duration.type)) without realizing the dialog, so this
+    // asserts the production source-row-type -> preset wiring, not a value we supply.
+    QCOMPARE(dialog.splitDialogPresetFirstType_dbg(0, 0), DurationType::Pause);
+    QCOMPARE(dialog.splitDialogPresetFirstType_dbg(1, 0), DurationType::Activity);
 }
