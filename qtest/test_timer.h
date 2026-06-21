@@ -125,6 +125,9 @@ private slots:
     void test_disabled_history_stop_keeps_clean_state_no_warning();
     void test_disabled_history_commitEditedTimeline_succeeds();
 
+    // Item B: commitEditedTimeline clears anchor when edited timeline has no ongoing
+    void test_commitEditedTimeline_clears_anchor_when_no_ongoing();
+
     // QF1: signal contract — started/paused/modeChanged emit counts
     void test_QF1_explicit_pause_emits_paused_not_modeChanged();
     void test_QF1_explicit_resume_emits_started_not_modeChanged();
