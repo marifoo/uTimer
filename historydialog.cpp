@@ -108,7 +108,7 @@ void HistoryDialog::accept()
  *
  * Strategy:
  * 1. Check result() — return false if Rejected (cancel path).
- * 2. Refresh ongoing end-time from engine (unless user edited it).
+ * 2. Refresh ongoing end-time from engine (preserving any user type edit).
  * 3. Delegate payload construction (normalization, origin re-split) to session_.
  * 4. If a merge will occur, ask for confirmation; abort on No.
  * 5. Persist via replaceAll().

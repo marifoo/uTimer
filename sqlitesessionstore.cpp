@@ -101,6 +101,7 @@ SqliteSessionStore::SqliteSessionStore(const Settings& settings, QObject *parent
         // Fresh DB: build the full schema now.  checkSchemaOnStartup() will
         // see db_was_fresh_ == true and skip validation, returning Created.
         if (!ensureSchema()) {
+            schema_creation_failed_ = true;
             db.close();
         }
     } else {
@@ -290,6 +291,11 @@ SchemaStatus SqliteSessionStore::checkSchemaOnStartup()
 
     if (history_days_to_keep_ == 0) {
         return SchemaStatus::Ready;
+    }
+
+    if (db_was_fresh_ && schema_creation_failed_) {
+        Logger::Log("[DB] checkSchemaOnStartup: fresh-DB schema creation failed earlier — refusing to start");
+        return SchemaStatus::Inaccessible;
     }
 
     if (!ensureOpen()) {
@@ -1207,21 +1213,25 @@ SessionStoreResult SqliteSessionStore::flushToDisc()
     return SessionStoreResult::success();
 }
 
-std::deque<SqliteSessionStore::OrphanCheckpoint> SqliteSessionStore::loadUnfinalizedCheckpoints()
+std::optional<std::deque<SqliteSessionStore::OrphanCheckpoint>> SqliteSessionStore::loadUnfinalizedCheckpoints()
 {
     QMutexLocker locker(&db_mutex_);
 
-    std::deque<OrphanCheckpoint> orphans;
+    if (history_days_to_keep_ == 0) {
+        return std::deque<OrphanCheckpoint>{};
+    }
 
     if (!ensureOpen()) {
-        return orphans;
+        return std::nullopt;
     }
+
+    std::deque<OrphanCheckpoint> orphans;
 
     QSqlQuery query(db);
     query.prepare("SELECT id, segment_id, type, start_utc, end_utc FROM durations WHERE is_finalized = 0 ORDER BY id ASC");
     if (!query.exec()) {
         Logger::Log("[DB] Error loading orphan checkpoints: " + query.lastError().text());
-        return orphans;
+        return std::nullopt;
     }
 
     while (query.next()) {
@@ -1527,9 +1537,15 @@ StartupRecoveryResult SqliteSessionStore::recoverStartupCheckpoints(const QDateT
         return result;
     }
     // When markerResult is nullopt (history disabled), loadUnfinalizedCheckpoints()
-    // also returns empty (ensureOpen returns false), so reconciliation is a safe no-op.
+    // returns an empty deque (disabled is a clean no-op), so reconciliation is a safe no-op.
 
-    const std::deque<OrphanCheckpoint> orphans = loadUnfinalizedCheckpoints();
+    const std::optional<std::deque<OrphanCheckpoint>> orphansOpt = loadUnfinalizedCheckpoints();
+    if (!orphansOpt.has_value()) {
+        Logger::Log("[DB] recoverStartupCheckpoints: orphan load failed — marker preserved, no reconciliation");
+        result.ok = false;
+        return result;
+    }
+    const std::deque<OrphanCheckpoint>& orphans = *orphansOpt;
     if (orphans.empty()) {
         // No orphans: delete the marker (clean state) and return.
         if (markerResult.has_value()) {

@@ -862,25 +862,13 @@ void Timer::setDurationType(size_t idx, DurationType type)
 }
 
 /**
- * Atomically replaces the in-memory durations and resets checkpoint tracking.
+ * Attempts to write a fresh checkpoint re-anchored to the given ongoing segment.
  *
- * This is the sole external entry point for overwriting session_.durations from outside
- * Timer (e.g., when HistoryDialog saves edits). It couples the two operations
- * that must always happen together:
- *   1. Replace the completed-segment deque.
- *   2. Re-anchor checkpoint tracking so the next checkpoint targets the correct
- *      DB row and wall-clock range for the ongoing segment.
- *
- * Without the coupling, a caller could replace durations but forget to reset
- * checkpoint tracking, causing stale segment IDs or start times to persist — a
- * bug that the compiler cannot catch if the operations are separate public methods.
- *
- * @param newDurations  Completed segments to replace session_.durations with.
- * @param ongoing       The currently running segment (if any). When provided,
- *                      checkpoint tracking (segment ID, start time, DB row) is
- *                      re-anchored to this segment. When std::nullopt, checkpoint
- *                      tracking state is left unchanged (appropriate when the timer
- *                      is stopped and there is no ongoing segment).
+ * No-op (returns true) when checkpoints are not applicable: checkpoint interval
+ * disabled, not in Activity mode, the segment is not an Activity segment, the
+ * segment has no positive duration / invalid timestamps, or a dialog is open /
+ * the session is locked. Disabled history is also treated as success. Returns
+ * false only on a real checkpoint write failure (caller bug or DB error).
  */
 bool Timer::maybeReanchorCheckpoint(const TimeDuration& seg)
 {
@@ -911,6 +899,25 @@ bool Timer::maybeReanchorCheckpoint(const TimeDuration& seg)
     }
 }
 
+/**
+ * Atomically replaces the in-memory durations and re-anchors checkpoint tracking
+ * from an edited Timeline.
+ *
+ * This is the sole external entry point for overwriting session_.durations from
+ * outside Timer (e.g., when HistoryDialog saves edits). It couples the two
+ * operations that must always happen together:
+ *   1. Replace the completed-segment deque (edited.completed()).
+ *   2. Re-anchor checkpoint tracking so the next checkpoint targets the correct
+ *      DB row and wall-clock range for the ongoing segment (edited.ongoing()).
+ *
+ * Without the coupling, a caller could replace durations but forget to reset
+ * checkpoint tracking, causing stale segment IDs or start times to persist — a
+ * bug that the compiler cannot catch if the operations are separate public methods.
+ *
+ * When edited.ongoing() is std::nullopt and the engine is running (mode_ != None),
+ * the segment anchor is cleared, the checkpoint timer is stopped, mode_ is set to
+ * None, and stopped(StopReason::EditApplied) is emitted.
+ */
 Timer::EditCommitResult Timer::commitEditedTimeline(const Timeline& edited)
 {
     QMutexLocker locker(&mutex_);

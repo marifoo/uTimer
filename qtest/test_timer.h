@@ -127,6 +127,7 @@ private slots:
 
     // Item B: commitEditedTimeline clears anchor when edited timeline has no ongoing
     void test_commitEditedTimeline_clears_anchor_when_no_ongoing();
+    void test_commitEditedTimeline_clears_anchor_when_no_ongoing_from_pause();
 
     // QF1: signal contract — started/paused/modeChanged emit counts
     void test_QF1_explicit_pause_emits_paused_not_modeChanged();

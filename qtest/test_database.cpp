@@ -2064,6 +2064,58 @@ void DatabaseTest::test_schema_status_ready_recreates_missing_idx_start_utc()
     manager.lazyClose_dbg();
 }
 
+void DatabaseTest::test_schema_status_ready_creates_missing_app_settings_and_idx_segment_id()
+{
+    // A valid existing DB that is missing app_settings and idx_segment_id must
+    // have them created on the Ready path (checkSchemaOnStartup ~:376-392).
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+
+    // Seed: create only the durations table with the full valid schema
+    // (columns + UNIQUE(segment_id) constraint), but no app_settings and no idx_segment_id.
+    const QString seedConn = "ready_additive_ddl_seed";
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", seedConn);
+        db.setDatabaseName(db_path_);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(q.exec(
+            "CREATE TABLE durations ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "segment_id TEXT NOT NULL CHECK(length(segment_id) > 0),"
+            "type INTEGER NOT NULL,"
+            "start_utc TEXT NOT NULL,"
+            "end_utc TEXT NOT NULL,"
+            "is_finalized INTEGER NOT NULL DEFAULT 0,"
+            "UNIQUE(segment_id)"
+            ")"
+        ));
+        db.close();
+    }
+    QSqlDatabase::removeDatabase(seedConn);
+
+    SqliteSessionStore manager(settings);
+    QCOMPARE(manager.checkSchemaOnStartup(), SchemaStatus::Ready);
+
+    // Verify app_settings and idx_segment_id were created.
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery verify(manager.rawDb_dbg());
+    QVERIFY(verify.exec(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='app_settings'"
+    ));
+    QVERIFY(verify.next());
+    QCOMPARE(verify.value(0).toInt(), 1);
+
+    QVERIFY(verify.exec(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_segment_id'"
+    ));
+    QVERIFY(verify.next());
+    QCOMPARE(verify.value(0).toInt(), 1);
+    manager.lazyClose_dbg();
+}
+
 void DatabaseTest::test_schema_status_inaccessible_readonly_file()
 {
     // A DB file that exists but cannot be opened (read-only) returns Inaccessible.
@@ -2376,6 +2428,54 @@ void DatabaseTest::test_recoverStartupCheckpoints_marker_intact_on_reconcile_fai
     QVERIFY(checkOrphan.exec());
     QVERIFY(checkOrphan.next());
     QCOMPARE(checkOrphan.value(0).toInt(), 0);
+
+    manager.lazyClose_dbg();
+}
+
+/**
+ * When loadUnfinalizedCheckpoints() fails (durations table dropped), the
+ * clean-shutdown marker must be preserved and recoverStartupCheckpoints()
+ * must return ok==false.
+ */
+void DatabaseTest::test_recoverStartupCheckpoints_marker_intact_on_load_failure()
+{
+    // Arrange: fresh DB with a clean-shutdown marker; then drop the durations table
+    // so the SELECT in loadUnfinalizedCheckpoints() fails.
+    resetDatabaseFile();
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    SqliteSessionStore manager(settings);
+
+    QVERIFY(manager.ensureOpen_dbg());
+
+    // Seed the clean-shutdown marker.
+    QSqlQuery q(manager.rawDb_dbg());
+    QVERIFY(q.exec(
+        "INSERT OR REPLACE INTO app_settings (key, value) "
+        "VALUES ('last_clean_shutdown', '2025-06-01T10:05:00.000Z')"
+    ));
+
+    // Drop the durations table so loadUnfinalizedCheckpoints() SELECT fails.
+    QVERIFY(q.exec("DROP TABLE durations"));
+
+    manager.lazyClose_dbg();
+
+    // Act: recover should fail because loadUnfinalizedCheckpoints returns nullopt.
+    const QDateTime now = QDateTime(QDate(2025, 6, 1), QTime(10, 10, 0), Qt::UTC);
+    StartupRecoveryResult res = manager.recoverStartupCheckpoints(now);
+
+    // Assert: recovery reports failure.
+    QVERIFY(!res.ok);
+
+    // Assert: marker is still present (not consumed).
+    QVERIFY(manager.ensureOpen_dbg());
+    QSqlQuery checkMarker(manager.rawDb_dbg());
+    QVERIFY(checkMarker.exec(
+        "SELECT COUNT(*) FROM app_settings WHERE key = 'last_clean_shutdown'"
+    ));
+    QVERIFY(checkMarker.next());
+    QCOMPARE(checkMarker.value(0).toInt(), 1);
 
     manager.lazyClose_dbg();
 }

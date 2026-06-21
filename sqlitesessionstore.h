@@ -82,6 +82,7 @@ private:
     QSqlDatabase db;
     uint history_days_to_keep_;
     bool db_was_fresh_;  // true if the DB file did not exist when the connection was first opened
+    bool schema_creation_failed_ = false;
 #ifndef QT_NO_DEBUG
     bool force_reconcile_failure_dbg_ = false;
 #endif
@@ -104,7 +105,7 @@ private:
     bool insertRows(QSqlQuery& query, const std::deque<TimeDuration>& rows);
 
     // Startup recovery helpers (implementation details of recoverStartupCheckpoints).
-    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints();
+    std::optional<std::deque<OrphanCheckpoint>> loadUnfinalizedCheckpoints();
     bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc);
     ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
                                                     const std::vector<long long>& outrightDropIds);
@@ -138,7 +139,7 @@ public:
     /// Exposes private types and methods for white-box tests of recovery internals.
     using OrphanCheckpoint_dbg = OrphanCheckpoint;
     using ReconcileResult_dbg  = ReconcileResult;
-    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints_dbg() { return loadUnfinalizedCheckpoints(); }
+    std::deque<OrphanCheckpoint> loadUnfinalizedCheckpoints_dbg() { return loadUnfinalizedCheckpoints().value_or(std::deque<OrphanCheckpoint>{}); }
     bool finalizeIfNoOverlap_dbg(qint64 rowId, const QDateTime& s, const QDateTime& e) {
         return finalizeIfNoOverlap(rowId, s, e);
     }

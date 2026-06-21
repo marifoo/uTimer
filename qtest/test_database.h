@@ -106,6 +106,7 @@ private slots:
     void test_schema_status_outdated_missing_column();
     void test_schema_status_outdated_missing_unique_constraint();
     void test_schema_status_ready_recreates_missing_idx_start_utc();
+    void test_schema_status_ready_creates_missing_app_settings_and_idx_segment_id();
     void test_schema_status_inaccessible_readonly_file();
 
     // Timer::initializeFromStore isolation: no side effects before recovery is called
@@ -120,6 +121,8 @@ private slots:
 
     // Item D: marker must survive reconciliation failure
     void test_recoverStartupCheckpoints_marker_intact_on_reconcile_failure();
+    // Finding 2: marker must survive orphan load failure
+    void test_recoverStartupCheckpoints_marker_intact_on_load_failure();
 };
 
 #endif // TEST_DATABASE_H

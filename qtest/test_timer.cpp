@@ -1936,8 +1936,10 @@ void TimerTest::test_commitEditedTimeline_clears_anchor_when_no_ongoing()
     completed.push_back(seg.value());
     Timeline editedTimeline(completed, std::nullopt);
 
-    // Set up a spy to capture the stopped() signal.
+    // Set up spies: the clear path must emit only stopped(), never started()/paused().
     QSignalSpy stoppedSpy(&tracker, &Timer::stopped);
+    QSignalSpy startedSpy(&tracker, &Timer::started);
+    QSignalSpy pausedSpy(&tracker, &Timer::paused);
 
     // Act: commit a timeline with no ongoing segment while mode_ != None.
     const auto commitResult = tracker.commitEditedTimeline(editedTimeline);
@@ -1963,8 +1965,62 @@ void TimerTest::test_commitEditedTimeline_clears_anchor_when_no_ongoing()
     QVERIFY2(!tracker.getOngoingDuration().has_value(),
              "getOngoingDuration() must return nullopt after anchor is cleared");
 
-    // stopped(EditApplied) was emitted exactly once.
+    // stopped(EditApplied) was emitted exactly once; no started()/paused().
     QCOMPARE(stoppedSpy.count(), 1);
     QCOMPARE(stoppedSpy.first().first().value<Timer::StopReason>(),
              Timer::StopReason::EditApplied);
+    QCOMPARE(startedSpy.count(), 0);
+    QCOMPARE(pausedSpy.count(), 0);
+}
+
+// Item B: same clear-on-no-ongoing behavior when the engine is in Pause mode.
+void TimerTest::test_commitEditedTimeline_clears_anchor_when_no_ongoing_from_pause()
+{
+    // Arrange: timer running, then paused, so mode_ == Pause with a valid anchor.
+    QTemporaryDir tempDir;
+    QVERIFY(tempDir.isValid());
+    Settings settings(createSettingsFile(tempDir.path(), 7));
+    FakeSessionStore fakeDb;
+    Timer tracker(settings, fakeDb);
+
+    tracker.useTimerViaButton(Button::Start);
+    QTest::qWait(10);
+    tracker.useTimerViaButton(Button::Pause);
+    QVERIFY(tracker.isPaused());
+    QVERIFY(!tracker.sessionState_dbg().segment_id.isEmpty());
+
+    // Build an edited timeline with completed segments but NO ongoing segment.
+    QDateTime now = QDateTime::currentDateTime();
+    std::deque<TimeDuration> completed;
+    auto seg = TimeDuration::create(DurationType::Activity, now.addSecs(-60), now);
+    QVERIFY(seg.has_value());
+    completed.push_back(seg.value());
+    Timeline editedTimeline(completed, std::nullopt);
+
+    QSignalSpy stoppedSpy(&tracker, &Timer::stopped);
+    QSignalSpy startedSpy(&tracker, &Timer::started);
+    QSignalSpy pausedSpy(&tracker, &Timer::paused);
+
+    // Act: commit a timeline with no ongoing segment while mode_ == Pause.
+    const auto commitResult = tracker.commitEditedTimeline(editedTimeline);
+
+    // Assert: commit succeeded and the anchor is fully cleared.
+    QVERIFY(commitResult.ok);
+    QVERIFY2(tracker.sessionState_dbg().segment_id.isEmpty(),
+             "segment_id must be cleared after commit with no ongoing segment");
+    QVERIFY2(!tracker.sessionState_dbg().segment_start_time.isValid(),
+             "segment_start_time must be cleared after commit with no ongoing segment");
+    QVERIFY2(tracker.isStopped(),
+             "mode_ must be None after commit with no ongoing segment");
+    QVERIFY2(!tracker.isCheckpointTimerActive_dbg(),
+             "checkpoint timer must be stopped after commit with no ongoing segment");
+    QVERIFY2(!tracker.getOngoingDuration().has_value(),
+             "getOngoingDuration() must return nullopt after anchor is cleared");
+
+    // stopped(EditApplied) was emitted exactly once; no started()/paused().
+    QCOMPARE(stoppedSpy.count(), 1);
+    QCOMPARE(stoppedSpy.first().first().value<Timer::StopReason>(),
+             Timer::StopReason::EditApplied);
+    QCOMPARE(startedSpy.count(), 0);
+    QCOMPARE(pausedSpy.count(), 0);
 }
