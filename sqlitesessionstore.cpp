@@ -1339,6 +1339,13 @@ SqliteSessionStore::ReconcileResult SqliteSessionStore::reconcileUnfinalizedChec
 
     ReconcileResult result;
 
+#ifndef QT_NO_DEBUG
+    if (force_reconcile_failure_dbg_) {
+        result.ok = false;
+        return result;
+    }
+#endif
+
     if (history_days_to_keep_ == 0) {
         result.ok = false;
         return result;
@@ -1431,7 +1438,7 @@ SessionStoreResult SqliteSessionStore::setLastCleanShutdownMarker(const QDateTim
     return SessionStoreResult::success();
 }
 
-std::optional<SqliteSessionStore::MarkerResult> SqliteSessionStore::consumeLastCleanShutdownMarker()
+std::optional<SqliteSessionStore::MarkerResult> SqliteSessionStore::readLastCleanShutdownMarker()
 {
     QMutexLocker locker(&db_mutex_);
 
@@ -1443,16 +1450,11 @@ std::optional<SqliteSessionStore::MarkerResult> SqliteSessionStore::consumeLastC
         return MarkerResult { {}, MarkerResult::Status::Error };
     }
 
-    if (!db.transaction()) {
-        return MarkerResult { {}, MarkerResult::Status::Error };
-    }
-
     std::optional<QDateTime> parsedTs;
     QSqlQuery readQuery(db);
     readQuery.prepare("SELECT value FROM app_settings WHERE key = :key");
     readQuery.bindValue(":key", QString::fromLatin1(kLastCleanShutdownKey));
     if (!readQuery.exec()) {
-        db.rollback();
         return MarkerResult { {}, MarkerResult::Status::Error };
     }
     if (readQuery.next()) {
@@ -1466,23 +1468,38 @@ std::optional<SqliteSessionStore::MarkerResult> SqliteSessionStore::consumeLastC
         }
     }
 
+    if (parsedTs.has_value()) {
+        return MarkerResult { *parsedTs, MarkerResult::Status::Found };
+    }
+    return MarkerResult { {}, MarkerResult::Status::NotFound };
+}
+
+bool SqliteSessionStore::deleteLastCleanShutdownMarker()
+{
+    QMutexLocker locker(&db_mutex_);
+
+    if (!ensureOpen()) {
+        return false;
+    }
+
+    if (!db.transaction()) {
+        return false;
+    }
+
     QSqlQuery deleteQuery(db);
     deleteQuery.prepare("DELETE FROM app_settings WHERE key = :key");
     deleteQuery.bindValue(":key", QString::fromLatin1(kLastCleanShutdownKey));
     if (!deleteQuery.exec()) {
         db.rollback();
-        return MarkerResult { {}, MarkerResult::Status::Error };
+        return false;
     }
 
     if (!db.commit()) {
         db.rollback();
-        return MarkerResult { {}, MarkerResult::Status::Error };
+        return false;
     }
 
-    if (parsedTs.has_value()) {
-        return MarkerResult { *parsedTs, MarkerResult::Status::Found };
-    }
-    return MarkerResult { {}, MarkerResult::Status::NotFound };
+    return true;
 }
 
 /**
@@ -1499,9 +1516,11 @@ StartupRecoveryResult SqliteSessionStore::recoverStartupCheckpoints(const QDateT
 {
     StartupRecoveryResult result;
 
-    // Consume the marker first.  If the read fails, do not reconcile — DB state
-    // is unknown and finalising rows could conflict with in-progress data.
-    const std::optional<MarkerResult> markerResult = consumeLastCleanShutdownMarker();
+    // Read the marker first (without deleting it).  If the read fails, do not
+    // reconcile — DB state is unknown and finalising rows could conflict with
+    // in-progress data.  The marker is only deleted after reconciliation succeeds
+    // so that ok==false never leaves the store in a mutated state.
+    const std::optional<MarkerResult> markerResult = readLastCleanShutdownMarker();
     if (markerResult.has_value() && markerResult->status == MarkerResult::Status::Error) {
         Logger::Log("[DB] recoverStartupCheckpoints: marker read failed — skipping orphan reconciliation");
         result.ok = false;
@@ -1512,6 +1531,10 @@ StartupRecoveryResult SqliteSessionStore::recoverStartupCheckpoints(const QDateT
 
     const std::deque<OrphanCheckpoint> orphans = loadUnfinalizedCheckpoints();
     if (orphans.empty()) {
+        // No orphans: delete the marker (clean state) and return.
+        if (markerResult.has_value()) {
+            deleteLastCleanShutdownMarker();
+        }
         return result;
     }
 
@@ -1534,6 +1557,11 @@ StartupRecoveryResult SqliteSessionStore::recoverStartupCheckpoints(const QDateT
         Logger::Log("[DB] recoverStartupCheckpoints: reconciliation transaction failed");
         result.ok = false;
         return result;
+    }
+
+    // Reconciliation succeeded: now it is safe to consume the marker.
+    if (markerResult.has_value()) {
+        deleteLastCleanShutdownMarker();
     }
 
     result.finalized_count = static_cast<int>(reconcile.finalized.size());

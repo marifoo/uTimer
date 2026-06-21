@@ -82,6 +82,9 @@ private:
     QSqlDatabase db;
     uint history_days_to_keep_;
     bool db_was_fresh_;  // true if the DB file did not exist when the connection was first opened
+#ifndef QT_NO_DEBUG
+    bool force_reconcile_failure_dbg_ = false;
+#endif
 
     // Guards all public entry points so that no two operations can interleave.
     // This is particularly important for createBackup(), which closes and
@@ -105,7 +108,8 @@ private:
     bool finalizeIfNoOverlap(qint64 rowId, const QDateTime& startUtc, const QDateTime& endUtc);
     ReconcileResult reconcileUnfinalizedCheckpoints(const std::vector<OrphanCheckpoint>& orphansToFinalize,
                                                     const std::vector<long long>& outrightDropIds);
-    std::optional<MarkerResult> consumeLastCleanShutdownMarker();
+    std::optional<MarkerResult> readLastCleanShutdownMarker();
+    bool deleteLastCleanShutdownMarker();
 
 #ifndef QT_NO_DEBUG
     /// Debug-build verification: checks that no segment_id appears more than
@@ -145,6 +149,10 @@ public:
         return reconcileUnfinalizedCheckpoints(toFinalize, outrightDropIds);
     }
     QString dbConnectionName_dbg() const { return db.connectionName(); }
+
+    /// Forces reconcileUnfinalizedCheckpoints to return ok=false, for testing
+    /// that recoverStartupCheckpoints does not mutate the marker on failure.
+    void setForceReconcileFailure_dbg(bool v) { force_reconcile_failure_dbg_ = v; }
 #endif // QT_NO_DEBUG
 
 };
